@@ -70,7 +70,7 @@ impl Member {
         match channel {
             Channel::InformationChannel { permissions, .. }
             | Channel::AnnouncementChannel { permissions, .. }
-            | Channel::ChatChannel { permissions, .. } => {
+            | Channel::StandardChannel { permissions, .. } => {
                 let mut role_overrides = permissions
                     .iter()
                     .filter(|p| p.entity_type == EntityType::Role)

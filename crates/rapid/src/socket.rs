@@ -28,11 +28,15 @@ pub struct RpcClient {
 }
 
 impl RpcClient {
-    // pub fn send(&self, data: Vec<u8>) {
-    //     self.socket
-    //         .send(Message::Binary(data))
-    //         .expect("Failed to send message");
-    // }
+    pub async fn send(&self, data: Vec<u8>) {                
+        self
+            .socket
+            .send(Message::Binary(
+                data,
+            ))
+            .await
+            .expect("Failed to send message");
+    }
     pub fn get_user<T: 'static>(&self) -> Option<&T> {
         self.user.as_ref().and_then(|u| u.downcast_ref())
     }
@@ -284,13 +288,7 @@ async fn start_client(
                 debug!("Received binary data");
                 let response = handle_packet(bin, &clients, &id, authenticate.clone(), methods.clone()).await;
                 let client = clients.get(&id.clone()).unwrap();
-                client
-                    .socket
-                    .send(Message::Binary(
-                        serialize(&response).expect("Failed to serialize"),
-                    ))
-                    .await
-                    .expect("Failed to send message");
+                client.send(serialize(&response).expect("Failed to serialize")).await;
             }
             Message::Close(_) => {
                 debug!("Received close");
@@ -421,4 +419,17 @@ pub fn serialize<T: Serialize>(value: &T) -> Result<Vec<u8>, rmp_serde::encode::
 pub fn deserialize<T: for<'a> Deserialize<'a>>(buf: &[u8]) -> Result<T, rmp_serde::decode::Error> {
     let mut deserializer = Deserializer::new(buf);
     Deserialize::deserialize(&mut deserializer)
+}
+
+pub fn emit_all<T:Serialize+Send+Clone + 'static>(clients: &DashMap<String, RpcClient>, data: T) {
+    for client in clients.iter() {
+        emit_one(client.value(), data.clone());
+    }
+}
+pub fn emit_one<T:Serialize+Send+Clone + 'static>(client: &RpcClient, data: T) {
+    let socket = client.socket.clone();
+    let data = data.clone();
+    spawn(async move {
+        socket.send(Message::Binary(serialize(&data).expect("Failed to serialize"))).await
+    });
 }

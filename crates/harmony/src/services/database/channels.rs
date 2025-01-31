@@ -40,7 +40,7 @@ pub enum Channel {
         scope_id: String,
         permissions: Vec<PermissionOverride>,
     },
-    ChatChannel {
+    StandardChannel {
         id: String,
         name: String,
         description: String,
@@ -49,6 +49,14 @@ pub enum Channel {
         // TODO: permission checks
         permissions: Vec<PermissionOverride>,
     },
+    // ForumChannel {
+    //     id: String,
+    //     name: String,
+    //     description: String,
+    //     space_id: String,
+    //     scope_id: String,
+    //     permissions: Vec<PermissionOverride>,
+    // },
 }
 
 impl Channel {
@@ -73,7 +81,7 @@ impl Channel {
         after: Option<String>,
     ) -> Result<Vec<Message>> {
         match self {
-            Channel::AnnouncementChannel { id, .. } | Channel::ChatChannel { id, .. } => {
+            Channel::AnnouncementChannel { id, .. } | Channel::StandardChannel { id, .. } => {
                 let database = super::get_database();
                 let limit = limit.unwrap_or(50);
                 let mut query = doc! { "channelId": id };
@@ -110,7 +118,7 @@ impl Channel {
     
     pub async fn get_invites(&self) -> Result<Vec<Invite>> {
         match self {
-            Channel::AnnouncementChannel { id, space_id,  .. } | Channel::ChatChannel { id, space_id, .. } => {
+            Channel::AnnouncementChannel { id, space_id,  .. } | Channel::StandardChannel { id, space_id, .. } => {
                 let database = super::get_database();
                 let query = doc! {
                     "channel_id": &id,

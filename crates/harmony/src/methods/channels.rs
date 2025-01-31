@@ -38,7 +38,7 @@ pub async fn get_channel(
         }
         Channel::InformationChannel { ref space_id, .. }
         | Channel::AnnouncementChannel { ref space_id, .. }
-        | Channel::ChatChannel { ref space_id, .. } => {
+        | Channel::StandardChannel { ref space_id, .. } => {
             if let Some(request_space_id) = &data.space_id {
                 if request_space_id != space_id {
                     return Err(Error::NotFound);

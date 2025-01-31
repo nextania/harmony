@@ -27,16 +27,10 @@ pub struct Space {
 // #[derive(Clone, Debug, Deserialize, Serialize)]
 // #[serde(rename_all = "camelCase")]
 // pub enum SpaceType {
-//     // Global,
-//     // Team,
-//     // Personal,
-//     // Organization,
-//     // Custom(String),
-//     Studio,
-//     Community,
-//     Personal,
-//     Organization,
-
+    // Global,
+    // Team,
+    // Studio,
+    // Community,
 // }
 
 impl Space {

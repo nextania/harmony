@@ -1,7 +1,11 @@
 
+use std::sync::Arc;
+
+use dashmap::{mapref::multiple::RefMulti, DashMap};
+use rapid::socket::{emit_one, RpcClient};
 use serde::{Deserialize, Serialize};
 
-use crate::services::database::messages::Message;
+use crate::services::database::{messages::Message, users::User};
 
 pub mod channels;
 pub mod events;
@@ -63,35 +67,6 @@ pub mod webrtc;
 //     pub(crate) method: Method,
 // }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AddFriendMethod {
-    channel_id: String,
-    friend_id: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RemoveFriendMethod {
-    channel_id: String,
-    friend_id: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GetFriendsMethod {}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GetFriendRequestsMethod {}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AcknowledgeFriendRequestMethod {
-    channel_id: String,
-    friend_id: String,
-}
-
 // #[derive(Clone, Debug, Deserialize, Serialize)]
 // pub struct RpcApiResponse {
 //     #[serde(skip_serializing_if = "Option::is_none")]
@@ -105,13 +80,12 @@ pub struct AcknowledgeFriendRequestMethod {
 // }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[repr(i8)]
 #[serde(tag = "type", content = "data", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum Event {
-    Hello(HelloEvent) = 0,
-
     // WebRTC: 10-19
-    NewMessage(NewMessageEvent) = 21,
+    NewMessage(NewMessageEvent),
+    RemoveFriend(String),
+    AddFriend(String),
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -157,4 +131,14 @@ pub enum CreateChannelType {
         nexus_id: String,
         scope_id: String,
     },
+}
+
+pub fn emit_to_id(clients: Arc<DashMap<String, RpcClient>>, user_id: &str, event: Event) {
+    let client: Vec<RefMulti<'_, String, RpcClient>> = clients.iter().filter(|client| {
+        let i = client.get_user::<User>().map(|u| u.id.clone());
+        i == Some(user_id.to_owned())
+    }).collect();
+    for client in client {
+        emit_one(client.value(), RpcApiEvent { event: event.clone() });
+    }
 }

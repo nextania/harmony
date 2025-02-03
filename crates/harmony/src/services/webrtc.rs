@@ -1,14 +1,13 @@
 use async_std::task::{sleep, spawn};
 use dashmap::DashMap;
 use futures_util::StreamExt;
-use jsonwebtoken::{encode, EncodingKey, Header};
 use lazy_static::lazy_static;
 use log::info;
 use pulse_api::{NodeDescription, NodeEvent, NodeEventKind, Region};
 use redis::{AsyncCommands, FromRedisValue, ToRedisArgs};
 use serde::{Deserialize, Serialize};
 
-use crate::errors::{Error, Result};
+use crate::{errors::{Error, Result}, request::Request};
 
 use super::{
     database::calls::Call, encryption::{deserialize, serialize}, environment::JWT_SECRET, redis::{get_connection, get_pubsub}
@@ -16,6 +15,7 @@ use super::{
 
 lazy_static! {
     pub static ref AVAILABLE_NODES: DashMap<String, Node> = DashMap::new();
+    pub static ref REQUESTS: DashMap<String, Request<String>> = DashMap::new();
 }
 
 #[derive(Clone, Debug)]
@@ -98,6 +98,12 @@ pub fn spawn_check_available_nodes() {
                 //         .expect("Failed to leave user");
                 // }
                 NodeEvent { event: NodeEventKind::Query, .. } => {}
+                NodeEvent { event: NodeEventKind::UserCreate{sdp, session_id, call_id }, .. } => {
+                    let req = REQUESTS.get_mut(format!("{}:{}", call_id, session_id).as_str());
+                    if let Some(mut req) = req {
+                        req.set(sdp.to_string());
+                    }
+                }
                 NodeEvent {
                     ..
                 } => {}
@@ -195,7 +201,7 @@ impl ActiveCall {
             channel_id: channel.clone(),
         };
         redis
-            .set::<std::string::String, ActiveCall, ActiveCall>(
+            .set::<std::string::String, ActiveCall, ()>(
                 format!("call:{}:{}", space, channel),
                 call.clone(),
             )
@@ -266,17 +272,25 @@ impl ActiveCall {
         Ok(())
     }
 
-    pub async fn get_token(&self, user_id: &String) -> Result<String> {
-        let authorization = RtcAuthorization {
-            user_id: user_id.to_string(),
-            call_id: self.id.clone(),
-        };
-        let token = encode::<RtcAuthorization>(
-            &Header::default(),
-            &authorization,
-            &EncodingKey::from_secret(JWT_SECRET.as_bytes()),
-        )?;
-        Ok(token)
+    pub async fn get_token(&self, user_id: &String, sdp: &String) -> Result<String> {
+        let request: Request<String> = Request::new();
+        REQUESTS.insert(format!("{}:{}", self.id, user_id), request.clone());
+        let mut redis = get_connection().await;
+        redis
+            .publish::<&str, NodeEvent, ()>(
+                "nodes",
+                NodeEvent {
+                    event: NodeEventKind::UserConnect { 
+                        call_id: self.id.clone(), 
+                        sdp: pulse_api::SessionDescription::Offer(sdp.clone()),
+                        session_id: user_id.to_owned(), 
+                    },
+                    id: "server".to_owned()
+                }
+            )
+            .await?;
+        let value = request.wait().await;
+        Ok(value)
     }
 
     pub async fn leave_user(&mut self, user_id: &String) -> Result<()> {

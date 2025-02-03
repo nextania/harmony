@@ -4,6 +4,7 @@ pub mod errors;
 pub mod methods;
 pub mod services;
 pub mod authentication;
+pub mod request;
 
 use authentication::authenticate;
 use rapid::socket::RpcServer;

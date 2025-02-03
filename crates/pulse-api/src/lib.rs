@@ -35,6 +35,8 @@ pub enum NodeEventKind {
         sdp: SessionDescription
     }, // server -> node on user connect
     UserCreate {
+        session_id: String,
+        call_id: String,
         sdp: SessionDescription,
     }, // node -> server on new user
     StartProduce {
@@ -137,6 +139,16 @@ pub enum SessionDescription {
     #[serde(rename = "answer")]
     Answer(String),
 }
+
+impl ToString for SessionDescription {
+    fn to_string(&self) -> String {
+        match self {
+            SessionDescription::Offer(sdp) => sdp.clone(),
+            SessionDescription::Answer(sdp) => sdp.clone(),
+        }
+    }
+}
+
 pub fn serialize<T: Serialize>(value: &T) -> Result<Vec<u8>, rmp_serde::encode::Error> {
     let mut buf = Vec::new();
     value.serialize(&mut Serializer::new(&mut buf).with_struct_map())?;

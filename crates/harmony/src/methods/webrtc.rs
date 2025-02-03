@@ -37,30 +37,30 @@ pub async fn join_call(
 ) -> impl RpcResponder {
     check_authenticated(clients, &id)?; // TODO: check rate limit, permissions req'd
     let data = data.into_inner();
-    if let Some(_space_id) = &data.space_id {
-        // let space = Space::get(space_id).await?;
-        // if !space.members.contains(&id) {
-        //     return Err(Error::NotFound); // unauthorized
-        // }
-        // let member = Member::get(&id, &space.id).await?;
-        // let channel = space.get_channel(&self.id).await?;
-        // let permission = member
-        //     .get_permission_in_channel(&channel, Permission::JoinCalls)
-        //     .await?;
-        // if !permission {
-        //     return Err(Error::MissingPermission {
-        //         permission: Permission::JoinCalls,
-        //     });
-        // }
-        // let call = ActiveCall::get_in_channel(space_id, &self.id).await?;
-        // if let Some(mut call) = call {
-        //     call.join_user(id.clone()).await?;
-        //     let token = call.get_token(&id).await?;
-        //     Ok(Response::JoinCall(JoinCallResponse { token }))
-        // } else {
-        //     Err(Error::NotFound)
-        // }
-        Err::<RpcValue<JoinCallResponse>, _>(Error::NoVoiceNodesAvailable)
+    if let Some(space_id) = &data.space_id {
+        let space = Space::get(space_id).await?;
+        if !space.members.contains(&id) {
+            return Err(Error::NotFound); // unauthorized
+        }
+        let member = Member::get(&id, &space.id).await?;
+        let channel = space.get_channel(&data.id).await?;
+        let permission = member
+            .get_permission_in_channel(&channel, Permission::JoinCalls)
+            .await?;
+        if !permission {
+            return Err(Error::MissingPermission {
+                permission: Permission::JoinCalls,
+            });
+        }
+        let call = ActiveCall::get_in_channel(space_id, &data.id).await?;
+        if let Some(mut call) = call {
+            call.join_user(id.clone()).await?;
+            let sdp = call.get_token(&id, &data.sdp).await?;
+            Ok(RpcValue(JoinCallResponse { sdp }))
+        } else {
+            Err(Error::NotFound)
+        }
+        // Err::<RpcValue<JoinCallResponse>, _>(Error::NoVoiceNodesAvailable)
     } else {
         Err(Error::Unimplemented)
     }
@@ -95,8 +95,7 @@ pub async fn start_call(
             });
         }
         let call = ActiveCall::create(space_id, &data.id, &id).await?;
-        let token = call.get_token(&id).await?;
-        Ok(RpcValue(StartCallResponse { token }))
+        Ok(RpcValue(StartCallResponse { id: call.id }))
     } else {
         Err(Error::Unimplemented)
     }
@@ -104,7 +103,7 @@ pub async fn start_call(
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct StartCallResponse {
-    token: String,
+    id: String
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

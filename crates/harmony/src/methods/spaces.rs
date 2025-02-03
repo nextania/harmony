@@ -12,7 +12,7 @@ use crate::{
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetSpaceMethod {
-    space_id: String,
+    id: String,
 }
 
 pub async fn get_space(
@@ -22,8 +22,8 @@ pub async fn get_space(
 ) -> impl RpcResponder {
     let user = check_authenticated(clients, &id)?;
     let data = data.into_inner();
-    let space = Space::get(&data.space_id).await?;
-    let user_in_space = user.in_space(&data.space_id).await?;
+    let space = Space::get(&data.id).await?;
+    let user_in_space = user.in_space(&data.id).await?;
     if !user_in_space {
         return Err(Error::NotFound);
     }

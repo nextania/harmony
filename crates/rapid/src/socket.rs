@@ -9,7 +9,7 @@ use async_std::{
 use async_tungstenite::{accept_async, tungstenite::Message};
 use dashmap::DashMap;
 use futures_util::{future::BoxFuture, SinkExt, StreamExt};
-use log::debug;
+use log::{debug, info};
 use rand::rngs::OsRng;
 use rmp_serde::{Deserializer, Serializer};
 use rmpv::{ext::{from_value, to_value}, Value};
@@ -175,6 +175,7 @@ impl RpcServer {
         F::Output: RpcResponder + 'static,
         F::Future: Send + 'static,
     {
+        info!("Registering method: {}", name);
         let x = Box::new(move |clients: Arc<DashMap<String, RpcClient>>, id: String, val: Value| {
             let method = method.clone();
             let n: Pin<Box<dyn Future<Output = Value> + Send>> = Box::pin(async move {
@@ -205,7 +206,9 @@ impl RpcServer {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum RpcApiRequest {    
+    #[serde(rename_all = "camelCase")]
     Identify {
         token: String,
         public_key: Vec<u8>,
@@ -220,9 +223,19 @@ pub enum RpcApiRequest {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct HelloEvent {
-    public_key: Vec<u8>,
-    request_ids: Vec<String>,
+#[serde(rename_all = "SCREAMING_SNAKE_CASE", tag = "type")]
+pub enum RpcApiEvent {
+    #[serde(rename_all = "camelCase")]
+    Hello {
+        public_key: Vec<u8>,
+        request_ids: Vec<String>,
+    },
+    Identify {},
+    Heartbeat {},
+    #[serde(rename_all = "camelCase")]
+    GetId {
+        request_ids: Vec<String>,
+    }
 }
 
 async fn start_client(
@@ -233,7 +246,10 @@ async fn start_client(
 ) {
     let connection = stream.unwrap();
     println!("Socket connected: {}", connection.peer_addr().unwrap());
-    let ws_stream = accept_async(connection).await.expect("Failed to accept");
+    let ws_stream = accept_async(connection).await;
+    let Ok(ws_stream) = ws_stream else {
+        return;
+    };
     let (mut write, mut read) = ws_stream.split();
     let (s, r) = unbounded::<Message>();
     spawn(async move {
@@ -249,7 +265,7 @@ async fn start_client(
     }
     let secret = EphemeralSecret::random_from_rng(OsRng);
     let public_key = PublicKey::from(&secret);
-    let val = HelloEvent {
+    let val = RpcApiEvent::Hello {
         public_key: public_key.to_bytes().to_vec(),
         request_ids: request_ids.clone(),
     };
@@ -283,12 +299,15 @@ async fn start_client(
     };
     clients.insert(id.clone(), client);
     while let Some(data) = read.next().await {
-        match data.unwrap() {
+        let Ok(data) = data else {
+            break;
+        };
+        match data {
             Message::Binary(bin) => {
                 debug!("Received binary data");
                 let response = handle_packet(bin, &clients, &id, authenticate.clone(), methods.clone()).await;
                 let client = clients.get(&id.clone()).unwrap();
-                client.send(serialize(&response).expect("Failed to serialize")).await;
+                client.send(response.expect("Failed to serialize")).await;
             }
             Message::Close(_) => {
                 debug!("Received close");
@@ -307,17 +326,6 @@ async fn start_client(
 pub struct RpcApiResponse {
     id: Option<String>,
     response: Option<Value>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct IdentifyResponse {}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct HeartbeatResponse {}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct GetIdResponse {
-    request_ids: Vec<String>,
 }
 
 impl Into<Value> for Error {
@@ -343,33 +351,25 @@ pub async fn handle_packet(
     user_id: &String,
     authenticate: AuthenticateFn,
     methods: Arc<DashMap<String, Box<dyn MethodFn>>>,
-) -> RpcApiResponse {
+) -> Result<Vec<u8>, rmp_serde::encode::Error> {
     let result = deserialize::<RpcApiRequest>(bin.as_slice());
     if let Ok(r) = result {
         debug!("Received: {:?}", r);
         match r {
+            // TODO: fix this to return Event instead
             RpcApiRequest::Identify { token, public_key: _ } => {
                 authenticate(token.clone()).await.map(|user| {
                     let mut client = clients.get_mut(user_id).unwrap();
                     client.user = Some(Arc::new(user));
-                    let response = IdentifyResponse {};
-                    return RpcApiResponse {
-                        id: None,
-                        response: Some(to_value(response).unwrap()),
-                    };
-                }).unwrap_or_else(|e| RpcApiResponse {
-                    id: None,
-                    response: Some(RpcApiError { error: e.into() }.into()),
+                    return serialize(&RpcApiEvent::Identify {});
+                }).unwrap_or_else(|e| {
+                    serialize(&RpcApiError { error: e.into() })
                 })
             },
             RpcApiRequest::Heartbeat {  } => {
                 let client = clients.get(user_id).unwrap();
                 client.heartbeat_tx.send(()).await.unwrap();
-                let response = HeartbeatResponse {};
-                RpcApiResponse {  
-                    response: Some(to_value(response).unwrap()),
-                    id: None,
-                }
+                serialize(&RpcApiEvent::Heartbeat {})
             },
             RpcApiRequest::GetId {  } => {
                 let mut client = clients.get_mut(user_id).unwrap();
@@ -379,34 +379,22 @@ pub async fn handle_packet(
                     client.request_ids.push(id.clone());
                     new_request_ids.push(id);
                 }
-                let response = GetIdResponse {
-                    request_ids: new_request_ids,
-                };
-                RpcApiResponse {
-                    response: Some(to_value(response).unwrap()),
-                    id: None,
-                }
+                serialize(&RpcApiEvent::GetId { request_ids: new_request_ids })
             },
             RpcApiRequest::Message { id, method, data } => {
                 let method = methods.get(&method);
                 let Some(method) = method else {
-                    return RpcApiResponse {
-                        id: Some(id),
-                        response: Some(RpcApiError { error: Error::InvalidMethod }.into()),
-                    };
+                    return serialize(&RpcApiError { error: Error::InvalidMethod });
                 };
-                let result = method(clients.clone(), id.clone(), data).await;
-                RpcApiResponse {
+                let result = method(clients.clone(), user_id.clone(), data).await;
+                serialize(&RpcApiResponse {
                     id: Some(id),
                     response: Some(result),
-                }
+                })
             },
         }
     } else {
-        RpcApiResponse {
-            id: None,
-            response: Some(RpcApiError { error: Error::InvalidMethod }.into()),
-        }
+        serialize(&RpcApiError { error: Error::InvalidMethod })
     }
 }
 

@@ -1,0 +1,31 @@
+[package]
+name = "pulse"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+serde = { version = "1.0.144", features = ["derive"] }
+rmp-serde = "1.1.2"
+
+futures = "0.3.24"
+async-std = { version = "1.12.0", features = ["attributes", "tokio1"] }
+async-tungstenite = "0.28.2"
+
+log = "0.4.17"
+dashmap = "6.1.0"
+lazy_static = "1.4.0"
+once_cell = "1.18.0"
+pretty_env_logger = "0.5.0"
+tracing-subscriber = { version="0.3.18", features = ["env-filter"] }
+
+redis = { version = "0.27.6", features = ["async-std-comp"] }
+
+str0m = "0.6.1"
+
+ulid = "1.1.3"
+rand = "0.8.5"
+dotenvy = "0.15.7"
+
+pulse-api = { path = "../pulse-api" }

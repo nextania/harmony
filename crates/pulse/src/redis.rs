@@ -1,12 +1,13 @@
 use std::time::Duration;
 
-use async_std::{channel, stream::StreamExt, task};
 use dashmap::DashMap;
+use futures::{channel::mpsc::unbounded, SinkExt, StreamExt};
 use lazy_static::lazy_static;
 use once_cell::sync::OnceCell;
 use pulse_api::{NodeDescription, NodeEvent, NodeEventKind, SessionDescription};
 use redis::{aio::MultiplexedConnection, AsyncCommands, Client};
 use str0m::change::SdpOffer;
+use tokio::{task, time};
 use ulid::Ulid;
 
 use crate::{environment::{REDIS_URI, REGION}, rtc::peer::{ClientApi, ClientApiIn}, socket::server::{create_new_user, UserCapabilities, UserInformation}};
@@ -24,7 +25,7 @@ pub fn get_client() -> &'static Client {
 
 pub async fn get_connection() -> MultiplexedConnection {
     get_client()
-        .get_multiplexed_async_std_connection()
+        .get_multiplexed_async_connection()
         .await
         .expect("Failed to get connection")
 }
@@ -59,7 +60,7 @@ pub async fn listen() -> () {
                 event: NodeEventKind::Ping,
                 id: i.clone()
             }).await;
-            task::sleep(Duration::from_secs(5)).await;
+            time::sleep(Duration::from_secs(5)).await;
         }
     });
     while let Some(msg) = pubsub.on_message().next().await {
@@ -88,7 +89,7 @@ pub async fn listen() -> () {
                 },
                 ..
             } => {
-                let (send, recv) = channel::unbounded::<NodeEvent>();
+                let (send, recv) = unbounded::<NodeEvent>();
                 let user = create_new_user(UserInformation {
                     id: session_id.clone(),
                     capabilities: UserCapabilities {
@@ -97,7 +98,7 @@ pub async fn listen() -> () {
                         screenshare: true,
                     },
                 }, call_id, recv).await;
-                if let Ok(user) = user {
+                if let Ok(mut user) = user {
                     let SessionDescription::Offer(offer) = sdp else {
                         continue;
                     };

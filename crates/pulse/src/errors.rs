@@ -1,6 +1,6 @@
 use std::fmt;
 
-use async_std::channel::SendError;
+use futures::channel::mpsc::SendError;
 use str0m::error::SdpError;
 
 #[derive(Debug)]
@@ -49,8 +49,8 @@ impl From<rmp_serde::decode::Error> for Error {
     }
 }
 
-impl From<async_std::io::Error> for Error {
-    fn from(e: async_std::io::Error) -> Self {
+impl From<tokio::io::Error> for Error {
+    fn from(e: tokio::io::Error) -> Self {
         error!("{}", e);
         Error::SocketError
     }
@@ -63,8 +63,8 @@ impl From<SdpError> for Error {
     }
 }
 
-impl<T> From<SendError<T>> for Error {
-    fn from(e: SendError<T>) -> Self {
+impl From<SendError> for Error {
+    fn from(e: SendError) -> Self {
         error!("{}", e);
         Error::SocketError
     }

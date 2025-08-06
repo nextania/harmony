@@ -1,4 +1,3 @@
-use async_std::task::{sleep, spawn};
 use dashmap::DashMap;
 use futures_util::StreamExt;
 use lazy_static::lazy_static;
@@ -6,11 +5,12 @@ use log::info;
 use pulse_api::{NodeDescription, NodeEvent, NodeEventKind, Region};
 use redis::{AsyncCommands, FromRedisValue, ToRedisArgs};
 use serde::{Deserialize, Serialize};
+use tokio::{task, time};
 
 use crate::{errors::{Error, Result}, request::Request};
 
 use super::{
-    database::calls::Call, encryption::{deserialize, serialize}, environment::JWT_SECRET, redis::{get_connection, get_pubsub}
+    database::calls::Call, encryption::{deserialize, serialize}, redis::{get_connection, get_pubsub}
 };
 
 lazy_static! {
@@ -42,7 +42,7 @@ impl Node {
 
 
 pub fn spawn_check_available_nodes() {
-    spawn(async move {
+    task::spawn(async move {
         let mut pubsub = get_pubsub().await;
         pubsub.subscribe("nodes").await.unwrap();
         let mut connection = get_connection().await;
@@ -110,7 +110,7 @@ pub fn spawn_check_available_nodes() {
             }
         }
     });
-    spawn(async move {
+    task::spawn(async move {
         loop {
             let time = chrono::Utc::now().timestamp_millis();
             AVAILABLE_NODES.retain(|id, node| {
@@ -123,7 +123,7 @@ pub fn spawn_check_available_nodes() {
                 }
             });
             // Don't deadlock
-            sleep(std::time::Duration::from_millis(1000)).await;
+            time::sleep(std::time::Duration::from_millis(1000)).await;
         }
     });
 }
@@ -217,9 +217,9 @@ impl ActiveCall {
         stored_call.create().await?;
         let space = space.clone();
         let channel = channel.clone();
-        spawn(async move {
+        task::spawn(async move {
             loop {
-                sleep(std::time::Duration::from_millis(30000)).await;
+                time::sleep(std::time::Duration::from_millis(30000)).await;
                 let mut redis = get_connection().await;
                 let active_call: std::result::Result<Option<ActiveCall>, _> =
                     redis.get(format!("call:{}:{}", space, channel)).await;

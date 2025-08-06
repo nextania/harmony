@@ -16,7 +16,7 @@ pub fn get_client() -> &'static Client {
 
 pub async fn get_connection() -> MultiplexedConnection {
     get_client()
-        .get_multiplexed_async_std_connection()
+        .get_multiplexed_async_connection()
         .await
         .expect("Failed to get connection")
 }

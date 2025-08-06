@@ -1,11 +1,11 @@
 use std::{collections::VecDeque, io::ErrorKind, sync::Arc, time::Instant};
 
-use async_std::net::UdpSocket;
 use str0m::{
     media::{KeyframeRequest, MediaData, Mid},
     net::{Protocol, Receive},
     Input,
 };
+use tokio::net::UdpSocket;
 
 use super::peer::Client;
 

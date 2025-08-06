@@ -17,7 +17,7 @@ use services::webrtc;
 
 use crate::services::environment::LISTEN_ADDRESS;
 
-#[async_std::main]
+#[tokio::main]
 async fn main() {
     // TODO: environment, negotiate encryption
 

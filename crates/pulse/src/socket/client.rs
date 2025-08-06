@@ -3,10 +3,9 @@ use std::sync::Arc;
 use crate::{
     environment, errors::Result, rtc::peer::ClientApi
 };
-use async_std::{
-    channel::Receiver, net::UdpSocket
-};
+use futures::channel::mpsc::UnboundedReceiver;
 use pulse_api::NodeEvent;
+use tokio::net::UdpSocket;
 use ulid::Ulid;
 
 use crate::rtc::call::Call;
@@ -50,7 +49,7 @@ impl CallUser {
         })
     }
 
-    pub async fn run(mut self, stream: Receiver<NodeEvent>) -> Result<()> {
+    pub async fn run(mut self, stream: UnboundedReceiver<NodeEvent>) -> Result<()> {
         // debug!("Announcing current state to client");
         // write
         //     .send(ServerEvent::Accept {

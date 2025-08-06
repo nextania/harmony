@@ -14,14 +14,16 @@ pub mod socket;
 
 use crate::errors::Result;
 
-#[async_std::main]
+#[tokio::main]
 async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
     // let mut builder = formatted_builder();
     // builder.parse_filters("debug");
     // builder.try_init().unwrap();
-    if env::var("RUST_LOG").is_err() {
-        env::set_var("RUST_LOG", "pulse=debug,str0m=debug");
+    unsafe {
+        if env::var("RUST_LOG").is_err() {
+            env::set_var("RUST_LOG", "pulse=debug,str0m=debug");
+        }
     }
     tracing_subscriber::registry()
         .with(fmt::layer())

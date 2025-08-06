@@ -5,22 +5,17 @@ use std::{
     time::{Duration, Instant},
 };
 
-use async_std::{
-    channel::{self, Receiver, Sender},
-    future::timeout,
-    net::UdpSocket,
-    task,
-};
+use futures::{channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender}, SinkExt, StreamExt};
 use str0m::{
     change::{SdpAnswer, SdpOffer, SdpPendingOffer},
     channel::{ChannelData, ChannelId},
     media::{Direction, KeyframeRequest, KeyframeRequestKind, MediaData, MediaKind, Mid, Rid},
     Candidate, Event, IceConnectionState, Input, Output, Rtc,
 };
-use ulid::Ulid;
+use tokio::{net::UdpSocket, task, time::timeout};
 
 use crate::{
-    errors::Error, redis::get_connection, socket::events::{MediaType, RemoteTrack}
+    errors::Error, socket::events::{MediaType, RemoteTrack}
 };
 
 use super::{
@@ -88,8 +83,8 @@ pub enum ClientApiIn {
 
 #[derive(Debug)]
 pub struct ClientApi {
-    pub send: Sender<ClientApiIn>,
-    pub recv: Receiver<ClientApiOut>,
+    pub send: UnboundedSender<ClientApiIn>,
+    pub recv: UnboundedReceiver<ClientApiOut>,
 }
 
 impl ClientApi {
@@ -99,15 +94,15 @@ impl ClientApi {
         local_addr: SocketAddr,
         call: Arc<Call>,
     ) -> Self {
-        let (in_send, in_recv) = channel::unbounded();
-        let (out_send, out_recv) = channel::unbounded();
+        let (in_send, mut in_recv) = unbounded();
+        let (mut out_send, out_recv) = unbounded();
         task::spawn(async move {
             let mut client = Client::new(session_id, local_addr, call.clone());
             let mut to_propagate: VecDeque<Propagated> = VecDeque::new();
             let mut buf = vec![0; 2000];
             info!("Client {} started", client.session_id);
-            let receiver = call.listener().await;
-            let redis = get_connection().await;
+            let mut receiver = call.listener().await;
+            // let redis = get_connection().await;
             loop {
                 if !client.rtc.is_alive() {
                     out_send
@@ -117,21 +112,27 @@ impl ClientApi {
                     // self.call.remove_user(&self.session_id);
                 }
 
-                let msg = in_recv.try_recv();
+                let msg = in_recv.next().await;
                 match msg {
-                    Ok(ClientApiIn::Offer(offer)) => {
-                        out_send
-                            .send(ClientApiOut::Answer(client.negotiate(offer)))
-                            .await?;
+                    Some(ClientApiIn::Offer(offer)) => {
+                        match client.negotiate(offer) {
+                            Ok(answer) => {
+                                out_send.send(ClientApiOut::Answer(answer)).await?;
+                            }
+                            Err(e) => {
+                                warn!("SDP negotiation failed: {:?}", e);
+                                // Optionally, send an error message to the client here
+                            }
+                        }
                     }
-                    Ok(ClientApiIn::Destroy) => {
+                    Some(ClientApiIn::Destroy) => {
                         client.close();
                         out_send
                             .send(ClientApiOut::RemoveUser(client.session_id.clone()))
                             .await?;
                         break;
                     }
-                    Ok(ClientApiIn::NewTrack(track_id, media_type)) => {
+                    Some(ClientApiIn::NewTrack(track_id, media_type)) => {
                         // check if such track exists on rtc
                         let Some(track) = client
                             .tracks_in
@@ -163,7 +164,7 @@ impl ClientApi {
                         }))
                         .await;
                     }
-                    Ok(ClientApiIn::AddTrack(track_id)) => {
+                    Some(ClientApiIn::AddTrack(track_id)) => {
                         let Some(track_in) = call.tracks.iter().find(|t| t.id == track_id) else {
                             warn!("WARNING: track not found");
                             continue;
@@ -171,14 +172,14 @@ impl ClientApi {
                         client.handle_track_open(track_in.track_in.clone());
                         drop(track_in);
                     }
-                    Ok(ClientApiIn::RemoveTrack(track_id)) => {}
-                    Err(e) => {
+                    Some(ClientApiIn::RemoveTrack(_track_id)) => {}
+                    None => {
                         // error!("{}", e);
                     }
                 }
 
                 // Receive propagated events from other clients
-                if let Ok(event) = receiver.try_recv() {
+                if let Some(event) = receiver.next().await {
                     match event {
                         CallEvent::Propagate(propagated) => {
                             let Some(client_id) = propagated.client_id() else {
@@ -207,7 +208,9 @@ impl ClientApi {
                             }
                         },
                         CallEvent::CreateTrack(_) => todo!(),
-                        CallEvent::RemoveTrack { removed_tracks } => todo!(),
+                        CallEvent::RemoveTrack { removed_tracks } => {
+                            warn!("RemoveTrack event not implemented: {:?}", removed_tracks);
+                        },
                         // CallEvent
                     }
                 }
@@ -270,15 +273,15 @@ impl Client {
         }
     }
 
-    pub fn negotiate(&mut self, offer: SdpOffer) -> SdpAnswer {
-        let candidate = Candidate::host(self.local_addr, "udp").expect("host candidate");
+    pub fn negotiate(&mut self, offer: SdpOffer) -> crate::errors::Result<SdpAnswer> {
+        let candidate = Candidate::host(self.local_addr, "udp").map_err(|_| Error::RtcError)?;
         self.rtc.add_local_candidate(candidate);
         let answer = self
             .rtc
             .sdp_api()
             .accept_offer(offer)
-            .expect("accept offer");
-        answer
+            .map_err(|_| Error::RtcError)?;
+        Ok(answer)
     }
 
     pub fn close(&mut self) {

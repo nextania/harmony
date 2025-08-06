@@ -1,10 +1,11 @@
 use std::{sync::Arc, time::Duration};
 
-use async_std::future;
 use dashmap::DashMap;
+use futures_util::SinkExt;
 use rapid::socket::{RpcClient, RpcResponder, RpcValue};
 use rmp_serde::Serializer;
 use serde::{Deserialize, Serialize};
+use tokio::time::timeout;
 
 use crate::{
     authentication::check_authenticated, errors::{Error, Result}, services::database::{channels::Channel, messages::Message, users::User}
@@ -85,8 +86,8 @@ pub async fn send_message(
                 .serialize(&mut Serializer::new(&mut value_buffer).with_struct_map())
                 .unwrap();
             println!("Serialized");
-            let y = x.socket.clone();
-            future::timeout(Duration::from_millis(5000), async move {
+            let mut y = x.socket.clone();
+            timeout(Duration::from_millis(5000), async move {
                 y.send(async_tungstenite::tungstenite::Message::Binary(
                     value_buffer,
                 ))

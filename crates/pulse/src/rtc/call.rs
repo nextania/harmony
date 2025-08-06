@@ -1,10 +1,7 @@
 use std::sync::Arc;
 
-use async_std::{
-    channel::{self, Receiver, Sender},
-    sync::Mutex,
-};
 use dashmap::DashMap;
+use futures::{channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender}, lock::Mutex, SinkExt};
 use lazy_static::lazy_static;
 
 use crate::socket::events::{MediaType, RemoteTrack};
@@ -26,7 +23,7 @@ pub enum CallEvent {
 #[derive(Debug)]
 pub struct Call {
     id: String,
-    pub senders: Arc<Mutex<Vec<Sender<CallEvent>>>>,
+    pub senders: Arc<Mutex<Vec<UnboundedSender<CallEvent>>>>,
     pub tracks: DashMap<String, Arc<Track>>,
     pub clients: DashMap<String, Client>,
 }
@@ -66,13 +63,13 @@ impl Call {
 
     pub async fn publish(&self, event: CallEvent) {
         // self.sender.clone().try_send(event).ok();
-        for sender in self.senders.lock().await.iter() {
-            sender.try_send(event.clone()).ok();
+        for mut sender in self.senders.lock().await.iter() {
+            sender.send(event.clone()).await.ok();
         }
     }
 
-    pub async fn listener(&self) -> Receiver<CallEvent> {
-        let (sender, receiver) = channel::unbounded();
+    pub async fn listener(&self) -> UnboundedReceiver<CallEvent> {
+        let (sender, receiver) = unbounded();
         self.senders.lock().await.push(sender);
         receiver
     }

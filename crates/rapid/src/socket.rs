@@ -1,19 +1,20 @@
 use std::{any::Any, future::Future, pin::Pin, sync::Arc};
 
-use async_std::{
-    channel::{unbounded, Sender},
-    future,
-    net::{TcpListener, TcpStream},
-    task::spawn,
-};
-use async_tungstenite::{accept_async, tungstenite::Message};
+// use async_std::{
+//     channel::{unbounded, Sender},
+//     future,
+//     net::{TcpListener, TcpStream},
+//     task::spawn,
+// };
+use async_tungstenite::{accept_async, tokio::TokioAdapter, tungstenite::Message};
 use dashmap::DashMap;
-use futures_util::{future::BoxFuture, SinkExt, StreamExt};
+use futures::{channel::mpsc::{unbounded, UnboundedSender}, future::BoxFuture, SinkExt, StreamExt};
 use log::{debug, info};
 use rand::rngs::OsRng;
 use rmp_serde::{Deserializer, Serializer};
 use rmpv::{ext::{from_value, to_value}, Value};
 use serde::{Deserialize, Serialize};
+use tokio::{net::{TcpListener, TcpStream}, task, time::timeout};
 use x25519_dalek::{EphemeralSecret, PublicKey};
 
 use crate::{errors::Error, utilities::{generate_id, HEARTBEAT_TIMEOUT}};
@@ -21,14 +22,14 @@ use crate::{errors::Error, utilities::{generate_id, HEARTBEAT_TIMEOUT}};
 #[derive(Clone)]
 pub struct RpcClient {
     pub id: String,
-    pub socket: Arc<Sender<Message>>,
+    pub socket: UnboundedSender<Message>,
     pub user: Option<Arc<Box<dyn Any + Send + Sync>>>,
     pub request_ids: Vec<String>,
-    pub heartbeat_tx: Arc<Sender<()>>,
+    pub heartbeat_tx: UnboundedSender<()>,
 }
 
 impl RpcClient {
-    pub async fn send(&self, data: Vec<u8>) {                
+    pub async fn send(&mut self, data: Vec<u8>) {                
         self
             .socket
             .send(Message::Binary(
@@ -195,12 +196,11 @@ impl RpcServer {
 
     pub async fn start(&self, address: String) {    
         let server = TcpListener::bind(address).await.unwrap();
-        let mut incoming = server.incoming();
-        while let Some(stream) = incoming.next().await {
+        while let Ok((stream, _)) = server.accept().await {
             let clients = self.clients.clone();
             let fnc = self.authenticate.clone();
             let methods = self.methods.clone();
-            spawn(async move { start_client(stream, clients, fnc, methods).await });
+            task::spawn(async move { start_client(stream, clients, fnc, methods).await });
         }
     }
 }
@@ -239,21 +239,20 @@ pub enum RpcApiEvent {
 }
 
 async fn start_client(
-    stream: Result<TcpStream, std::io::Error>,
+    connection: TcpStream,
     clients: Arc<DashMap<String, RpcClient>>,
     authenticate: AuthenticateFn,
     methods: Arc<DashMap<String, Box<dyn MethodFn>>>,
 ) {
-    let connection = stream.unwrap();
     println!("Socket connected: {}", connection.peer_addr().unwrap());
-    let ws_stream = accept_async(connection).await;
+    let ws_stream = accept_async(TokioAdapter::new(connection)).await;
     let Ok(ws_stream) = ws_stream else {
         return;
     };
     let (mut write, mut read) = ws_stream.split();
-    let (s, r) = unbounded::<Message>();
-    spawn(async move {
-        while let Ok(msg) = r.recv().await {
+    let (mut s, mut r) = unbounded::<Message>();
+    task::spawn(async move {
+        while let Some(msg) = r.next().await {
             write.send(msg).await.expect("Failed to send message");
         }
         write.close().await.expect("Failed to close");
@@ -275,27 +274,27 @@ async fn start_client(
     .await
     .expect("Failed to send message");
 
-    let (tx, rx) = unbounded::<()>();
+    let (tx, mut rx) = unbounded::<()>();
     let clients_moved = clients.clone();
     let id_moved = id.clone();
-    spawn(async move {
-        while future::timeout(
+    task::spawn(async move {
+        while timeout(
             std::time::Duration::from_millis(*HEARTBEAT_TIMEOUT),
-            rx.recv(),
+            rx.next(),
         )
         .await
         .is_ok()
         {}
-        if let Some((_, client)) = clients_moved.remove(&id_moved) {
-            client.socket.close();
+        if let Some((_, mut client)) = clients_moved.remove(&id_moved) {
+            client.socket.close().await.ok();
         }
     });
     let client = RpcClient {
         id: id.clone(),
-        socket: Arc::new(s),
+        socket: s,
         user: None,
         request_ids,
-        heartbeat_tx: Arc::new(tx),
+        heartbeat_tx: tx,
     };
     clients.insert(id.clone(), client);
     while let Some(data) = read.next().await {
@@ -306,7 +305,7 @@ async fn start_client(
             Message::Binary(bin) => {
                 debug!("Received binary data");
                 let response = handle_packet(bin, &clients, &id, authenticate.clone(), methods.clone()).await;
-                let client = clients.get(&id.clone()).unwrap();
+                let mut client = clients.get_mut(&id.clone()).unwrap();
                 client.send(response.expect("Failed to serialize")).await;
             }
             Message::Close(_) => {
@@ -314,8 +313,8 @@ async fn start_client(
             }
             _ => {
                 debug!("Received unknown message");
-                if let Some((_, client)) = clients.remove(&id.clone()) {
-                    client.socket.close();
+                if let Some((_, mut client)) = clients.remove(&id.clone()) {
+                    client.socket.close().await.ok();
                 }
             }
         }
@@ -367,7 +366,7 @@ pub async fn handle_packet(
                 })
             },
             RpcApiRequest::Heartbeat {  } => {
-                let client = clients.get(user_id).unwrap();
+                let mut client = clients.get_mut(user_id).unwrap();
                 client.heartbeat_tx.send(()).await.unwrap();
                 serialize(&RpcApiEvent::Heartbeat {})
             },
@@ -415,9 +414,9 @@ pub fn emit_all<T:Serialize+Send+Clone + 'static>(clients: &DashMap<String, RpcC
     }
 }
 pub fn emit_one<T:Serialize+Send+Clone + 'static>(client: &RpcClient, data: T) {
-    let socket = client.socket.clone();
+    let mut socket = client.socket.clone();
     let data = data.clone();
-    spawn(async move {
+    task::spawn(async move {
         socket.send(Message::Binary(serialize(&data).expect("Failed to serialize"))).await
     });
 }

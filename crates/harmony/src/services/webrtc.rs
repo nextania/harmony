@@ -7,10 +7,15 @@ use redis::{AsyncCommands, FromRedisValue, ToRedisArgs};
 use serde::{Deserialize, Serialize};
 use tokio::{task, time};
 
-use crate::{errors::{Error, Result}, request::Request};
+use crate::{
+    errors::{Error, Result},
+    request::Request,
+};
 
 use super::{
-    database::calls::Call, encryption::{deserialize, serialize}, redis::{get_connection, get_pubsub}
+    database::calls::Call,
+    encryption::{deserialize, serialize},
+    redis::{get_connection, get_pubsub},
 };
 
 lazy_static! {
@@ -40,16 +45,21 @@ impl Node {
     }
 }
 
-
 pub fn spawn_check_available_nodes() {
     task::spawn(async move {
         let mut pubsub = get_pubsub().await;
         pubsub.subscribe("nodes").await.unwrap();
         let mut connection = get_connection().await;
-        connection.publish::<&str, NodeEvent, ()>("nodes", NodeEvent {
-            event: NodeEventKind::Query,
-            id: "server".to_owned(),
-        }).await.expect("Failed to publish");
+        connection
+            .publish::<&str, NodeEvent, ()>(
+                "nodes",
+                NodeEvent {
+                    event: NodeEventKind::Query,
+                    id: "server".to_owned(),
+                },
+            )
+            .await
+            .expect("Failed to publish");
         while let Some(msg) = pubsub.on_message().next().await {
             let payload: Vec<u8> = msg.get_payload().unwrap();
             let payload: NodeEvent = deserialize(&payload).unwrap();
@@ -97,16 +107,25 @@ pub fn spawn_check_available_nodes() {
                 //         .await
                 //         .expect("Failed to leave user");
                 // }
-                NodeEvent { event: NodeEventKind::Query, .. } => {}
-                NodeEvent { event: NodeEventKind::UserCreate{sdp, session_id, call_id }, .. } => {
+                NodeEvent {
+                    event: NodeEventKind::Query,
+                    ..
+                } => {}
+                NodeEvent {
+                    event:
+                        NodeEventKind::UserCreate {
+                            sdp,
+                            session_id,
+                            call_id,
+                        },
+                    ..
+                } => {
                     let req = REQUESTS.get_mut(format!("{}:{}", call_id, session_id).as_str());
                     if let Some(mut req) = req {
                         req.set(sdp.to_string());
                     }
                 }
-                NodeEvent {
-                    ..
-                } => {}
+                NodeEvent { .. } => {}
             }
         }
     });
@@ -133,7 +152,6 @@ pub struct ActiveCall {
     pub id: String,
     pub name: Option<String>,
     pub members: Vec<String>,
-    pub space_id: String,
     pub channel_id: String,
 }
 
@@ -187,9 +205,9 @@ pub struct RtcAuthorization {
 }
 
 impl ActiveCall {
-    pub async fn create(space: &String, channel: &String, initiator: &str) -> Result<ActiveCall> {
+    pub async fn create(channel: &String, initiator: &str) -> Result<ActiveCall> {
         let mut redis = get_connection().await;
-        let call = Self::get_in_channel(space, channel).await?;
+        let call = Self::get_in_channel(channel).await?;
         if call.is_some() {
             return Err(Error::AlreadyExists);
         }
@@ -197,12 +215,11 @@ impl ActiveCall {
             id: ulid::Ulid::new().to_string(),
             name: None,
             members: vec![initiator.to_owned()],
-            space_id: space.clone(),
             channel_id: channel.clone(),
         };
         redis
             .set::<std::string::String, ActiveCall, ()>(
-                format!("call:{}:{}", space, channel),
+                format!("call:channel:{}", channel),
                 call.clone(),
             )
             .await
@@ -215,14 +232,13 @@ impl ActiveCall {
             ended_at: chrono::Utc::now().timestamp_millis(),
         };
         stored_call.create().await?;
-        let space = space.clone();
         let channel = channel.clone();
         task::spawn(async move {
             loop {
                 time::sleep(std::time::Duration::from_millis(30000)).await;
                 let mut redis = get_connection().await;
                 let active_call: std::result::Result<Option<ActiveCall>, _> =
-                    redis.get(format!("call:{}:{}", space, channel)).await;
+                    redis.get(format!("call:channel:{}", channel)).await;
                 let active_call = match active_call {
                     Ok(call) => call,
                     Err(_) => {
@@ -241,9 +257,9 @@ impl ActiveCall {
         Ok(call)
     }
 
-    pub async fn get_in_channel(space: &String, channel: &String) -> Result<Option<ActiveCall>> {
+    pub async fn get_in_channel(channel: &String) -> Result<Option<ActiveCall>> {
         let mut redis = get_connection().await;
-        let id: Option<String> = redis.get(format!("call:{}:{}", space, channel)).await?;
+        let id: Option<String> = redis.get(format!("call:channel:{}", channel)).await?;
         if let Some(id) = id {
             Ok(Self::get(&id).await?)
         } else {
@@ -280,13 +296,13 @@ impl ActiveCall {
             .publish::<&str, NodeEvent, ()>(
                 "nodes",
                 NodeEvent {
-                    event: NodeEventKind::UserConnect { 
-                        call_id: self.id.clone(), 
+                    event: NodeEventKind::UserConnect {
+                        call_id: self.id.clone(),
                         sdp: pulse_api::SessionDescription::Offer(sdp.clone()),
-                        session_id: user_id.to_owned(), 
+                        session_id: user_id.to_owned(),
                     },
-                    id: "server".to_owned()
-                }
+                    id: "server".to_owned(),
+                },
             )
             .await?;
         let value = request.wait().await;
@@ -309,8 +325,8 @@ impl ActiveCall {
         let mut redis = get_connection().await;
         redis
             .del::<std::string::String, ActiveCall>(format!(
-                "call:{}:{}",
-                self.space_id, self.channel_id
+                "call:channel:{}",
+                 self.channel_id
             ))
             .await?;
 

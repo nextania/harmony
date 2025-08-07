@@ -1,18 +1,14 @@
-
 use std::sync::Arc;
 
-use dashmap::{mapref::multiple::RefMulti, DashMap};
-use rapid::socket::{emit_one, RpcClient};
+use dashmap::{DashMap, mapref::multiple::RefMulti};
+use rapid::socket::{RpcClient, emit_one};
 use serde::{Deserialize, Serialize};
 
 use crate::services::database::{messages::Message, users::User};
 
 pub mod channels;
-pub mod events;
 pub mod invites;
 pub mod messages;
-pub mod roles;
-pub mod spaces;
 pub mod users;
 pub mod webrtc;
 
@@ -58,7 +54,6 @@ pub mod webrtc;
 //     DeleteRole(DeleteRoleMethod) = 72,
 //     // GetRoles(GetRolesMethod) = 73,
 // }
-
 
 // #[derive(Debug, Deserialize, Serialize)]
 // pub struct RpcApiMethod {
@@ -134,11 +129,19 @@ pub enum CreateChannelType {
 }
 
 pub fn emit_to_id(clients: Arc<DashMap<String, RpcClient>>, user_id: &str, event: Event) {
-    let client: Vec<RefMulti<'_, String, RpcClient>> = clients.iter().filter(|client| {
-        let i = client.get_user::<User>().map(|u| u.id.clone());
-        i == Some(user_id.to_owned())
-    }).collect();
+    let client: Vec<RefMulti<'_, String, RpcClient>> = clients
+        .iter()
+        .filter(|client| {
+            let i = client.get_user::<User>().map(|u| u.id.clone());
+            i == Some(user_id.to_owned())
+        })
+        .collect();
     for client in client {
-        emit_one(client.value(), RpcApiEvent { event: event.clone() });
+        emit_one(
+            client.value(),
+            RpcApiEvent {
+                event: event.clone(),
+            },
+        );
     }
 }

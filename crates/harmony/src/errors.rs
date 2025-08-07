@@ -2,8 +2,6 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::services::permissions::Permission;
-
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -16,7 +14,7 @@ pub enum Error {
     InvalidMethod,
     InvalidRequestId,
     InternalError,
-    MissingPermission { permission: Permission },
+    MissingPermission,
 
     // Authentication errors
     InvalidToken,
@@ -40,7 +38,7 @@ pub enum Error {
 
     // User errors
     Blocked,
-    AlreadyFriends,
+    AlreadyEstablished,
     AlreadyRequested,
     NotFriends,
 
@@ -59,9 +57,7 @@ impl fmt::Display for Error {
             Error::InvalidMethod => write!(f, "Invalid method"),
             Error::InvalidRequestId => write!(f, "Invalid request id"),
             Error::InternalError => write!(f, "Internal error"),
-            Error::MissingPermission { permission } => {
-                write!(f, "Missing permission: {permission:?}")
-            }
+            Error::MissingPermission => write!(f, "Missing permission"),
             Error::InvalidToken => write!(f, "Invalid token"),
             Error::NotAuthenticated => write!(f, "Not authenticated"),
             Error::MessageTooLong => write!(f, "Message too long"),
@@ -73,7 +69,7 @@ impl fmt::Display for Error {
             Error::InviteAlreadyUsed => write!(f, "Invite already used"),
             Error::ChannelFull => write!(f, "Channel full"),
             Error::Blocked => write!(f, "Blocked"),
-            Error::AlreadyFriends => write!(f, "Already friends"),
+            Error::AlreadyEstablished => write!(f, "Already friends"),
             Error::AlreadyRequested => write!(f, "Already requested"),
             Error::NotFriends => write!(f, "Not friends"),
             Error::AlreadyExists => write!(f, "Already exists"),

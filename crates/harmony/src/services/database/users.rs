@@ -2,7 +2,7 @@ use futures_util::StreamExt;
 use mongodb::bson::{self, doc};
 use serde::{Deserialize, Serialize};
 
-use super::{channels::Channel, invites::Invite, spaces::Space};
+use super::channels::Channel;
 use crate::errors::{Error, Result};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -10,7 +10,8 @@ pub enum Status {
     Online = 0,
     Idle = 1,
     Busy = 2,
-    Invisible = 3,
+    BusyNotify = 3,
+    Invisible = 4,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -22,7 +23,7 @@ pub struct Presence {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum Relationship {
-    Friend = 0,
+    Established = 0,
     Blocked = 1,
     Requested = 2,
     Pending = 3,
@@ -30,13 +31,13 @@ pub enum Relationship {
 
 // TODO: allow disabling of friend requests
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Affinity {
+pub struct Contact {
     id: String,
     relationship: Relationship,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct AffinityExtended {
+pub struct ContactExtended {
     id: String,
     relationship: Relationship,
     user: User,
@@ -47,7 +48,7 @@ pub struct User {
     pub id: String,
     pub profile_banner: Option<String>, // TODO: Make use of file handling
     pub profile_description: String,
-    pub affinities: Vec<Affinity>,
+    pub contacts: Vec<Contact>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub online: Option<bool>,
@@ -56,35 +57,6 @@ pub struct User {
 }
 
 impl User {
-    pub async fn get_spaces(&self) -> Result<Vec<Space>> {
-        let spaces = super::get_database().collection::<Space>("spaces");
-        let spaces = spaces
-            .find(doc! {
-                "members": {
-                    "$in": [&self.id],
-                },
-            })
-            .await?;
-        let mut spaces: Vec<Space> = spaces
-            .filter_map(|space| async { space.ok() })
-            .collect()
-            .await;
-        spaces.sort_by(|a, b| a.name.cmp(&b.name));
-        Ok(spaces)
-    }
-
-    pub async fn in_space(&self, space_id: &String) -> Result<bool> {
-        let spaces = super::get_database().collection::<Space>("spaces");
-        let space = spaces
-            .find_one(doc! {
-                "id": space_id,
-                "members": {
-                    "$in": [&self.id],
-                },
-            })
-            .await?;
-        Ok(space.is_some())
-    }
     pub async fn in_channel(&self, channel: &Channel) -> Result<bool> {
         match channel {
             Channel::PrivateChannel {
@@ -99,15 +71,8 @@ impl User {
                 }
             }
             Channel::GroupChannel { members, .. } => {
-                if members.contains(&self.id) {
-                    Ok(true)
-                } else {
-                    Ok(false)
-                }
+                Ok(members.iter().any(|member| member.id == self.id))
             }
-            Channel::InformationChannel { space_id, .. } => self.in_space(space_id).await,
-            Channel::AnnouncementChannel { space_id, .. } => self.in_space(space_id).await,
-            Channel::StandardChannel { space_id, .. } => self.in_space(space_id).await,
         }
     }
 
@@ -142,7 +107,7 @@ impl User {
             id,
             profile_banner: None,
             profile_description: String::new(),
-            affinities: Vec::new(),
+            contacts: Vec::new(),
             online: None,
             presence: None,
         };
@@ -150,13 +115,13 @@ impl User {
         Ok(user)
     }
 
-    pub async fn add_friend(&self, friend_id: &String) -> Result<()> {
+    pub async fn add_contact(&self, contact_id: &String) -> Result<()> {
         let users = super::get_database().collection::<User>("users");
-        User::get(friend_id).await?;
-        let affinity = self.affinities.iter().find(|a| &a.id == friend_id);
-        if let Some(affinity) = affinity {
-            match affinity.relationship {
-                Relationship::Friend => Err(Error::AlreadyFriends),
+        User::get(contact_id).await?;
+        let contact = self.contacts.iter().find(|a| &a.id == contact_id);
+        if let Some(contact) = contact {
+            match contact.relationship {
+                Relationship::Established => Err(Error::AlreadyEstablished),
                 Relationship::Blocked => Err(Error::Blocked),
                 Relationship::Requested => Err(Error::AlreadyRequested),
                 Relationship::Pending => {
@@ -167,12 +132,12 @@ impl User {
                             },
                             doc! {
                                 "$set": {
-                                    "affinities.$[affinity].relationship": bson::to_bson(&Relationship::Friend)?
+                                    "contacts.$[contact].relationship": bson::to_bson(&Relationship::Established)?
                                 }
                             }).with_options(
                             Some(mongodb::options::UpdateOptions::builder()
                                 .array_filters(vec![doc! {
-                                    "affinity.id": &friend_id
+                                    "contact.id": &contact_id
                                 }])
                                 .build()),
                         )
@@ -180,16 +145,16 @@ impl User {
                     users
                         .update_one(
                             doc! {
-                                "id": &friend_id
+                                "id": &contact_id
                             },
                             doc! {
                                 "$set": {
-                                    "affinities.$[affinity].relationship": bson::to_bson(&Relationship::Friend)?
+                                    "contacts.$[contact].relationship": bson::to_bson(&Relationship::Established)?
                                 }
                             }).with_options(
                             Some(mongodb::options::UpdateOptions::builder()
                                 .array_filters(vec![doc! {
-                                    "affinity.id": &self.id
+                                    "contact.id": &self.id
                                 }])
                                 .build()),
                         )
@@ -205,8 +170,8 @@ impl User {
                     },
                     doc! {
                         "$push": {
-                            "affinities": {
-                                "id": friend_id,
+                            "contacts": {
+                                "id": contact_id,
                                 "relationship": bson::to_bson(&Relationship::Requested)?
                             }
                         }
@@ -216,11 +181,11 @@ impl User {
             users
                 .update_one(
                     doc! {
-                        "id": &friend_id
+                        "id": &contact_id
                     },
                     doc! {
                         "$push": {
-                            "affinities": {
+                            "contacts": {
                                 "id": &self.id,
                                 "relationship": bson::to_bson(&Relationship::Pending)?
                             }
@@ -232,14 +197,14 @@ impl User {
         }
     }
 
-    pub async fn remove_friend(&self, friend_id: &String) -> Result<()> {
+    pub async fn remove_contact(&self, contact_id: &String) -> Result<()> {
         let users = super::get_database().collection::<User>("users");
-        User::get(friend_id).await?;
-        let affinity = self.affinities.iter().find(|a| &a.id == friend_id);
-        if let Some(affinity) = affinity {
-            match affinity.relationship {
-                // remove friend
-                Relationship::Friend => {
+        User::get(contact_id).await?;
+        let contact = self.contacts.iter().find(|a| &a.id == contact_id);
+        if let Some(contact) = contact {
+            match contact.relationship {
+                // remove contact
+                Relationship::Established => {
                     users
                         .update_one(
                             doc! {
@@ -247,8 +212,8 @@ impl User {
                             },
                             doc! {
                                 "$pull": {
-                                    "affinities": {
-                                        "id": friend_id
+                                    "contacts": {
+                                        "id": contact_id
                                     }
                                 }
                             },
@@ -257,11 +222,11 @@ impl User {
                     users
                         .update_one(
                             doc! {
-                                "id": friend_id
+                                "id": contact_id
                             },
                             doc! {
                                 "$pull": {
-                                    "affinities": {
+                                    "contacts": {
                                         "id": &self.id
                                     }
                                 }
@@ -280,8 +245,8 @@ impl User {
                             },
                             doc! {
                                 "$pull": {
-                                    "affinities": {
-                                        "id": friend_id
+                                    "contacts": {
+                                        "id": contact_id
                                     }
                                 }
                             },
@@ -290,11 +255,11 @@ impl User {
                     users
                         .update_one(
                             doc! {
-                                "id": friend_id
+                                "id": contact_id
                             },
                             doc! {
                                 "$pull": {
-                                    "affinities": {
+                                    "contacts": {
                                         "id": &self.id
                                     }
                                 }
@@ -312,8 +277,8 @@ impl User {
                             },
                             doc! {
                                 "$pull": {
-                                    "affinities": {
-                                        "id": friend_id
+                                    "contacts": {
+                                        "id": contact_id
                                     }
                                 }
                             },
@@ -322,11 +287,11 @@ impl User {
                     users
                         .update_one(
                             doc! {
-                                "id": friend_id
+                                "id": contact_id
                             },
                             doc! {
                                 "$pull": {
-                                    "affinities": {
+                                    "contacts": {
                                         "id": &self.id
                                     }
                                 }
@@ -341,92 +306,88 @@ impl User {
         }
     }
 
-    pub async fn get_friends(&self) -> Result<Vec<User>> {
+    pub async fn get_established_contacts(&self) -> Result<Vec<User>> {
         let users = super::get_database().collection::<User>("users");
-        let friends = self
-            .affinities
-            .iter()
-            .map(|affinity| async {
-                if affinity.relationship == Relationship::Friend {
-                    let user = users
-                        .find_one(doc! {
-                            "id": &affinity.id
-                        })
-                        .await.ok()?;
-                    match user {
-                        Some(user) => Some(user),
-                        None => None,
-                    }
-                } else {
-                    None
-                }
-            });
-        let friends: Vec<User> = futures_util::future::join_all(friends)
-            .await
-            .iter()
-            .filter_map(|friend| friend.clone())
-            .collect();
-        Ok(friends)
-    }
-
-    pub async fn get_affinities(&self) -> Result<Vec<AffinityExtended>> {
-        let users = super::get_database().collection::<User>("users");
-        let affinities = self
-            .affinities
-            .iter()
-            .map(|affinity| async {
+        let contacts = self.contacts.iter().map(|contact| async {
+            if contact.relationship == Relationship::Established {
                 let user = users
                     .find_one(doc! {
-                        "id": &affinity.id
+                        "id": &contact.id
                     })
-                    .await.ok()?;
+                    .await
+                    .ok()?;
                 match user {
-                    Some(user) => Some(AffinityExtended {
-                        id: affinity.id.clone(),
-                        relationship: affinity.relationship.clone(),
-                        user,
-                    }),
+                    Some(user) => Some(user),
                     None => None,
                 }
-            });
-        let affinities: Vec<AffinityExtended> = futures_util::future::join_all(affinities)
+            } else {
+                None
+            }
+        });
+        let contacts: Vec<User> = futures_util::future::join_all(contacts)
             .await
             .iter()
-            .filter_map(|affinity| affinity.clone())
+            .filter_map(|contact| contact.clone())
             .collect();
-        Ok(affinities)
+        Ok(contacts)
     }
 
-    pub async fn accept_invite(&self, invite_code: &String) -> Result<Space> {
-        let invites = super::get_database().collection::<Invite>("invites");
-        let spaces = super::get_database().collection::<Space>("spaces");
-        let invite = invites
-            .find_one_and_update(
-                doc! {
-                    "id": invite_code,
-                },
-                doc! {
-                    "$push": {
-                        "uses": &self.id,
-                    }
-                },
-            )
-            .await?;
-        let invite = match invite {
-            Some(invite) => invite,
-            None => return Err(Error::NotFound),
-        };
-        let space = spaces
-            .find_one(doc! {
-                "id": invite.space_id,
-            })
-            .await?;
-        let space = match space {
-            Some(space) => space,
-            None => return Err(Error::NotFound),
-        };
-        Ok(space)
+    pub async fn get_contacts(&self) -> Result<Vec<ContactExtended>> {
+        let users = super::get_database().collection::<User>("users");
+        let contacts = self.contacts.iter().map(|contact| async {
+            let user = users
+                .find_one(doc! {
+                    "id": &contact.id
+                })
+                .await
+                .ok()?;
+            match user {
+                Some(user) => Some(ContactExtended {
+                    id: contact.id.clone(),
+                    relationship: contact.relationship.clone(),
+                    user,
+                }),
+                None => None,
+            }
+        });
+        let contacts: Vec<ContactExtended> = futures_util::future::join_all(contacts)
+            .await
+            .iter()
+            .filter_map(|contact| contact.clone())
+            .collect();
+        Ok(contacts)
     }
+
+    // pub async fn accept_invite(&self, invite_code: &String) -> Result<Space> {
+    //     let invites = super::get_database().collection::<Invite>("invites");
+    //     let spaces = super::get_database().collection::<Space>("spaces");
+    //     let invite = invites
+    //         .find_one_and_update(
+    //             doc! {
+    //                 "id": invite_code,
+    //             },
+    //             doc! {
+    //                 "$push": {
+    //                     "uses": &self.id,
+    //                 }
+    //             },
+    //         )
+    //         .await?;
+    //     let invite = match invite {
+    //         Some(invite) => invite,
+    //         None => return Err(Error::NotFound),
+    //     };
+    //     let space = spaces
+    //         .find_one(doc! {
+    //             "id": invite.space_id,
+    //         })
+    //         .await?;
+    //     let space = match space {
+    //         Some(space) => space,
+    //         None => return Err(Error::NotFound),
+    //     };
+    //     Ok(space)
+    // }
 
     pub async fn get_channels(&self) -> Result<Vec<Channel>> {
         let channels = super::get_database().collection::<Channel>("channels");

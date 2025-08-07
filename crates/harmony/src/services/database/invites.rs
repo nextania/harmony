@@ -17,8 +17,6 @@ pub struct Invite {
     pub max_uses: Option<i32>,
     pub uses: Vec<String>,
     pub authorized_users: Option<Vec<String>>,
-    pub space_id: Option<String>,
-    pub scope_id: String,
 }
 
 impl Invite {
@@ -28,8 +26,6 @@ impl Invite {
         expires_at: Option<u64>,
         max_uses: Option<i32>,
         authorized_users: Option<Vec<String>>,
-        space_id: Option<String>,
-        scope_id: Option<String>,
     ) -> Result<Invite> {
         let invite = Invite {
             id: Ulid::new().to_string(),
@@ -41,8 +37,6 @@ impl Invite {
             max_uses,
             uses: Vec::new(),
             authorized_users,
-            space_id,
-            scope_id: scope_id.unwrap_or_else(|| "global".to_owned()),
         };
         let database = super::get_database();
         database
@@ -52,12 +46,12 @@ impl Invite {
         Ok(invite)
     }
 
-    pub async fn get(code: &String) -> Result<Invite> {
+    pub async fn get(id: &String) -> Result<Invite> {
         let database = super::get_database();
         let invite = database
             .collection::<Invite>("invites")
             .find_one(doc! {
-                "id": code,
+                "id": id,
             })
             .await?;
         match invite {
@@ -83,7 +77,4 @@ pub fn generate_code() -> String {
     Alphanumeric.sample_string(&mut rand::thread_rng(), 7)
 }
 
-// pub async fn update_invite(code: String) -> Option<Invite> {
-
-// }
 

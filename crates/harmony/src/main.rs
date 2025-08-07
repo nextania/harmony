@@ -1,10 +1,10 @@
 #![allow(dead_code)]
 
+pub mod authentication;
 pub mod errors;
 pub mod methods;
-pub mod services;
-pub mod authentication;
 pub mod request;
+pub mod services;
 
 use authentication::authenticate;
 use rapid::socket::RpcServer;
@@ -44,16 +44,10 @@ async fn main() {
         .register("GET_INVITES", methods::invites::get_invites)
         .register("GET_MESSAGES", methods::messages::get_messages)
         .register("SEND_MESSAGE", methods::messages::send_message)
-        .register("CREATE_ROLE", methods::roles::create_role)
-        .register("EDIT_ROLE", methods::roles::edit_role)
-        .register("DELETE_ROLE", methods::roles::delete_role)
-        .register("GET_SPACE", methods::spaces::get_space)
-        .register("CREATE_SPACE", methods::spaces::create_space)
-        .register("EDIT_SPACE", methods::spaces::edit_space)
-        .register("DELETE_SPACE", methods::spaces::delete_space)
         .register("JOIN_CALL", methods::webrtc::join_call)
         .register("LEAVE_CALL", methods::webrtc::leave_call)
         .register("START_CALL", methods::webrtc::start_call)
         .register("END_CALL", methods::webrtc::end_call)
-        .start(listen_address).await;
+        .start(listen_address)
+        .await;
 }

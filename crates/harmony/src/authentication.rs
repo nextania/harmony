@@ -1,11 +1,14 @@
-use std::{any::Any, collections::HashSet, sync::Arc};
+use std::{any::Any, sync::Arc};
 
 use dashmap::DashMap;
 use rapid::socket::{RpcClient, RpcResponder};
-use rmpv::{ext::to_value, Value};
+use rmpv::{Value, ext::to_value};
 use serde::Deserialize;
 
-use crate::{errors::{Error, Result}, services::{database::users::User, environment::JWT_SECRET}};
+use crate::{
+    errors::{Error, Result},
+    services::database::users::User,
+};
 
 #[derive(Deserialize)]
 struct UserJwt {
@@ -14,7 +17,6 @@ struct UserJwt {
     issued_at: u128,
     expires_at: u128,
 }
-
 
 // Important: This only accepts a token and will not sign a token.
 // The token is to be obtained from a separate login server
@@ -26,13 +28,14 @@ pub async fn authenticate(token: String) -> rapid::errors::Result<Box<dyn Any + 
     // TODO: validate the token
     let user = User::get(&token).await;
     let user = if let Err(Error::NotFound) = user {
-        User::create(token).await.map_err(|_| rapid::errors::Error::InternalError)?
+        User::create(token)
+            .await
+            .map_err(|_| rapid::errors::Error::InternalError)?
     } else {
         user.map_err(|_| rapid::errors::Error::InternalError)?
     };
     Ok(Box::new(user))
 }
-
 
 pub fn check_authenticated(
     clients: Arc<DashMap<String, RpcClient>>,

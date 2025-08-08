@@ -5,14 +5,14 @@ use async_notify::Notify;
 #[derive(Clone, Debug)]
 pub struct Request<T: Clone> {
     data: Option<T>,
-    notify: Arc<Notify>
+    notify: Arc<Notify>,
 }
 
 impl<T: Clone> Request<T> {
     pub fn new() -> Self {
         Self {
             data: None,
-            notify: Arc::new(Notify::new())
+            notify: Arc::new(Notify::new()),
         }
     }
 

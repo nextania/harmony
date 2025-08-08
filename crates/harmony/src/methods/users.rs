@@ -1,4 +1,3 @@
-
 // 1. add friend
 // 2. remove friend
 // 3. get friends
@@ -38,7 +37,7 @@ pub async fn add_friend(
     let user = User::get(&id).await?;
     let friend = User::get(&data.id).await?;
     User::add_contact(&user, &friend.id).await?;
-    Ok::<_, Error>(RpcValue(AddFriendResponse {  }))
+    Ok::<_, Error>(RpcValue(AddFriendResponse {}))
 }
 
 pub async fn add_friend_username(
@@ -51,7 +50,7 @@ pub async fn add_friend_username(
     let user = User::get(&id).await?;
     let friend = User::get_by_username(&data.username).await?;
     User::add_contact(&user, &friend.id).await?;
-    Ok::<_, Error>(RpcValue(AddFriendResponse {  }))
+    Ok::<_, Error>(RpcValue(AddFriendResponse {}))
 }
 
 pub async fn remove_friend(
@@ -64,7 +63,7 @@ pub async fn remove_friend(
     let user = User::get(&id).await?;
     let friend = User::get(&data.id).await?;
     user.remove_contact(&friend.id).await?;
-    Ok::<_, Error>(RpcValue(AddFriendResponse {  }))
+    Ok::<_, Error>(RpcValue(AddFriendResponse {}))
 }
 
 pub async fn get_friends(
@@ -77,4 +76,3 @@ pub async fn get_friends(
     let contacts = user.get_contacts().await?;
     Ok::<_, Error>(RpcValue(contacts))
 }
-

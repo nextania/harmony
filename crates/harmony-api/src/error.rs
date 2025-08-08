@@ -84,53 +84,53 @@ pub enum ApiError {
     /// Generic errors
     #[error("Database error: {message}")]
     DatabaseError { message: String },
-    
+
     #[error("Not found")]
     NotFound,
-    
+
     #[error("Unimplemented")]
     Unimplemented,
-    
+
     #[error("Invalid method")]
     InvalidMethod,
-    
+
     #[error("Invalid request ID")]
     InvalidRequestId,
-    
+
     #[error("Internal error")]
     InternalError,
-    
+
     #[error("Missing permission")]
     MissingPermission,
 
     /// Authentication errors
     #[error("Invalid token")]
     InvalidToken,
-    
+
     #[error("Not authenticated")]
     NotAuthenticated,
 
     /// Message errors
     #[error("Message too long")]
     MessageTooLong,
-    
+
     #[error("Message empty")]
     MessageEmpty,
 
     /// Space errors
     #[error("Name too long")]
     NameTooLong,
-    
+
     #[error("Name empty")]
     NameEmpty,
 
     /// Invite errors
     #[error("Invalid invite")]
     InvalidInvite,
-    
+
     #[error("Invite expired")]
     InviteExpired,
-    
+
     #[error("Invite already used")]
     InviteAlreadyUsed,
 
@@ -141,23 +141,23 @@ pub enum ApiError {
     /// User errors
     #[error("Blocked")]
     Blocked,
-    
+
     #[error("Already established")]
     AlreadyEstablished,
-    
+
     #[error("Already requested")]
     AlreadyRequested,
-    
+
     #[error("Not friends")]
     NotFriends,
 
     /// Call errors
     #[error("Already exists")]
     AlreadyExists,
-    
+
     #[error("Call limit reached")]
     CallLimitReached,
-    
+
     #[error("No voice nodes available")]
     NoVoiceNodesAvailable,
 }

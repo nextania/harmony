@@ -76,5 +76,3 @@ impl Invite {
 pub fn generate_code() -> String {
     Alphanumeric.sample_string(&mut rand::thread_rng(), 7)
 }
-
-

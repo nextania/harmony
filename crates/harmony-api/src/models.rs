@@ -1,9 +1,6 @@
-//! Data models for the Harmony API
-
-use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
-/// User information
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct User {
     pub id: String,
@@ -16,7 +13,6 @@ pub struct User {
     pub contacts: Vec<Contact>,
 }
 
-/// User online status
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum Status {
     Online = 0,
@@ -26,14 +22,12 @@ pub enum Status {
     Invisible = 4,
 }
 
-/// User presence information
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Presence {
     pub status: Status,
     pub message: String,
 }
 
-/// Relationship types between users
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum Relationship {
@@ -43,14 +37,12 @@ pub enum Relationship {
     Pending = 3,
 }
 
-/// Contact information
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Contact {
     pub id: String,
     pub relationship: Relationship,
 }
 
-/// Extended contact information with user details
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ContactExtended {
     pub id: String,
@@ -58,7 +50,6 @@ pub struct ContactExtended {
     pub user: User,
 }
 
-/// Channel member information
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChannelMember {
@@ -66,7 +57,6 @@ pub struct ChannelMember {
     pub role: ChannelMemberRole,
 }
 
-/// Channel member roles
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ChannelMemberRole {
@@ -74,7 +64,6 @@ pub enum ChannelMemberRole {
     Manager,
 }
 
-/// Channel types
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE", tag = "type")]
 pub enum Channel {
@@ -93,7 +82,6 @@ pub enum Channel {
 }
 
 impl Channel {
-    /// Get the channel ID
     pub fn id(&self) -> &str {
         match self {
             Channel::PrivateChannel { id, .. } => id,
@@ -101,7 +89,6 @@ impl Channel {
         }
     }
 
-    /// Get the channel name (for display purposes)
     pub fn name(&self) -> String {
         match self {
             Channel::PrivateChannel { target_id, .. } => {
@@ -112,7 +99,6 @@ impl Channel {
     }
 }
 
-/// Message in a channel
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Message {
@@ -126,19 +112,16 @@ pub struct Message {
 }
 
 impl Message {
-    /// Get the creation time as a DateTime
     pub fn created_at_datetime(&self) -> DateTime<Utc> {
         DateTime::from_timestamp_millis(self.created_at).unwrap_or_default()
     }
 
-    /// Get the edit time as a DateTime (if edited)
     pub fn edited_at_datetime(&self) -> Option<DateTime<Utc>> {
         self.edited_at
             .and_then(|ts| DateTime::from_timestamp_millis(ts))
     }
 }
 
-/// Invite to a channel
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Invite {
@@ -154,7 +137,6 @@ pub struct Invite {
 }
 
 impl Invite {
-    /// Check if the invite has expired
     pub fn is_expired(&self) -> bool {
         if let Some(expires_at) = self.expires_at {
             let now = chrono::Utc::now().timestamp_millis() as u64;
@@ -164,7 +146,6 @@ impl Invite {
         }
     }
 
-    /// Check if the invite has reached max uses
     pub fn is_max_uses_reached(&self) -> bool {
         if let Some(max_uses) = self.max_uses {
             self.uses.len() >= max_uses as usize
@@ -173,13 +154,11 @@ impl Invite {
         }
     }
 
-    /// Check if the invite is still valid
     pub fn is_valid(&self) -> bool {
         !self.is_expired() && !self.is_max_uses_reached()
     }
 }
 
-/// Active call information
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ActiveCall {
     pub id: String,
@@ -188,7 +167,6 @@ pub struct ActiveCall {
     pub started_at: i64,
 }
 
-/// WebRTC authorization token
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct RtcAuthorization {
     pub channel_id: String,

@@ -324,10 +324,7 @@ impl ActiveCall {
         // remove call from redis, store into db
         let mut redis = get_connection().await;
         redis
-            .del::<std::string::String, ActiveCall>(format!(
-                "call:channel:{}",
-                 self.channel_id
-            ))
+            .del::<std::string::String, ActiveCall>(format!("call:channel:{}", self.channel_id))
             .await?;
 
         // disconnect any remaining users present

@@ -1,17 +1,14 @@
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use dashmap::DashMap;
-use futures_util::SinkExt;
 use rapid::socket::{RpcClient, RpcResponder, RpcValue};
-use rmp_serde::Serializer;
 use serde::{Deserialize, Serialize};
-use tokio::time::timeout;
 
 use crate::{
-    authentication::check_authenticated, errors::{Error, Result}, services::database::{channels::Channel, messages::Message, users::User}
+    authentication::check_authenticated,
+    errors::{Error, Result},
+    services::database::{channels::Channel, messages::Message},
 };
-
-use super::{Event, NewMessageEvent, RpcApiEvent};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -71,33 +68,33 @@ pub async fn send_message(
     }
     let message =
         Message::create(data.channel_id.clone(), user.id.clone(), trimmed.to_owned()).await?;
-    for x in clients.clone().iter_mut() {
-        // TODO: Check if user is in channel
-        if let Some(u) = x.get_user::<User>() {
-            println!("Sending message to {}", u.id);
-            let mut value_buffer = Vec::new();
-            let value = RpcApiEvent {
-                event: Event::NewMessage(NewMessageEvent {
-                    message: message.clone(),
-                    channel_id: data.channel_id.clone(),
-                }),
-            };
-            value
-                .serialize(&mut Serializer::new(&mut value_buffer).with_struct_map())
-                .unwrap();
-            println!("Serialized");
-            let mut y = x.socket.clone();
-            timeout(Duration::from_millis(5000), async move {
-                y.send(async_tungstenite::tungstenite::Message::Binary(
-                    value_buffer,
-                ))
-                .await
-            })
-            .await
-            .unwrap_or(Ok(()))
-            .unwrap_or_else(|e| println!("{e:?}"));
-        }
-    }
+    // for x in clients.clone().iter_mut() {
+    //     // TODO: Check if user is in channel
+    //     if let Some(u) = x.get_user::<User>() {
+    //         println!("Sending message to {}", u.id);
+    //         let mut value_buffer = Vec::new();
+    //         let value = RpcApiEvent {
+    //             event: Event::NewMessage(NewMessageEvent {
+    //                 message: message.clone(),
+    //                 channel_id: data.channel_id.clone(),
+    //             }),
+    //         };
+    //         value
+    //             .serialize(&mut Serializer::new(&mut value_buffer).with_struct_map())
+    //             .unwrap();
+    //         println!("Serialized");
+    //         let mut y = x.socket.clone();
+    //         timeout(Duration::from_millis(5000), async move {
+    //             y.send(async_tungstenite::tungstenite::Message::Binary(
+    //                 value_buffer,
+    //             ))
+    //             .await
+    //         })
+    //         .await
+    //         .unwrap_or(Ok(()))
+    //         .unwrap_or_else(|e| println!("{e:?}"));
+    //     }
+    // }
     Ok(RpcValue(SendMessageResponse {
         message_id: message.id,
     }))

@@ -1,5 +1,5 @@
 use once_cell::sync::OnceCell;
-use redis::{aio::MultiplexedConnection, Client};
+use redis::{Client, aio::MultiplexedConnection};
 
 use super::environment::REDIS_URI;
 

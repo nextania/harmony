@@ -10,7 +10,6 @@ rmp-serde = "1.1.2"
 rmpv = { git = "https://github.com/infiniwave/msgpack-rust.git", features = [
     "with-serde",
 ] }
-reqwest = { version = "0.12", features = ["json", "stream"] }
 thiserror = "2.0.12"
 url = "2.5"
 futures-util = "0.3"

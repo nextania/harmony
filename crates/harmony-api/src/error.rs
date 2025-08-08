@@ -8,10 +8,6 @@ pub type Result<T> = std::result::Result<T, HarmonyError>;
 /// Errors that can occur when using the Harmony API client
 #[derive(Error, Debug)]
 pub enum HarmonyError {
-    /// Network-related errors (connection, HTTP, WebSocket)
-    #[error("Network error: {0}")]
-    Network(#[from] reqwest::Error),
-
     /// WebSocket connection errors
     #[error("WebSocket error: {0}")]
     WebSocket(#[from] async_tungstenite::tungstenite::Error),

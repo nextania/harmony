@@ -1,9 +1,6 @@
 #[derive(Debug, Clone, uniffi::Error, thiserror::Error)]
 #[uniffi(flat_error)]
 pub enum HarmonyBindingError {
-    #[error("Network error: {reason}")]
-    Network { reason: String },
-
     #[error("WebSocket error: {reason}")]
     WebSocket { reason: String },
 
@@ -47,9 +44,6 @@ pub enum HarmonyBindingError {
 impl From<harmony_api::HarmonyError> for HarmonyBindingError {
     fn from(error: harmony_api::HarmonyError) -> Self {
         match error {
-            harmony_api::HarmonyError::Network(e) => HarmonyBindingError::Network {
-                reason: e.to_string(),
-            },
             harmony_api::HarmonyError::WebSocket(e) => HarmonyBindingError::WebSocket {
                 reason: e.to_string(),
             },

@@ -1,13 +1,15 @@
 [package]
 name = "harmony-api"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 rmp-serde = "1.1.2"
-rmpv = { git = "https://github.com/infiniwave/msgpack-rust.git", features = ["with-serde"] }
+rmpv = { git = "https://github.com/infiniwave/msgpack-rust.git", features = [
+    "with-serde",
+] }
 reqwest = { version = "0.12", features = ["json", "stream"] }
 thiserror = "1.0"
 url = "2.5"

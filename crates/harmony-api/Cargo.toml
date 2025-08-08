@@ -1,8 +1,22 @@
 [package]
 name = "harmony-api"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[[example]]
+name = "connection_resilience"
+path = "examples/connection_resilience.rs"
 
 [dependencies]
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+rmp-serde = "1.1.2"
+rmpv = { version = "1.3.0", features = ["with-serde"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
+thiserror = "1.0"
+url = "2.5"
+futures-util = "0.3"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
+env_logger = "0.11"

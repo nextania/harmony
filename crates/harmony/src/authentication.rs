@@ -1,7 +1,6 @@
 use std::{any::Any, collections::HashSet, sync::Arc};
 
 use dashmap::DashMap;
-use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use rapid::socket::{RpcClient, RpcResponder};
 use rmpv::{ext::to_value, Value};
 use serde::Deserialize;
@@ -24,22 +23,10 @@ struct UserJwt {
 pub async fn authenticate(token: String) -> rapid::errors::Result<Box<dyn Any + Send + Sync>> {
     // println!("Public key: {:?}", self.public_key);
     println!("Token: {:?}", token);
-    let mut validation = Validation::new(Algorithm::HS256);
-    validation.required_spec_claims = HashSet::new();
-    validation.validate_exp = false;
-    let token_message = decode::<UserJwt>(
-        &token,
-        &DecodingKey::from_secret(JWT_SECRET.as_ref()),
-        &validation,
-    )
-    .map_err(|_| rapid::errors::Error::InvalidToken)?;
-    let time = chrono::Utc::now().timestamp_millis() as u128;
-    if time > token_message.claims.expires_at {
-        return Err(rapid::errors::Error::InvalidToken);
-    }
-    let user = User::get(&token_message.claims.id).await;
+    // TODO: validate the token
+    let user = User::get(&token).await;
     let user = if let Err(Error::NotFound) = user {
-        User::create(token_message.claims.id).await.map_err(|_| rapid::errors::Error::InternalError)?
+        User::create(token).await.map_err(|_| rapid::errors::Error::InternalError)?
     } else {
         user.map_err(|_| rapid::errors::Error::InternalError)?
     };

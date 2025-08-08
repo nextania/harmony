@@ -15,6 +15,7 @@ use rmp_serde::{Deserializer, Serializer};
 use rmpv::{ext::{from_value, to_value}, Value};
 use serde::{Deserialize, Serialize};
 use tokio::{net::{TcpListener, TcpStream}, task, time::timeout};
+use uuid::Uuid;
 use x25519_dalek::{EphemeralSecret, PublicKey};
 
 use crate::{errors::Error, utilities::{generate_id, HEARTBEAT_TIMEOUT}};
@@ -24,7 +25,6 @@ pub struct RpcClient {
     pub id: String,
     pub socket: UnboundedSender<Message>,
     pub user: Option<Arc<Box<dyn Any + Send + Sync>>>,
-    pub request_ids: Vec<String>,
     pub heartbeat_tx: UnboundedSender<()>,
 }
 
@@ -214,7 +214,6 @@ pub enum RpcApiRequest {
         public_key: Vec<u8>,
     },
     Heartbeat {},
-    GetId {},
     Message {
         id: String,
         method: String,
@@ -228,14 +227,9 @@ pub enum RpcApiEvent {
     #[serde(rename_all = "camelCase")]
     Hello {
         public_key: Vec<u8>,
-        request_ids: Vec<String>,
     },
     Identify {},
     Heartbeat {},
-    #[serde(rename_all = "camelCase")]
-    GetId {
-        request_ids: Vec<String>,
-    }
 }
 
 async fn start_client(
@@ -258,15 +252,10 @@ async fn start_client(
         write.close().await.expect("Failed to close");
     });
     let id = generate_id();
-    let mut request_ids = Vec::new();
-    for _ in 0..20 {
-        request_ids.push(generate_id());
-    }
     let secret = EphemeralSecret::random_from_rng(OsRng);
     let public_key = PublicKey::from(&secret);
     let val = RpcApiEvent::Hello {
         public_key: public_key.to_bytes().to_vec(),
-        request_ids: request_ids.clone(),
     };
     s.send(Message::Binary(
         serialize(&val).expect("Failed to serialize"),
@@ -293,7 +282,6 @@ async fn start_client(
         id: id.clone(),
         socket: s,
         user: None,
-        request_ids,
         heartbeat_tx: tx,
     };
     clients.insert(id.clone(), client);
@@ -370,17 +358,11 @@ pub async fn handle_packet(
                 client.heartbeat_tx.send(()).await.unwrap();
                 serialize(&RpcApiEvent::Heartbeat {})
             },
-            RpcApiRequest::GetId {  } => {
-                let mut client = clients.get_mut(user_id).unwrap();
-                let mut new_request_ids = Vec::new();
-                for _ in 0..20 {
-                    let id = generate_id();
-                    client.request_ids.push(id.clone());
-                    new_request_ids.push(id);
-                }
-                serialize(&RpcApiEvent::GetId { request_ids: new_request_ids })
-            },
             RpcApiRequest::Message { id, method, data } => {
+                // check if id is a uuid
+                if Uuid::try_parse(&id).is_err() {
+                    return serialize(&RpcApiError { error: Error::InvalidRequestId });
+                }
                 let method = methods.get(&method);
                 let Some(method) = method else {
                     return serialize(&RpcApiError { error: Error::InvalidMethod });

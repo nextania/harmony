@@ -11,10 +11,10 @@ rmpv = { git = "https://github.com/infiniwave/msgpack-rust.git", features = [
     "with-serde",
 ] }
 reqwest = { version = "0.12", features = ["json", "stream"] }
-thiserror = "1.0"
+thiserror = "2.0.12"
 url = "2.5"
 futures-util = "0.3"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
+async-tungstenite = { version = "0.30.0", features = ["tokio-runtime"] }
 env_logger = "0.11"

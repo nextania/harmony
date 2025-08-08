@@ -14,7 +14,7 @@ pub enum HarmonyError {
 
     /// WebSocket connection errors
     #[error("WebSocket error: {0}")]
-    WebSocket(#[from] tokio_tungstenite::tungstenite::Error),
+    WebSocket(#[from] async_tungstenite::tungstenite::Error),
 
     /// MessagePack serialization/deserialization errors
     #[error("MessagePack serialization error: {0}")]

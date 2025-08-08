@@ -2,13 +2,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures_util::{SinkExt, StreamExt};
+use futures_util::StreamExt;
 use rmpv::Value;
 use serde::{Deserialize, Serialize};
 
-use tokio::sync::{mpsc, Mutex, RwLock};
+use async_tungstenite::{tokio::connect_async, tungstenite::protocol::Message};
+use tokio::sync::{Mutex, RwLock, mpsc};
 use tokio::time::timeout;
-use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
 use url::Url;
 use uuid::Uuid;
 
@@ -89,7 +89,7 @@ struct ClientState {
 pub struct HarmonyClient {
     options: ClientOptions,
     state: Arc<RwLock<ClientState>>,
-    websocket_tx: Arc<Mutex<Option<mpsc::UnboundedSender<WsMessage>>>>,
+    websocket_tx: Arc<Mutex<Option<mpsc::UnboundedSender<Message>>>>,
     reconnect_tx: mpsc::UnboundedSender<()>,
 }
 
@@ -147,7 +147,7 @@ impl HarmonyClient {
 
     async fn mark_disconnected(
         state: Arc<RwLock<ClientState>>,
-        websocket_tx: Arc<Mutex<Option<mpsc::UnboundedSender<WsMessage>>>>,
+        websocket_tx: Arc<Mutex<Option<mpsc::UnboundedSender<Message>>>>,
     ) {
         {
             let mut websocket_tx = websocket_tx.lock().await;
@@ -343,7 +343,7 @@ impl HarmonyClient {
             let websocket_tx = self.websocket_tx.lock().await;
             if let Some(sender) = websocket_tx.as_ref() {
                 sender
-                    .send(WsMessage::Binary(buf))
+                    .send(Message::binary(buf))
                     .map_err(|_| HarmonyError::ConnectionLost)?;
             } else {
                 return Err(HarmonyError::NotConnected);
@@ -409,7 +409,7 @@ impl HarmonyClient {
     pub async fn disconnect(&self) -> Result<()> {
         let websocket_tx = self.websocket_tx.lock().await;
         if let Some(sender) = websocket_tx.as_ref() {
-            let _ = sender.send(WsMessage::Close(None));
+            let _ = sender.send(Message::Close(None));
         }
 
         let mut state = self.state.write().await;
@@ -424,7 +424,7 @@ async fn connect(client: &HarmonyClient, is_reconnect: bool) -> Result<()> {
     let url = Url::parse(&client.options.server_url)
         .map_err(|e| HarmonyError::InvalidInput(format!("Invalid server URL: {}", e)))?;
 
-    let (ws_stream, _) = timeout(client.options.timeout, connect_async(url))
+    let (ws_stream, _) = timeout(client.options.timeout, connect_async(url.to_string()))
         .await
         .map_err(|_| HarmonyError::Internal("Connection timeout".to_string()))?
         .map_err(HarmonyError::WebSocket)?;
@@ -460,7 +460,7 @@ async fn connect(client: &HarmonyClient, is_reconnect: bool) -> Result<()> {
     let ws_tx_clone = ws_tx.clone();
     tokio::spawn(async move {
         while let Some(message) = receiver.recv().await {
-            let mut tx = ws_tx_clone.lock().await;
+            let tx = ws_tx_clone.lock().await;
             if let Err(e) = tx.send(message).await {
                 eprintln!("Failed to send WebSocket message: {}", e);
                 break;
@@ -475,14 +475,17 @@ async fn connect(client: &HarmonyClient, is_reconnect: bool) -> Result<()> {
     tokio::spawn(async move {
         while let Some(message) = ws_rx.next().await {
             match message {
-                Ok(WsMessage::Binary(data)) => {
-                    if let Err(e) =
-                        HarmonyClient::handle_binary_message(state_clone.clone(), &data).await
+                Ok(Message::Binary(data)) => {
+                    if let Err(e) = HarmonyClient::handle_binary_message(
+                        state_clone.clone(),
+                        &data.to_vec().as_slice(),
+                    )
+                    .await
                     {
                         eprintln!("Failed to handle message: {}", e);
                     }
                 }
-                Ok(WsMessage::Close(_)) | Err(_) => {
+                Ok(Message::Close(_)) | Err(_) => {
                     HarmonyClient::mark_disconnected(
                         state_clone.clone(),
                         websocket_tx_clone.clone(),
@@ -518,7 +521,7 @@ async fn authenticate(client: &HarmonyClient) -> Result<()> {
     let websocket_tx = client.websocket_tx.lock().await;
     if let Some(sender) = websocket_tx.as_ref() {
         sender
-            .send(WsMessage::Binary(buf))
+            .send(Message::binary(buf))
             .map_err(|_| HarmonyError::NotConnected)?;
     } else {
         return Err(HarmonyError::NotConnected);

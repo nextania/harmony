@@ -1,24 +1,32 @@
 use std::{any::Any, future::Future, pin::Pin, sync::Arc};
 
-// use async_std::{
-//     channel::{unbounded, Sender},
-//     future,
-//     net::{TcpListener, TcpStream},
-//     task::spawn,
-// };
 use async_tungstenite::{accept_async, tokio::TokioAdapter, tungstenite::Message};
 use dashmap::DashMap;
-use futures::{channel::mpsc::{unbounded, UnboundedSender}, future::BoxFuture, SinkExt, StreamExt};
+use futures::{
+    SinkExt, StreamExt,
+    channel::mpsc::{UnboundedSender, unbounded},
+    future::BoxFuture,
+};
 use log::{debug, info};
 use rand::rngs::OsRng;
 use rmp_serde::{Deserializer, Serializer};
-use rmpv::{ext::{from_value, to_value}, Value};
+use rmpv::{
+    Value,
+    ext::{from_value, to_value},
+};
 use serde::{Deserialize, Serialize};
-use tokio::{net::{TcpListener, TcpStream}, task, time::timeout};
+use tokio::{
+    net::{TcpListener, TcpStream},
+    task,
+    time::timeout,
+};
 use uuid::Uuid;
 use x25519_dalek::{EphemeralSecret, PublicKey};
 
-use crate::{errors::Error, utilities::{generate_id, HEARTBEAT_TIMEOUT}};
+use crate::{
+    errors::Error,
+    utilities::{HEARTBEAT_TIMEOUT, generate_id},
+};
 
 #[derive(Clone)]
 pub struct RpcClient {
@@ -29,12 +37,9 @@ pub struct RpcClient {
 }
 
 impl RpcClient {
-    pub async fn send(&mut self, data: Vec<u8>) {                
-        self
-            .socket
-            .send(Message::Binary(
-                data,
-            ))
+    pub async fn send(&mut self, data: Vec<u8>) {
+        self.socket
+            .send(Message::Binary(data.into()))
             .await
             .expect("Failed to send message");
     }
@@ -87,14 +92,19 @@ impl<T: for<'a> Deserialize<'a>> RpcRequest for RpcValue<T> {
 }
 
 pub type AuthenticateFn = Box<dyn CloneableAuthenticateFn>;
-pub trait CloneableAuthenticateFn: Fn(String) -> BoxFuture<'static, Result<Box<dyn Any + Send + Sync>, Error>> + Send + Sync {
+pub trait CloneableAuthenticateFn:
+    Fn(String) -> BoxFuture<'static, Result<Box<dyn Any + Send + Sync>, Error>> + Send + Sync
+{
     fn clone_box<'a>(&self) -> Box<dyn 'a + CloneableAuthenticateFn>
     where
         Self: 'a;
 }
 impl<F> CloneableAuthenticateFn for F
 where
-    F: Fn(String) -> BoxFuture<'static, Result<Box<dyn Any + Send + Sync>, Error>> + Clone + Send + Sync,
+    F: Fn(String) -> BoxFuture<'static, Result<Box<dyn Any + Send + Sync>, Error>>
+        + Clone
+        + Send
+        + Sync,
 {
     fn clone_box<'a>(&self) -> Box<dyn 'a + CloneableAuthenticateFn>
     where
@@ -109,17 +119,19 @@ impl<'a> Clone for Box<dyn 'a + CloneableAuthenticateFn> {
     }
 }
 
-
-
-
-pub trait MethodFn: Fn(Arc<DashMap<String, RpcClient>>, String, Value) -> BoxFuture<'static, Value> + Send + Sync {
+pub trait MethodFn:
+    Fn(Arc<DashMap<String, RpcClient>>, String, Value) -> BoxFuture<'static, Value> + Send + Sync
+{
     fn clone_box<'a>(&self) -> Box<dyn 'a + MethodFn>
     where
         Self: 'a;
 }
 impl<F> MethodFn for F
 where
-    F: Fn(Arc<DashMap<String, RpcClient>>, String, Value) -> BoxFuture<'static, Value> + Clone + Send + Sync,
+    F: Fn(Arc<DashMap<String, RpcClient>>, String, Value) -> BoxFuture<'static, Value>
+        + Clone
+        + Send
+        + Sync,
 {
     fn clone_box<'a>(&self) -> Box<dyn 'a + MethodFn>
     where
@@ -134,12 +146,15 @@ impl<'a> Clone for Box<dyn 'a + MethodFn> {
     }
 }
 
-
-
 pub trait Handler<G>: Clone + 'static {
     type Output;
     type Future: Future<Output = Self::Output>;
-    fn call (&self, clients: Arc<DashMap<String, RpcClient>>, name: String, request: G) -> Self::Future;
+    fn call(
+        &self,
+        clients: Arc<DashMap<String, RpcClient>>,
+        name: String,
+        request: G,
+    ) -> Self::Future;
 }
 
 impl<F, G, Fut> Handler<G> for F
@@ -149,11 +164,15 @@ where
 {
     type Output = Fut::Output;
     type Future = Fut;
-    fn call(&self, clients: Arc<DashMap<String, RpcClient>>, name: String, request: G) -> Self::Future {
+    fn call(
+        &self,
+        clients: Arc<DashMap<String, RpcClient>>,
+        name: String,
+        request: G,
+    ) -> Self::Future {
         self(clients, name, request)
     }
 }
-
 
 pub struct RpcServer {
     clients: Arc<DashMap<String, RpcClient>>,
@@ -170,31 +189,34 @@ impl RpcServer {
         }
     }
 
-    pub fn register<F, G>(self, name: &str, method: F) -> Self where 
+    pub fn register<F, G>(self, name: &str, method: F) -> Self
+    where
         F: Handler<G> + Sync + Send,
         G: RpcRequest + Send,
         F::Output: RpcResponder + 'static,
         F::Future: Send + 'static,
     {
         info!("Registering method: {}", name);
-        let x = Box::new(move |clients: Arc<DashMap<String, RpcClient>>, id: String, val: Value| {
-            let method = method.clone();
-            let n: Pin<Box<dyn Future<Output = Value> + Send>> = Box::pin(async move {
-                let g = G::from_value(val);
-                let g = match g {
-                    Ok(g) => g,
-                    Err(e) => return RpcValue(e).into_value(),
-                };
-                let res = method.call(clients, id, g).await;
-                res.into_value()
-            });
-            n
-        });
+        let x = Box::new(
+            move |clients: Arc<DashMap<String, RpcClient>>, id: String, val: Value| {
+                let method = method.clone();
+                let n: Pin<Box<dyn Future<Output = Value> + Send>> = Box::pin(async move {
+                    let g = G::from_value(val);
+                    let g = match g {
+                        Ok(g) => g,
+                        Err(e) => return RpcValue(e).into_value(),
+                    };
+                    let res = method.call(clients, id, g).await;
+                    res.into_value()
+                });
+                n
+            },
+        );
         self.methods.insert(name.to_string(), x);
         self
     }
 
-    pub async fn start(&self, address: String) {    
+    pub async fn start(&self, address: String) {
         let server = TcpListener::bind(address).await.unwrap();
         while let Ok((stream, _)) = server.accept().await {
             let clients = self.clients.clone();
@@ -207,7 +229,7 @@ impl RpcServer {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum RpcApiRequest {    
+pub enum RpcApiRequest {
     #[serde(rename_all = "camelCase")]
     Identify {
         token: String,
@@ -217,8 +239,8 @@ pub enum RpcApiRequest {
     Message {
         id: String,
         method: String,
-        data: Value, 
-    }
+        data: Value,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -243,13 +265,13 @@ async fn start_client(
     let Ok(ws_stream) = ws_stream else {
         return;
     };
-    let (mut write, mut read) = ws_stream.split();
+    let (write, mut read) = ws_stream.split();
     let (mut s, mut r) = unbounded::<Message>();
     task::spawn(async move {
         while let Some(msg) = r.next().await {
             write.send(msg).await.expect("Failed to send message");
         }
-        write.close().await.expect("Failed to close");
+        write.close(None).await.expect("Failed to close");
     });
     let id = generate_id();
     let secret = EphemeralSecret::random_from_rng(OsRng);
@@ -258,7 +280,7 @@ async fn start_client(
         public_key: public_key.to_bytes().to_vec(),
     };
     s.send(Message::Binary(
-        serialize(&val).expect("Failed to serialize"),
+        serialize(&val).expect("Failed to serialize").into(),
     ))
     .await
     .expect("Failed to send message");
@@ -292,9 +314,18 @@ async fn start_client(
         match data {
             Message::Binary(bin) => {
                 debug!("Received binary data");
-                let response = handle_packet(bin, &clients, &id, authenticate.clone(), methods.clone()).await;
+                let response = handle_packet(
+                    bin.to_vec(),
+                    &clients,
+                    &id,
+                    authenticate.clone(),
+                    methods.clone(),
+                )
+                .await;
                 let mut client = clients.get_mut(&id.clone()).unwrap();
-                client.send(response.expect("Failed to serialize")).await;
+                client
+                    .send(response.expect("Failed to serialize").into())
+                    .await;
             }
             Message::Close(_) => {
                 debug!("Received close");
@@ -344,38 +375,46 @@ pub async fn handle_packet(
         debug!("Received: {:?}", r);
         match r {
             // TODO: fix this to return Event instead
-            RpcApiRequest::Identify { token, public_key: _ } => {
-                authenticate(token.clone()).await.map(|user| {
+            RpcApiRequest::Identify {
+                token,
+                public_key: _,
+            } => authenticate(token.clone())
+                .await
+                .map(|user| {
                     let mut client = clients.get_mut(user_id).unwrap();
                     client.user = Some(Arc::new(user));
                     return serialize(&RpcApiEvent::Identify {});
-                }).unwrap_or_else(|e| {
-                    serialize(&RpcApiError { error: e.into() })
                 })
-            },
-            RpcApiRequest::Heartbeat {  } => {
+                .unwrap_or_else(|e| serialize(&RpcApiError { error: e.into() })),
+            RpcApiRequest::Heartbeat {} => {
                 let mut client = clients.get_mut(user_id).unwrap();
                 client.heartbeat_tx.send(()).await.unwrap();
                 serialize(&RpcApiEvent::Heartbeat {})
-            },
+            }
             RpcApiRequest::Message { id, method, data } => {
                 // check if id is a uuid
                 if Uuid::try_parse(&id).is_err() {
-                    return serialize(&RpcApiError { error: Error::InvalidRequestId });
+                    return serialize(&RpcApiError {
+                        error: Error::InvalidRequestId,
+                    });
                 }
                 let method = methods.get(&method);
                 let Some(method) = method else {
-                    return serialize(&RpcApiError { error: Error::InvalidMethod });
+                    return serialize(&RpcApiError {
+                        error: Error::InvalidMethod,
+                    });
                 };
                 let result = method(clients.clone(), user_id.clone(), data).await;
                 serialize(&RpcApiResponse {
                     id: Some(id),
                     response: Some(result),
                 })
-            },
+            }
         }
     } else {
-        serialize(&RpcApiError { error: Error::InvalidMethod })
+        serialize(&RpcApiError {
+            error: Error::InvalidMethod,
+        })
     }
 }
 
@@ -390,15 +429,22 @@ pub fn deserialize<T: for<'a> Deserialize<'a>>(buf: &[u8]) -> Result<T, rmp_serd
     Deserialize::deserialize(&mut deserializer)
 }
 
-pub fn emit_all<T:Serialize+Send+Clone + 'static>(clients: &DashMap<String, RpcClient>, data: T) {
+pub fn emit_all<T: Serialize + Send + Clone + 'static>(
+    clients: &DashMap<String, RpcClient>,
+    data: T,
+) {
     for client in clients.iter() {
         emit_one(client.value(), data.clone());
     }
 }
-pub fn emit_one<T:Serialize+Send+Clone + 'static>(client: &RpcClient, data: T) {
+pub fn emit_one<T: Serialize + Send + Clone + 'static>(client: &RpcClient, data: T) {
     let mut socket = client.socket.clone();
     let data = data.clone();
     task::spawn(async move {
-        socket.send(Message::Binary(serialize(&data).expect("Failed to serialize"))).await
+        socket
+            .send(Message::Binary(
+                serialize(&data).expect("Failed to serialize").into(),
+            ))
+            .await
     });
 }

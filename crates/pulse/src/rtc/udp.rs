@@ -1,9 +1,9 @@
 use std::{collections::VecDeque, io::ErrorKind, sync::Arc, time::Instant};
 
 use str0m::{
+    Input,
     media::{KeyframeRequest, MediaData, Mid},
     net::{Protocol, Receive},
-    Input,
 };
 use tokio::net::UdpSocket;
 

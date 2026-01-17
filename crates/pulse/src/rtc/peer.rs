@@ -5,22 +5,26 @@ use std::{
     time::{Duration, Instant},
 };
 
-use futures::{channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender}, SinkExt, StreamExt};
+use futures::{
+    SinkExt, StreamExt,
+    channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded},
+};
 use str0m::{
+    Candidate, Event, IceConnectionState, Input, Output, Rtc,
     change::{SdpAnswer, SdpOffer, SdpPendingOffer},
     channel::{ChannelData, ChannelId},
     media::{Direction, KeyframeRequest, KeyframeRequestKind, MediaData, MediaKind, Mid, Rid},
-    Candidate, Event, IceConnectionState, Input, Output, Rtc,
 };
 use tokio::{net::UdpSocket, task, time::timeout};
 
 use crate::{
-    errors::Error, socket::events::{MediaType, RemoteTrack}
+    errors::Error,
+    socket::events::{MediaType, RemoteTrack},
 };
 
 use super::{
     call::{Call, CallEvent},
-    udp::{poll_until_timeout, read_socket_input, Propagated},
+    udp::{Propagated, poll_until_timeout, read_socket_input},
 };
 
 #[derive(Debug)]
@@ -206,12 +210,11 @@ impl ClientApi {
                                 }
                                 Propagated::Noop | Propagated::Timeout(_) => {}
                             }
-                        },
+                        }
                         CallEvent::CreateTrack(_) => todo!(),
                         CallEvent::RemoveTrack { removed_tracks } => {
                             warn!("RemoveTrack event not implemented: {:?}", removed_tracks);
-                        },
-                        // CallEvent
+                        } // CallEvent
                     }
                 }
 

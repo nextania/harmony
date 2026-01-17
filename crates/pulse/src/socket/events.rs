@@ -33,7 +33,6 @@ pub struct RemoteTrack {
 //     pub description: SessionDescription,
 // }
 
-
 // impl std::fmt::Display for MediaType {
 //     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 //         match self {

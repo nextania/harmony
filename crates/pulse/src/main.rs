@@ -4,7 +4,7 @@ extern crate log;
 use std::env;
 
 use pretty_env_logger::formatted_builder;
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 pub mod environment;
 pub mod errors;

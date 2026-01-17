@@ -1,7 +1,11 @@
 use std::sync::Arc;
 
 use dashmap::DashMap;
-use futures::{channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender}, lock::Mutex, SinkExt};
+use futures::{
+    SinkExt,
+    channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded},
+    lock::Mutex,
+};
 use lazy_static::lazy_static;
 
 use crate::socket::events::{MediaType, RemoteTrack};
@@ -105,7 +109,7 @@ impl Call {
         // }
 
         // TODO: emit event to redis
-        
+
         if self.clients.is_empty() {
             self.destroy();
         }

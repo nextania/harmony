@@ -3,7 +3,11 @@ use pulse_api::NodeEvent;
 use tokio::net::UdpSocket;
 use ulid::Ulid;
 
-use crate::{environment, errors::Result, rtc::{call::Call, peer::ClientApi}};
+use crate::{
+    environment,
+    errors::Result,
+    rtc::{call::Call, peer::ClientApi},
+};
 
 use super::client::CallUser;
 
@@ -20,7 +24,11 @@ pub struct UserInformation {
     pub capabilities: UserCapabilities,
 }
 
-pub async fn create_new_user(user: UserInformation, call_id: String, recv: UnboundedReceiver<NodeEvent>) -> Result<ClientApi> {
+pub async fn create_new_user(
+    user: UserInformation,
+    call_id: String,
+    recv: UnboundedReceiver<NodeEvent>,
+) -> Result<ClientApi> {
     info!("User {} joined {call_id}", user.id);
     let call = Call::get(&call_id);
 

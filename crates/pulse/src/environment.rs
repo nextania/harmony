@@ -13,5 +13,8 @@ lazy_static! {
     pub static ref PUBLIC_ADDRESS: String =
         env::var("PUBLIC_ADDRESS").unwrap_or("209.145.60.11".to_string());
     pub static ref REDIS_URI: String = env::var("REDIS_URI").expect("REDIS_URI must be set");
-    pub static ref REGION: Region = env::var("REGION").expect("REGION must be set").parse().expect("Invalid region");
+    pub static ref REGION: Region = env::var("REGION")
+        .expect("REGION must be set")
+        .parse()
+        .expect("Invalid region");
 }

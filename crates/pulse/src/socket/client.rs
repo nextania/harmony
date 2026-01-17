@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
-use crate::{
-    environment, errors::Result, rtc::peer::ClientApi
-};
+use crate::{environment, errors::Result, rtc::peer::ClientApi};
 use futures::channel::mpsc::UnboundedReceiver;
 use pulse_api::NodeEvent;
 use tokio::net::UdpSocket;
@@ -10,9 +8,7 @@ use ulid::Ulid;
 
 use crate::rtc::call::Call;
 
-use super::
-    server::UserInformation
-;
+use super::server::UserInformation;
 
 #[derive(Debug)]
 pub struct CallUser {

@@ -1,4 +1,4 @@
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{Rng, SeedableRng, rngs::StdRng};
 
 pub fn random_number(size: usize) -> Vec<u8> {
     let mut rng = StdRng::from_entropy();

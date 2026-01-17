@@ -1,5 +1,3 @@
-
-
 use std::str::FromStr;
 
 use redis::FromRedisValue;
@@ -26,13 +24,13 @@ pub struct NodeEvent {
 #[serde(tag = "type")]
 pub enum NodeEventKind {
     Description(NodeDescription), // on node connect
-    Ping, // on node ping
-    Disconnect, // on node disconnect
-    Query, // on server connect
+    Ping,                         // on node ping
+    Disconnect,                   // on node disconnect
+    Query,                        // on server connect
     UserConnect {
         session_id: String,
         call_id: String,
-        sdp: SessionDescription
+        sdp: SessionDescription,
     }, // server -> node on user connect
     UserCreate {
         session_id: String,
@@ -40,29 +38,28 @@ pub enum NodeEventKind {
         sdp: SessionDescription,
     }, // node -> server on new user
     StartProduce {
-        track: String
+        track: String,
     }, // server -> node on user start produce
     StopProduce {
-        track: String
-
-    },// server -> node on user start produce
+        track: String,
+    }, // server -> node on user start produce
     StartConsume {
-        track: String
+        track: String,
     }, // server -> node on user start consume
     StopConsume {
-        track: String
+        track: String,
     }, // server -> node on user stop consume
     UserDisconnect {
-        id: String
+        id: String,
     }, // server -> node on user disconnect
     UserDelete {
-        id: String
+        id: String,
     }, // node -> server on user delete
     TrackAvailable {
-        id: String
+        id: String,
     },
     TrackUnavailable {
-        id: String
+        id: String,
     },
 }
 
@@ -129,7 +126,6 @@ impl FromStr for Region {
         }
     }
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "sdp")]

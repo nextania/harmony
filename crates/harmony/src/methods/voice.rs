@@ -8,7 +8,7 @@ use crate::authentication::check_authenticated;
 use crate::errors::{Error, Result};
 use crate::services::database::channels::Channel;
 use crate::services::database::users::User;
-use crate::services::webrtc::ActiveCall;
+use crate::services::voice::ActiveCall;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct JoinCallMethod {

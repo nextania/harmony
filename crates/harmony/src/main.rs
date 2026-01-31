@@ -13,7 +13,7 @@ use services::redis;
 // use services::webrtc;
 
 use log::info;
-use services::webrtc;
+use services::voice;
 
 use crate::services::environment::LISTEN_ADDRESS;
 
@@ -31,7 +31,7 @@ async fn main() {
 
     redis::connect().await;
     info!("Connected to Redis");
-    webrtc::spawn_check_available_nodes();
+    voice::spawn_check_available_nodes();
 
     let listen_address = LISTEN_ADDRESS.to_owned();
     info!("Starting server at {listen_address}");
@@ -44,10 +44,10 @@ async fn main() {
         .register("GET_INVITES", methods::invites::get_invites)
         .register("GET_MESSAGES", methods::messages::get_messages)
         .register("SEND_MESSAGE", methods::messages::send_message)
-        .register("JOIN_CALL", methods::webrtc::join_call)
-        .register("LEAVE_CALL", methods::webrtc::leave_call)
-        .register("START_CALL", methods::webrtc::start_call)
-        .register("END_CALL", methods::webrtc::end_call)
+        .register("JOIN_CALL", methods::voice::join_call)
+        .register("LEAVE_CALL", methods::voice::leave_call)
+        .register("START_CALL", methods::voice::start_call)
+        .register("END_CALL", methods::voice::end_call)
         .start(listen_address)
         .await;
 }

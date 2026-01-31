@@ -3,5 +3,5 @@ pub mod encryption;
 pub mod environment;
 pub mod permissions;
 pub mod redis;
-pub mod webrtc;
+pub mod voice;
 // pub mod logger;

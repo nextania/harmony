@@ -10,7 +10,7 @@ pub mod channels;
 pub mod invites;
 pub mod messages;
 pub mod users;
-pub mod webrtc;
+pub mod voice;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", content = "data", rename_all = "SCREAMING_SNAKE_CASE")]

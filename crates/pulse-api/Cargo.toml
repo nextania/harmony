@@ -9,3 +9,4 @@ edition = "2024"
 redis = "0.32.4"
 serde = { version = "1.0.144", features = ["derive"] }
 rmp-serde = "1.1.2"
+rkyv = "0.8.14"

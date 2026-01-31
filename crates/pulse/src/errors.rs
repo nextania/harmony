@@ -1,14 +1,12 @@
 use std::fmt;
 
 use futures::channel::mpsc::SendError;
-use str0m::error::SdpError;
 
 #[derive(Debug)]
 pub enum Error {
     InvalidCall,
     FailedToAuthenticate,
     AlreadyConnected,
-    RtcError,
     SocketError,
     SerializeError,
 }
@@ -21,17 +19,9 @@ impl fmt::Display for Error {
             Error::InvalidCall => write!(f, "Invalid call"),
             Error::FailedToAuthenticate => write!(f, "Failed to authenticate"),
             Error::AlreadyConnected => write!(f, "Already connected"),
-            Error::RtcError => write!(f, "RTC error"),
             Error::SocketError => write!(f, "Socket error"),
             Error::SerializeError => write!(f, "Serialize error"),
         }
-    }
-}
-
-impl From<async_tungstenite::tungstenite::Error> for Error {
-    fn from(e: async_tungstenite::tungstenite::Error) -> Self {
-        error!("{}", e);
-        Error::SocketError
     }
 }
 
@@ -56,12 +46,6 @@ impl From<tokio::io::Error> for Error {
     }
 }
 
-impl From<SdpError> for Error {
-    fn from(e: SdpError) -> Self {
-        error!("{}", e);
-        Error::RtcError
-    }
-}
 
 impl From<SendError> for Error {
     fn from(e: SendError) -> Self {

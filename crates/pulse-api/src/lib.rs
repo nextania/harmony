@@ -3,6 +3,7 @@ use std::str::FromStr;
 use redis::FromRedisValue;
 
 use redis::ToRedisArgs;
+use rkyv::Archive;
 use rmp_serde::Deserializer;
 use rmp_serde::Serializer;
 use serde::Deserialize;
@@ -23,44 +24,31 @@ pub struct NodeEvent {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type")]
 pub enum NodeEventKind {
-    Description(NodeDescription), // on node connect
-    Ping,                         // on node ping
-    Disconnect,                   // on node disconnect
-    Query,                        // on server connect
+    Description(NodeDescription), // when a node becomes available
+    Ping,                         // periodic ping from node
+    Disconnect,                   // when a node goes offline
+    Query,                        // when the main server requests all available nodes
     UserConnect {
-        session_id: String,
-        call_id: String,
-        sdp: SessionDescription,
-    }, // server -> node on user connect
-    UserCreate {
-        session_id: String,
-        call_id: String,
-        sdp: SessionDescription,
-    }, // node -> server on new user
-    StartProduce {
-        track: String,
-    }, // server -> node on user start produce
-    StopProduce {
-        track: String,
-    }, // server -> node on user start produce
-    StartConsume {
-        track: String,
-    }, // server -> node on user start consume
-    StopConsume {
-        track: String,
-    }, // server -> node on user stop consume
+        // IMPORTANT: this is the session id, not the user id
+        // one user may connect several times to one call
+        id: String,
+    }, // Notify the main server that a user has connected
     UserDisconnect {
         id: String,
-    }, // server -> node on user disconnect
-    UserDelete {
+    }, // Notify the main server that a user has disconnected (or be notified by the main server)
+    UserStateChange {
         id: String,
-    }, // node -> server on user delete
-    TrackAvailable {
+        muted: bool,
+        deafened: bool,
+    }, // The main server handles state and notifies the node of a user mute/deafen state change
+    UserMoved {
         id: String,
-    },
-    TrackUnavailable {
-        id: String,
-    },
+        target_server: String,
+        target_token: String,
+    }, // The main server notifies the node that a user has moved regions
+    CallEnded {
+        call_id: String,
+    }, // The main server notifies the node that a call has ended, disconnecting all users in that call
 }
 
 impl ToRedisArgs for NodeEvent {
@@ -127,22 +115,79 @@ impl FromStr for Region {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", content = "sdp")]
-pub enum SessionDescription {
-    #[serde(rename = "offer")]
-    Offer(String),
-    #[serde(rename = "answer")]
-    Answer(String),
+#[derive(Archive, Clone, Debug, rkyv::Deserialize, rkyv::Serialize)]
+pub enum MediaHint {
+    Audio,
+    Video,
+    ScreenAudio,
+    ScreenVideo,
 }
 
-impl ToString for SessionDescription {
-    fn to_string(&self) -> String {
-        match self {
-            SessionDescription::Offer(sdp) => sdp.clone(),
-            SessionDescription::Answer(sdp) => sdp.clone(),
-        }
-    }
+#[derive(Archive, Clone, Debug, rkyv::Deserialize, rkyv::Serialize)]
+pub enum WtMessageC2S {
+    Connect {
+        session_token: String,
+    }, 
+    Disconnect {},
+    StartProduce {
+        id: String,
+        media_hint: MediaHint,
+    }, 
+    StopProduce {
+        id: String,
+    }, 
+    StartConsume {
+        id: String,
+    }, 
+    StopConsume {
+        id: String,
+    }, 
+    Heartbeat {},
+}
+
+#[derive(Archive, Clone, Debug, rkyv::Deserialize, rkyv::Serialize)]
+pub struct AvailableTrack {
+    pub id: String,
+    pub media_hint: MediaHint,
+    // indicates which session (and therefore user) this track belongs to
+    pub session_id: String,
+}
+
+#[derive(Archive, Clone, Debug, rkyv::Deserialize, rkyv::Serialize)]
+pub enum WtMessageS2C {
+    Connected {
+        id: String,
+        available_tracks: Vec<AvailableTrack>,
+    },
+    Disconnected {
+        reconnect: Option<(String, String)>, // (new_server_address, new_token)
+    },
+    ProduceStarted {
+        id: String,
+    },
+    ProduceStopped {
+        id: String,
+    },
+    ConsumeStarted {
+        id: String,
+    },
+    ConsumeStopped {
+        id: String,
+    },
+    TrackAvailable {
+        track: AvailableTrack,
+    },
+    TrackUnavailable {
+        id: String,
+    },
+    Heartbeat {},
+}
+
+#[derive(Archive, Clone, Debug, rkyv::Deserialize, rkyv::Serialize)]
+pub struct WtTrackData {
+    // the track id
+    pub id: String,
+    pub data: Vec<u8>,
 }
 
 pub fn serialize<T: Serialize>(value: &T) -> Result<Vec<u8>, rmp_serde::encode::Error> {

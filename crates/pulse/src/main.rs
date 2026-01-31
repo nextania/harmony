@@ -1,36 +1,27 @@
 #[macro_use]
 extern crate log;
 
-use std::env;
-
-use pretty_env_logger::formatted_builder;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 pub mod environment;
 pub mod errors;
 pub mod redis;
-pub mod rtc;
-pub mod socket;
+pub mod wt;
 
 use crate::errors::Result;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
-    // let mut builder = formatted_builder();
-    // builder.parse_filters("debug");
-    // builder.try_init().unwrap();
-    unsafe {
-        if env::var("RUST_LOG").is_err() {
-            env::set_var("RUST_LOG", "pulse=debug,str0m=debug");
-        }
-    }
+    
     tracing_subscriber::registry()
         .with(fmt::layer())
         .with(EnvFilter::from_default_env())
         .init();
 
     redis::connect().await;
-    redis::listen().await;
+    info!("Connected to Redis");
+    
+    wt::listen().await;
     Ok(())
 }

@@ -45,3 +45,5 @@ typetag = "0.2.18"
 rmpv = { git = "https://github.com/infiniwave/msgpack-rust.git" }
 pulse-api = { path = "../pulse-api" }
 async-notify = "0.3.0"
+reqwest = { version = "0.13.1", features = ["json"] }
+serde_json = "1.0.149"

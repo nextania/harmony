@@ -35,7 +35,6 @@ pub async fn create_call_token(
 ) -> impl RpcResponder {
     check_authenticated(clients, &id)?; // TODO: check rate limit, permissions req'd
     let data = data.into_inner();
-    // Check if the user is in the channel
     let user = User::get(&id).await?;
     let Some(mut call) = ActiveCall::get_in_channel(&data.id).await? else {
         return Err(Error::NotFound);
@@ -45,6 +44,7 @@ pub async fn create_call_token(
         return Err(Error::NotFound);
     }
     let token = call.get_token(&id).await?;
+    // TODO: return all users in the call with their states
     Ok(RpcValue(CreateCallTokenResponse { token }))
 }
 

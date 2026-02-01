@@ -99,6 +99,7 @@ pub fn spawn_voice_events() {
                     event: NodeEventKind::UserDisconnect { id: session_id, call_id },
                     ..
                 } => {
+                    // TODO: emit event to all clients in the call
                     if let Ok(Some(mut call)) = ActiveCall::get(&call_id).await {
                         if let Err(e) = call.leave_user(&session_id).await {
                             log::error!("Failed to remove user {} from call {}: {:?}", session_id, call_id, e);
@@ -111,15 +112,22 @@ pub fn spawn_voice_events() {
                     event: NodeEventKind::UserConnect { id: session_id, call_id },
                     ..
                 } => {
+                    // TODO: emit event to all clients in the call 
                     info!("User {} connected to call {}", session_id, call_id);
-                    if let Ok(Some(mut call)) = ActiveCall::get(&call_id).await {
-                        call.empty_since = None;
-                        if let Err(e) = call.update().await {
-                            log::error!("Failed to update call {} in redis: {:?}", call_id, e);
-                        }
-                        let member_ids: Vec<String> = call.members.iter().map(|(user_id, _)| user_id.clone()).collect();
-                        if let Err(e) = Call::update(&call_id, member_ids).await {
-                            log::error!("Failed to update call {} in database: {:?}", call_id, e);
+                    if let Ok(call) = ActiveCall::get(&call_id).await {
+                        if let Some(mut call) = call {
+                            call.empty_since = None;
+                            if let Err(e) = call.update().await {
+                                log::error!("Failed to update call {} in redis: {:?}", call_id, e);
+                            }
+                            let member_ids: Vec<String> = call.members.iter().map(|(user_id, _)| user_id.clone()).collect();
+                            if let Err(e) = Call::update(&call_id, member_ids).await {
+                                log::error!("Failed to update call {} in database: {:?}", call_id, e);
+                            }
+                        } else {
+                            // TODO: this is most likely due to the call expiring while user is connecting
+                            // this should RESTORE the call into memory
+                            log::warn!("Call {} not found when user {} tried to connect", call_id, session_id);
                         }
                     }
                 }
@@ -155,17 +163,17 @@ pub struct ActiveCall {
     pub empty_since: Option<i64>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct CallSession {
-    id: String,
-    user_id: String,
-    call_id: String,
-    muted: bool,
-    deafened: bool,
-    speaking: bool,
-    video: bool,
-    screenshare: bool,
-}
+// #[derive(Clone, Debug, Deserialize, Serialize)]
+// pub struct CallSession {
+//     id: String,
+//     user_id: String,
+//     call_id: String,
+//     muted: bool,
+//     deafened: bool,
+//     speaking: bool,
+//     video: bool,
+//     screenshare: bool,
+// }
 
 impl FromRedisValue for ActiveCall {
     fn from_redis_value(v: &redis::Value) -> redis::RedisResult<Self> {
@@ -232,9 +240,16 @@ impl ActiveCall {
             empty_since: Some(time),
         };
         redis
-            .set::<std::string::String, ActiveCall, ()>(
-                format!("call:channel:{}", channel),
+            .set::<String, ActiveCall, ()>(
+                format!("call:{}", call.id),
                 call.clone(),
+            )
+            .await
+            .unwrap();
+        redis
+            .set::<String, String, ()>(
+                format!("call:channel:{}", channel),
+                call.id.clone(),
             )
             .await
             .unwrap();
@@ -248,7 +263,8 @@ impl ActiveCall {
         };
         stored_call.create().await?;
         let call_id = call.id.clone();
-        
+        // FIXME: this links a task to a specific server instance
+        // if that instance goes down, the call will never be cleaned up
         task::spawn(async move {
             const EMPTY_TIMEOUT_MS: i64 = 5 * 60 * 1000; // 5 minutes
             let mut last_empty = time;
@@ -330,6 +346,7 @@ impl ActiveCall {
         let token = generate_token();
         let mut redis = get_connection().await;
         redis
+            // TODO: set ttl of 1min
             .set::<String, SessionData, ()>(
                 format!("session:{}", token),
                 SessionData {

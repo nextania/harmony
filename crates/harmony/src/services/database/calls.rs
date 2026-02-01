@@ -8,10 +8,8 @@ pub struct Call {
     pub id: String,
     pub name: Option<String>,
     pub channel_id: String,
-    // TODO: ALL members who ever joined the call at any point
     pub joined_members: Vec<String>,
-    // also stores last ping
-    pub ended_at: i64, // can calculate duration
+    pub ended_at: i64, // last check: this will be useful if the server goes down
     pub initiator: String, // user id of who started the call
 }
 

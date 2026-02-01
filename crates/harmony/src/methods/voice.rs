@@ -19,7 +19,7 @@ pub struct CreateCallTokenMethod {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct CreateCallTokenResponse {
-    session_token: String,
+    token: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -44,15 +44,14 @@ pub async fn create_call_token(
     if !user.in_channel(&channel).await? {
         return Err(Error::NotFound);
     }
-    call.join_user(id.clone()).await?;
-    let sdp = call.get_token(&id, &data.sdp).await?;
-    Ok(RpcValue(CreateCallTokenResponse { sdp }))
-    // Err::<RpcValue<CreateCallTokenResponse>, _>(Error::NoVoiceNodesAvailable)
+    let token = call.get_token(&id).await?;
+    Ok(RpcValue(CreateCallTokenResponse { token }))
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct StartCallMethod {
     id: String,
+    preferred_region: Option<pulse_api::Region>,
 }
 
 pub async fn start_call(
@@ -63,14 +62,14 @@ pub async fn start_call(
     check_authenticated(clients, &id)?;
     let data = data.into_inner();
     let user = User::get(&id).await?;
-    let Some(call) = ActiveCall::get_in_channel(&data.id).await? else {
-        return Err(Error::NotFound);
+    if ActiveCall::get_in_channel(&data.id).await?.is_some() {
+        return Err(Error::AlreadyExists);
     };
-    let channel = Channel::get(&call.channel_id).await?;
+    let channel = Channel::get(&data.id).await?;
     if !user.in_channel(&channel).await? {
         return Err(Error::NotFound);
     }
-    let call = ActiveCall::create(&data.id, &id).await?;
+    let call = ActiveCall::create(&data.id, &id, data.preferred_region).await?;
     Ok(RpcValue(StartCallResponse { id: call.id }))
 }
 

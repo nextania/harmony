@@ -199,12 +199,6 @@ impl ToRedisArgs for ActiveCall {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct RtcAuthorization {
-    call_id: String,
-    user_id: String,
-}
-
 impl ActiveCall {
     pub async fn create(channel: &String, initiator: &str, preferred_region: Option<Region>) -> Result<ActiveCall> {
         let mut redis = get_connection().await;

@@ -1,4 +1,5 @@
 use flate2::Compression;
+use rand::distr::Alphanumeric;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
@@ -12,10 +13,19 @@ use serde::{Deserialize, Serialize};
 use std::io::{Cursor, Read};
 
 pub fn random_number(size: usize) -> Vec<u8> {
-    let mut rng = StdRng::from_entropy();
+    let mut rng = StdRng::from_os_rng();
     let mut result: Vec<u8> = vec![0; size];
     rng.fill(&mut result[..]);
     result
+}
+
+pub fn generate_token() -> String {
+    let rng = rand::rng();
+    rng
+        .sample_iter(&Alphanumeric)
+        .take(64)
+        .map(char::from)
+        .collect()
 }
 
 pub fn generate(alphabet: &[char], size: usize) -> String {

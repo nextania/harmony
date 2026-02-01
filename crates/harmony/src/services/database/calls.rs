@@ -12,6 +12,7 @@ pub struct Call {
     pub joined_members: Vec<String>,
     // also stores last ping
     pub ended_at: i64, // can calculate duration
+    pub initiator: String, // user id of who started the call
 }
 
 impl Call {

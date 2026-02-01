@@ -9,6 +9,17 @@ use rmp_serde::Serializer;
 use serde::Deserialize;
 use serde::Serialize;
 
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct SessionData {
+    pub session_id: String,
+    pub call_id: String,
+    pub assigned_server: String,
+    pub can_listen: bool,
+    pub can_speak: bool,
+    pub can_video: bool,
+    pub can_screen: bool,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct NodeDescription {
     pub region: Region,
@@ -32,9 +43,11 @@ pub enum NodeEventKind {
         // IMPORTANT: this is the session id, not the user id
         // one user may connect several times to one call
         id: String,
+        call_id: String,
     }, // Notify the main server that a user has connected
     UserDisconnect {
         id: String,
+        call_id: String,
     }, // Notify the main server that a user has disconnected (or be notified by the main server)
     UserStateChange {
         id: String,
@@ -82,8 +95,39 @@ impl FromRedisValue for NodeEvent {
         }
     }
 }
+impl ToRedisArgs for SessionData {
+    fn write_redis_args<W>(&self, out: &mut W)
+    where
+        W: ?Sized + redis::RedisWrite,
+    {
+        let data = serialize(self).unwrap();
+        out.write_arg(data.as_slice());
+    }
+}
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+impl FromRedisValue for SessionData {
+    fn from_redis_value(v: &redis::Value) -> redis::RedisResult<Self> {
+        match *v {
+            redis::Value::BulkString(ref bytes) => {
+                let data = deserialize(bytes);
+                match data {
+                    Ok(data) => Ok(data),
+                    Err(_) => Err(redis::RedisError::from((
+                        redis::ErrorKind::TypeError,
+                        "Deserialization error",
+                    ))),
+                }
+            }
+
+            _ => Err(redis::RedisError::from((
+                redis::ErrorKind::TypeError,
+                "Format error",
+            ))),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
 pub enum Region {
     Canada,
     UsCentral,

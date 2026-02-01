@@ -11,14 +11,15 @@ use crate::services::database::users::User;
 use crate::services::voice::ActiveCall;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct JoinCallMethod {
+pub struct CreateCallTokenMethod {
     id: String,
-    sdp: String,
+    initial_muted: bool,
+    initial_deafened: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct JoinCallResponse {
-    sdp: String,
+pub struct CreateCallTokenResponse {
+    session_token: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -27,10 +28,10 @@ pub struct RtcAuthorization {
     user_id: String,
 }
 
-pub async fn join_call(
+pub async fn create_call_token(
     clients: Arc<DashMap<String, RpcClient>>,
     id: String,
-    data: RpcValue<JoinCallMethod>,
+    data: RpcValue<CreateCallTokenMethod>,
 ) -> impl RpcResponder {
     check_authenticated(clients, &id)?; // TODO: check rate limit, permissions req'd
     let data = data.into_inner();
@@ -45,8 +46,8 @@ pub async fn join_call(
     }
     call.join_user(id.clone()).await?;
     let sdp = call.get_token(&id, &data.sdp).await?;
-    Ok(RpcValue(JoinCallResponse { sdp }))
-    // Err::<RpcValue<JoinCallResponse>, _>(Error::NoVoiceNodesAvailable)
+    Ok(RpcValue(CreateCallTokenResponse { sdp }))
+    // Err::<RpcValue<CreateCallTokenResponse>, _>(Error::NoVoiceNodesAvailable)
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -112,30 +113,3 @@ pub async fn end_call(
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct EndCallResponse {}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct LeaveCallMethod {
-    id: String,
-}
-
-pub async fn leave_call(
-    clients: Arc<DashMap<String, RpcClient>>,
-    id: String,
-    data: RpcValue<LeaveCallMethod>,
-) -> impl RpcResponder {
-    check_authenticated(clients, &id)?;
-    let data = data.into_inner();
-    let call = ActiveCall::get_in_channel(&data.id).await?;
-    if let Some(mut call) = call {
-        if call.members.contains(&id) {
-            return Err(Error::NotFound);
-        }
-        call.leave_user(&id.clone()).await?;
-        Ok(RpcValue(LeaveCallResponse {}))
-    } else {
-        Err(Error::NotFound)
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct LeaveCallResponse {}

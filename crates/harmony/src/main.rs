@@ -31,7 +31,7 @@ async fn main() {
 
     redis::connect().await;
     info!("Connected to Redis");
-    voice::spawn_check_available_nodes();
+    voice::spawn_voice_events();
 
     let listen_address = LISTEN_ADDRESS.to_owned();
     info!("Starting server at {listen_address}");
@@ -44,8 +44,7 @@ async fn main() {
         .register("GET_INVITES", methods::invites::get_invites)
         .register("GET_MESSAGES", methods::messages::get_messages)
         .register("SEND_MESSAGE", methods::messages::send_message)
-        .register("JOIN_CALL", methods::voice::join_call)
-        .register("LEAVE_CALL", methods::voice::leave_call)
+        .register("CREATE_CALL_TOKEN", methods::voice::create_call_token)
         .register("START_CALL", methods::voice::start_call)
         .register("END_CALL", methods::voice::end_call)
         .start(listen_address)

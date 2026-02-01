@@ -14,7 +14,7 @@ use crate::{
 static REDIS: OnceCell<Client> = OnceCell::new();
 pub static INSTANCE_ID: Lazy<String> = Lazy::new(|| Ulid::new().to_string());
 
-pub async fn connect() {
+pub fn connect() {
     let client = Client::open(&**REDIS_URI).expect("Failed to connect");
     REDIS.set(client).expect("Failed to set client");
 }
@@ -125,7 +125,7 @@ pub async fn listen() -> () {
             }
             
             NodeEvent {
-                event: NodeEventKind::UserDisconnect { id },
+                event: NodeEventKind::UserDisconnect { id, .. },
                 ..
             } => {
                 if let Some((_, session)) = crate::wt::GLOBAL_SESSIONS.iter()

@@ -1,5 +1,5 @@
 use mongodb::bson::doc;
-use rand::distributions::{Alphanumeric, DistString};
+use rand::distr::{Alphanumeric, SampleString};
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
@@ -74,5 +74,5 @@ impl Invite {
 }
 
 pub fn generate_code() -> String {
-    Alphanumeric.sample_string(&mut rand::thread_rng(), 7)
+    Alphanumeric.sample_string(&mut rand::rng(), 7)
 }

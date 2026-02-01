@@ -1,5 +1,5 @@
 #[macro_use]
-extern crate log;
+extern crate tracing;
 
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -8,10 +8,8 @@ pub mod errors;
 pub mod redis;
 pub mod wt;
 
-use crate::errors::Result;
-
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
     
     tracing_subscriber::registry()
@@ -19,9 +17,9 @@ async fn main() -> Result<()> {
         .with(EnvFilter::from_default_env())
         .init();
 
-    redis::connect().await;
+    redis::connect();
+    redis::get_connection().await;
     info!("Connected to Redis");
     
-    wt::listen().await;
-    Ok(())
+    wt::listen().await
 }

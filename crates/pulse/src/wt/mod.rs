@@ -1,7 +1,7 @@
 pub mod call;
 
 use dashmap::DashMap;
-use pulse_api::{AvailableTrack, MediaHint, NodeEvent, NodeEventKind, WtMessageC2S, WtMessageS2C, WtTrackData};
+use pulse_api::{AvailableTrack, MediaHint, NodeEvent, NodeEventKind, SessionData, WtMessageC2S, WtMessageS2C, WtTrackData};
 use ulid::Ulid;
 use wtransport::{Endpoint, ServerConfig};
 use wtransport::endpoint::endpoint_side::Server;
@@ -16,16 +16,6 @@ use lazy_static::lazy_static;
 use crate::redis::INSTANCE_ID;
 use crate::wt::call::Call;
 
-#[derive(Clone, Debug, serde::Deserialize)]
-struct SessionData {
-    session_id: String,
-    call_id: String,
-    can_listen: bool,
-    can_speak: bool,
-    can_video: bool,
-    can_screen: bool,
-    assigned_server: String,
-}
 
 #[derive(Clone, Debug)]
 pub struct SessionInner {
@@ -136,6 +126,7 @@ async fn handle_session(
                 id: session_id.to_string(),
                 event: NodeEventKind::UserDisconnect {
                     id: state.session_id.clone(),
+                    call_id: state.call_id.clone(),
                 },
             },
         ).await;
@@ -421,6 +412,7 @@ async fn handle_connect(
                 // Note: session_id here refers to the instance of the user,
                 // as opposed to the specific connection
                 id: session_data.session_id.clone(),
+                call_id: session_data.call_id.clone(),
             },
         },
     ).await?;

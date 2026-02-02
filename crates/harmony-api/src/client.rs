@@ -460,7 +460,7 @@ async fn connect(client: &HarmonyClient, is_reconnect: bool) -> Result<()> {
     let ws_tx_clone = ws_tx.clone();
     tokio::spawn(async move {
         while let Some(message) = receiver.recv().await {
-            let tx = ws_tx_clone.lock().await;
+            let mut tx = ws_tx_clone.lock().await;
             if let Err(e) = tx.send(message).await {
                 eprintln!("Failed to send WebSocket message: {}", e);
                 break;

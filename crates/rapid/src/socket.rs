@@ -265,7 +265,7 @@ async fn start_client(
     let Ok(ws_stream) = ws_stream else {
         return;
     };
-    let (write, mut read) = ws_stream.split();
+    let (mut write, mut read) = ws_stream.split();
     let (mut s, mut r) = unbounded::<Message>();
     task::spawn(async move {
         while let Some(msg) = r.next().await {

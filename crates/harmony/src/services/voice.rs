@@ -5,7 +5,7 @@ use futures_util::StreamExt;
 use lazy_static::lazy_static;
 use tracing::info;
 use pulse_api::{NodeDescription, NodeEvent, NodeEventKind, Region, SessionData};
-use redis::{AsyncCommands, FromRedisValue, ToRedisArgs};
+use redis::{AsyncCommands, FromRedisValue, ToRedisArgs, ToSingleRedisArg};
 use serde::{Deserialize, Serialize};
 use tokio::{task, time};
 
@@ -260,26 +260,26 @@ pub struct ActiveCall {
 // }
 
 impl FromRedisValue for ActiveCall {
-    fn from_redis_value(v: &redis::Value) -> redis::RedisResult<Self> {
-        match *v {
+    fn from_redis_value(v: redis::Value) -> std::result::Result<Self, redis::ParsingError> {
+        match v {
             redis::Value::BulkString(ref bytes) => {
                 let data = deserialize(bytes);
                 match data {
                     Ok(data) => Ok(data),
-                    Err(_) => Err(redis::RedisError::from((
-                        redis::ErrorKind::TypeError,
+                    Err(_) => Err(redis::ParsingError::from(
                         "Deserialization error",
-                    ))),
+                    )),
                 }
             }
 
-            _ => Err(redis::RedisError::from((
-                redis::ErrorKind::TypeError,
+            _ => Err(redis::ParsingError::from(
                 "Format error",
-            ))),
+            )),
         }
     }
 }
+
+impl ToSingleRedisArg for ActiveCall {}
 
 impl ToRedisArgs for ActiveCall {
     fn write_redis_args<W>(&self, out: &mut W)

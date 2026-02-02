@@ -104,9 +104,3 @@ impl From<redis::RedisError> for Error {
         }
     }
 }
-
-impl From<jsonwebtoken::errors::Error> for Error {
-    fn from(_: jsonwebtoken::errors::Error) -> Self {
-        Error::InternalError
-    }
-}

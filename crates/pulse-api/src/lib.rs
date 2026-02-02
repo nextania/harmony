@@ -3,6 +3,7 @@ use std::str::FromStr;
 use redis::FromRedisValue;
 
 use redis::ToRedisArgs;
+use redis::ToSingleRedisArg;
 use rkyv::Archive;
 use rmp_serde::Deserializer;
 use rmp_serde::Serializer;
@@ -64,6 +65,8 @@ pub enum NodeEventKind {
     }, // The main server notifies the node that a call has ended, disconnecting all users in that call
 }
 
+impl ToSingleRedisArg for NodeEvent {}
+
 impl ToRedisArgs for NodeEvent {
     fn write_redis_args<W>(&self, out: &mut W)
     where
@@ -75,26 +78,27 @@ impl ToRedisArgs for NodeEvent {
 }
 
 impl FromRedisValue for NodeEvent {
-    fn from_redis_value(v: &redis::Value) -> redis::RedisResult<Self> {
-        match *v {
+    fn from_redis_value(v: redis::Value) -> Result<Self, redis::ParsingError> {
+        match v {
             redis::Value::BulkString(ref bytes) => {
                 let data = deserialize(bytes);
                 match data {
                     Ok(data) => Ok(data),
-                    Err(_) => Err(redis::RedisError::from((
-                        redis::ErrorKind::TypeError,
+                    Err(_) => Err(redis::ParsingError::from(
                         "Deserialization error",
-                    ))),
+                    )),
                 }
             }
 
-            _ => Err(redis::RedisError::from((
-                redis::ErrorKind::TypeError,
+            _ => Err(redis::ParsingError::from(
                 "Format error",
-            ))),
+            )),
         }
     }
 }
+
+impl ToSingleRedisArg for SessionData {}
+
 impl ToRedisArgs for SessionData {
     fn write_redis_args<W>(&self, out: &mut W)
     where
@@ -106,23 +110,21 @@ impl ToRedisArgs for SessionData {
 }
 
 impl FromRedisValue for SessionData {
-    fn from_redis_value(v: &redis::Value) -> redis::RedisResult<Self> {
-        match *v {
+    fn from_redis_value(v: redis::Value) -> Result<Self, redis::ParsingError> {
+        match v {
             redis::Value::BulkString(ref bytes) => {
                 let data = deserialize(bytes);
                 match data {
                     Ok(data) => Ok(data),
-                    Err(_) => Err(redis::RedisError::from((
-                        redis::ErrorKind::TypeError,
+                    Err(_) => Err(redis::ParsingError::from(
                         "Deserialization error",
-                    ))),
+                    )),
                 }
             }
 
-            _ => Err(redis::RedisError::from((
-                redis::ErrorKind::TypeError,
+            _ => Err(redis::ParsingError::from(
                 "Format error",
-            ))),
+            )),
         }
     }
 }

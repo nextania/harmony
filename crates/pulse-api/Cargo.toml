@@ -6,7 +6,7 @@ edition = "2024"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-redis = "0.32.4"
+redis = "1.0.3"
 serde = { version = "1.0.144", features = ["derive"] }
 rmp-serde = "1.1.2"
 rkyv = "0.8.14"

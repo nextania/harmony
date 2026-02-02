@@ -1,12 +1,9 @@
-use std::sync::Arc;
-
-use dashmap::DashMap;
-use rapid::socket::{RpcClient, RpcResponder, RpcValue};
+use rapid::socket::{RpcResponder, RpcState, RpcValue};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     authentication::check_authenticated,
-    errors::{Error, Result},
+    errors::Error,
     services::database::channels::Channel,
 };
 
@@ -17,12 +14,11 @@ pub struct GetChannelMethod {
 }
 
 pub async fn get_channel(
-    clients: Arc<DashMap<String, RpcClient>>,
-    id: String,
+    state: RpcState,
     data: RpcValue<GetChannelMethod>,
 ) -> impl RpcResponder {
     let data = data.into_inner();
-    let user = check_authenticated(clients, &id)?;
+    let user = check_authenticated(&state)?;
     let channel = Channel::get(&data.id).await?;
     match channel {
         Channel::PrivateChannel { .. } | Channel::GroupChannel { .. } => {
@@ -46,11 +42,10 @@ pub struct GetChannelResponse {
 pub struct GetChannelsMethod {}
 
 pub async fn get_channels(
-    clients: Arc<DashMap<String, RpcClient>>,
-    id: String,
+    state: RpcState,
     _: RpcValue<GetChannelsMethod>,
 ) -> impl RpcResponder {
-    let user = check_authenticated(clients, &id)?;
+    let user = check_authenticated(&state)?;
     let channels = user.get_channels().await?;
     Ok::<_, Error>(RpcValue(GetChannelsResponse { channels }))
 }

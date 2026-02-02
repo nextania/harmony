@@ -1,8 +1,7 @@
 use std::{any::Any, sync::Arc};
 
-use dashmap::DashMap;
 use once_cell::sync::Lazy;
-use rapid::socket::{RpcClient, RpcResponder};
+use rapid::socket::{RpcResponder, RpcState};
 use rmpv::{Value, ext::to_value};
 use serde::Deserialize;
 use serde_json::json;
@@ -51,16 +50,11 @@ pub async fn validate_token(token: &str) -> rapid::errors::Result<AsUser> {
     Ok(as_user)
 }
 
-pub fn check_authenticated(
-    clients: Arc<DashMap<String, RpcClient>>,
-    id: &str,
-) -> Result<Arc<User>> {
-    let client = clients.get(id).expect("Failed to get client");
-    if let Some(x) = client.get_user::<User>() {
-        Ok(x.clone().into())
-    } else {
-        Err(Error::NotAuthenticated)
-    }
+pub fn check_authenticated(state: &RpcState) -> Result<Arc<User>> {
+    state.client().get_user::<User>()
+        .cloned()
+        .ok_or(Error::NotAuthenticated)
+        .and_then(|user| Ok(user.into()))
 }
 
 impl RpcResponder for Error {

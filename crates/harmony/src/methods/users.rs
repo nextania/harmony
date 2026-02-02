@@ -5,10 +5,7 @@
 // 5. create direct channel
 // 6. get direct channels
 
-use std::sync::Arc;
-
-use dashmap::DashMap;
-use rapid::socket::{RpcClient, RpcResponder, RpcValue};
+use rapid::socket::{RpcResponder, RpcState, RpcValue};
 use serde::{Deserialize, Serialize};
 
 use crate::{authentication::check_authenticated, errors::Error, services::database::users::User};
@@ -28,51 +25,43 @@ pub struct AddFriendUsernameMethod {
 pub struct AddFriendResponse {}
 
 pub async fn add_friend(
-    clients: Arc<DashMap<String, RpcClient>>,
-    id: String,
+    state: RpcState,
     data: RpcValue<AddFriendMethod>,
 ) -> impl RpcResponder {
-    check_authenticated(clients, &id)?;
+    let user = check_authenticated(&state)?;
     let data = data.into_inner();
-    let user = User::get(&id).await?;
     let friend = User::get(&data.id).await?;
     User::add_contact(&user, &friend.id).await?;
     Ok::<_, Error>(RpcValue(AddFriendResponse {}))
 }
 
 pub async fn add_friend_username(
-    clients: Arc<DashMap<String, RpcClient>>,
-    id: String,
+    state: RpcState,
     data: RpcValue<AddFriendUsernameMethod>,
 ) -> impl RpcResponder {
-    check_authenticated(clients, &id)?;
+    let user = check_authenticated(&state)?;
     let data = data.into_inner();
-    let user = User::get(&id).await?;
     let friend = User::get_by_username(&data.username).await?;
     User::add_contact(&user, &friend.id).await?;
     Ok::<_, Error>(RpcValue(AddFriendResponse {}))
 }
 
 pub async fn remove_friend(
-    clients: Arc<DashMap<String, RpcClient>>,
-    id: String,
+    state: RpcState,
     data: RpcValue<AddFriendMethod>,
 ) -> impl RpcResponder {
-    check_authenticated(clients, &id)?;
+    let user = check_authenticated(&state)?;
     let data = data.into_inner();
-    let user = User::get(&id).await?;
     let friend = User::get(&data.id).await?;
     user.remove_contact(&friend.id).await?;
     Ok::<_, Error>(RpcValue(AddFriendResponse {}))
 }
 
 pub async fn get_friends(
-    clients: Arc<DashMap<String, RpcClient>>,
-    id: String,
+    state: RpcState,
     _data: RpcValue<()>,
 ) -> impl RpcResponder {
-    check_authenticated(clients, &id)?;
-    let user = User::get(&id).await?;
+    let user = check_authenticated(&state)?;
     let contacts = user.get_contacts().await?;
     Ok::<_, Error>(RpcValue(contacts))
 }

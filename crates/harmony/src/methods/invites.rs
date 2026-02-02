@@ -1,12 +1,9 @@
-use std::sync::Arc;
-
-use dashmap::DashMap;
-use rapid::socket::{RpcClient, RpcResponder, RpcValue};
+use rapid::socket::{RpcResponder, RpcState, RpcValue};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     authentication::check_authenticated,
-    errors::{Error, Result},
+    errors::Error,
     services::database::{channels::Channel, invites::Invite},
 };
 
@@ -19,12 +16,11 @@ pub struct CreateInviteMethod {
 }
 
 pub async fn create_invite(
-    clients: Arc<DashMap<String, RpcClient>>,
-    id: String,
+    state: RpcState,
     data: RpcValue<CreateInviteMethod>,
 ) -> impl RpcResponder {
     let data = data.into_inner();
-    let user = check_authenticated(clients, &id)?;
+    let user = check_authenticated(&state)?;
     let invite = Invite::create(
         data.channel_id.clone(),
         user.id.clone(),
@@ -47,12 +43,11 @@ pub struct DeleteInviteMethod {
 }
 
 pub async fn delete_invite(
-    clients: Arc<DashMap<String, RpcClient>>,
-    id: String,
+    state: RpcState,
     data: RpcValue<DeleteInviteMethod>,
 ) -> impl RpcResponder {
     let data = data.into_inner();
-    let user = check_authenticated(clients, &id)?;
+    let user = check_authenticated(&state)?;
     let invite = Invite::get(&data.id).await?;
     let channel = Channel::get(&invite.channel_id).await?;
     if !channel.is_manager(&user.id) {
@@ -74,12 +69,11 @@ pub struct GetInviteMethod {
 }
 
 pub async fn get_invite(
-    clients: Arc<DashMap<String, RpcClient>>,
-    id: String,
+    state: RpcState,
     data: RpcValue<GetInviteMethod>,
 ) -> impl RpcResponder {
     let data = data.into_inner();
-    let user = check_authenticated(clients, &id)?;
+    let user = check_authenticated(&state)?;
     let invite = Invite::get(&data.code).await?;
     let channel = Channel::get(&invite.channel_id).await?;
     //ban?
@@ -142,12 +136,11 @@ pub struct GetInvitesMethod {
 }
 
 pub async fn get_invites(
-    clients: Arc<DashMap<String, RpcClient>>,
-    id: String,
+    state: RpcState,
     data: RpcValue<GetInvitesMethod>,
 ) -> impl RpcResponder {
     let data = data.into_inner();
-    let user = check_authenticated(clients, &id)?;
+    let user = check_authenticated(&state)?;
     let channel = Channel::get(&data.channel_id).await?;
     if !channel.is_manager(&user.id) {
         return Err(Error::MissingPermission);

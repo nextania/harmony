@@ -1,7 +1,4 @@
-use std::sync::Arc;
-
-use dashmap::{DashMap, mapref::multiple::RefMulti};
-use rapid::socket::{RpcClient, emit_one};
+use rapid::socket::RpcClients;
 use serde::{Deserialize, Serialize};
 
 use crate::services::database::{messages::Message, users::User};
@@ -19,6 +16,9 @@ pub enum Event {
     NewMessage(NewMessageEvent),
     RemoveFriend(String),
     AddFriend(String),
+    UserJoinedCall(UserJoinedCallEvent),
+    UserLeftCall(UserLeftCallEvent),
+    UserVoiceStateChanged(UserVoiceStateChangedEvent),
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -33,6 +33,32 @@ pub struct HelloEvent {
 pub struct NewMessageEvent {
     message: Message,
     channel_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserJoinedCallEvent {
+    pub call_id: String,
+    pub user_id: String,
+    pub session_id: String,
+    pub muted: bool,
+    pub deafened: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserLeftCallEvent {
+    pub call_id: String,
+    pub session_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserVoiceStateChangedEvent {
+    pub call_id: String,
+    pub session_id: String,
+    pub muted: bool,
+    pub deafened: bool,
 }
 
 pub enum CreateChannelType {
@@ -60,15 +86,30 @@ pub enum CreateChannelType {
     },
 }
 
-pub fn emit_to_id(clients: Arc<DashMap<String, RpcClient>>, user_id: &str, event: Event) {
-    let client: Vec<RefMulti<'_, String, RpcClient>> = clients
-        .iter()
-        .filter(|client| {
+pub fn emit_to_id(clients: RpcClients, user_id: &str, event: Event) {
+    clients.emit_by(
+        event,
+        |client| {
             let i = client.get_user::<User>().map(|u| u.id.clone());
             i == Some(user_id.to_owned())
-        })
-        .collect();
-    for client in client {
-        emit_one(client.value(), event.clone());
-    }
+        },
+    );
+}
+
+pub fn emit_to_ids(
+    clients: RpcClients,
+    user_ids: &[String],
+    event: Event,
+) {
+    clients.emit_by(
+        event,
+        |client| {
+            let i = client.get_user::<User>().map(|u| u.id.clone());
+            if let Some(user_id) = i {
+                user_ids.contains(&user_id)
+            } else {
+                false
+            }
+        },
+    );
 }

@@ -46,8 +46,7 @@ pub struct ContactExtended {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct User {
     pub id: String,
-    pub profile_banner: Option<String>, // TODO: Make use of file handling
-    pub profile_description: String,
+    // pub profile_banner: Option<String>, // TODO: move to AS 
     pub contacts: Vec<Contact>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -105,8 +104,6 @@ impl User {
         let users = super::get_database().collection::<User>("users");
         let user = User {
             id,
-            profile_banner: None,
-            profile_description: String::new(),
             contacts: Vec::new(),
             online: None,
             presence: None,

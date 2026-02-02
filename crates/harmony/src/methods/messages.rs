@@ -1,12 +1,9 @@
-use std::sync::Arc;
-
-use dashmap::DashMap;
-use rapid::socket::{RpcClient, RpcResponder, RpcValue};
+use rapid::socket::{RpcResponder, RpcState, RpcValue};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     authentication::check_authenticated,
-    errors::{Error, Result},
+    errors::Error,
     services::database::{channels::Channel, messages::Message},
 };
 
@@ -21,11 +18,10 @@ pub struct GetMessagesMethod {
 }
 
 pub async fn get_messages(
-    clients: Arc<DashMap<String, RpcClient>>,
-    id: String,
+    state: RpcState,
     data: RpcValue<GetMessagesMethod>,
 ) -> impl RpcResponder {
-    check_authenticated(clients, &id)?;
+    check_authenticated(&state)?;
     let data = data.into_inner();
     let channel = Channel::get(&data.channel_id).await?;
     let messages = channel
@@ -53,11 +49,10 @@ pub struct SendMessageMethod {
 }
 
 pub async fn send_message(
-    clients: Arc<DashMap<String, RpcClient>>,
-    id: String,
+    state: RpcState,
     data: RpcValue<SendMessageMethod>,
 ) -> impl RpcResponder {
-    let user = check_authenticated(clients.clone(), &id)?;
+    let user = check_authenticated(&state)?;
     let data = data.into_inner();
     let trimmed = data.content.trim();
     if trimmed.len() > 4096 {

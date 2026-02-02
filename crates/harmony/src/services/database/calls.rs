@@ -25,6 +25,7 @@ impl Call {
     }
     // updating it periodically creates persistence
     pub async fn update(id: &String, members: Vec<String>) -> Result<()> {
+        // TODO: only push changes
         let database = super::get_database();
         database
             .collection::<Call>("calls")

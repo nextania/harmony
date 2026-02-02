@@ -10,8 +10,7 @@ use serde::{Deserialize, Serialize};
 use tokio::{task, time};
 
 use crate::{
-    errors::{Error, Result},
-    request::Request, services::encryption::generate_token,
+    RPC_CLIENTS, errors::{Error, Result}, methods::{Event, UserJoinedCallEvent, UserLeftCallEvent, emit_to_ids}, request::Request, services::encryption::generate_token
 };
 
 use super::{
@@ -200,8 +199,6 @@ pub fn spawn_voice_events() {
     });
 }
 
-// TODO: broadcast these events to all users in call
-
 async fn process_user_disconnect(session_id: &str, call_id: &str) -> Result<()> {
     if let Ok(Some(mut call)) = ActiveCall::get(&call_id.to_string()).await {
         if let Err(e) = call.leave_user(&session_id.to_string()).await {
@@ -209,6 +206,20 @@ async fn process_user_disconnect(session_id: &str, call_id: &str) -> Result<()> 
             return Err(e);
         } else {
             info!("User {} disconnected from call {}", session_id, call_id);
+            
+            let clients = RPC_CLIENTS.get().expect("RPC clients not initialized");
+            let member_user_ids: Vec<String> = call.members.iter()
+                .map(|session| session.user_id.clone())
+                .collect();
+            
+            emit_to_ids(
+                clients.clone(),
+                &member_user_ids,
+                Event::UserLeftCall(UserLeftCallEvent {
+                    call_id: call_id.to_string(),
+                    session_id: session_id.to_string(),
+                }),
+            );
         }
     }
     Ok(())
@@ -223,11 +234,29 @@ async fn process_user_connect(session_id: &str, call_id: &str) -> Result<()> {
                 tracing::error!("Failed to update call {} in redis: {:?}", call_id, e);
                 return Err(e);
             }
-            let member_ids: Vec<String> = call.members.iter().map(|(user_id, _)| user_id.clone()).collect();
-            if let Err(e) = Call::update(&call_id.to_string(), member_ids).await {
+            let member_ids: Vec<String> = call.members.iter().map(|session| session.user_id.clone()).collect();
+            if let Err(e) = Call::update(&call_id.to_string(), member_ids.clone()).await {
                 tracing::error!("Failed to update call {} in database: {:?}", call_id, e);
                 return Err(e);
             }
+            
+            let Some(session) = call.members.iter()
+                .find(|session| session.id == session_id) else {
+                    return Err(Error::NotFound);
+            };
+                // including the one who just joined
+                let clients = RPC_CLIENTS.get().expect("RPC clients not initialized");
+                emit_to_ids(
+                    clients.clone(),
+                    &member_ids,
+                    Event::UserJoinedCall(UserJoinedCallEvent {
+                        call_id: call_id.to_string(),
+                            user_id: session.user_id.clone(),
+                            session_id: session.id.clone(),
+                            muted: session.muted,
+                            deafened: session.deafened,
+                        }),
+                    );
         } else {
             // TODO: this is most likely due to the call expiring while user is connecting
             // this should RESTORE the call into memory
@@ -241,23 +270,20 @@ async fn process_user_connect(session_id: &str, call_id: &str) -> Result<()> {
 pub struct ActiveCall {
     pub id: String,
     pub name: Option<String>,
-    pub members: Vec<(String, String)>, // (user_id, session_id)
+    pub members: Vec<CallSession>,
     pub channel_id: String,
     pub assigned_node: String,
     pub empty_since: Option<i64>,
 }
 
-// #[derive(Clone, Debug, Deserialize, Serialize)]
-// pub struct CallSession {
-//     id: String,
-//     user_id: String,
-//     call_id: String,
-//     muted: bool,
-//     deafened: bool,
-//     speaking: bool,
-//     video: bool,
-//     screenshare: bool,
-// }
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct CallSession {
+    pub id: String,
+    pub user_id: String,
+    pub call_id: String,
+    pub muted: bool,
+    pub deafened: bool,
+}
 
 impl FromRedisValue for ActiveCall {
     fn from_redis_value(v: redis::Value) -> std::result::Result<Self, redis::ParsingError> {
@@ -419,45 +445,51 @@ impl ActiveCall {
         Ok(())
     }
     
-    pub async fn get_token(&mut self, user_id: &String) -> Result<String> {
+    pub async fn get_token(&mut self, user_id: &String, initial_muted: bool, initial_deafened: bool) -> Result<String> {
         let session_id = ulid::Ulid::new().to_string();
-        self.members.push((user_id.clone(), session_id.clone()));
+        self.members.push(CallSession {
+            id: session_id.clone(),
+            user_id: user_id.clone(),
+            call_id: self.id.clone(),
+            muted: initial_muted,
+            deafened: initial_deafened,
+        });
         self.update().await?;
         
-        let member_ids: Vec<String> = self.members.iter().map(|(uid, _)| uid.clone()).collect();
+        let member_ids: Vec<String> = self.members.iter().map(|session| session.user_id.clone()).collect();
         Call::update(&self.id, member_ids).await?;
         
         let token = generate_token();
         let mut redis = get_connection().await;
         redis
-            // TODO: set ttl of 1min
-            .set::<String, SessionData, ()>(
+            .set_ex::<String, SessionData, ()>(
                 format!("session:{}", token),
                 SessionData {
                     call_id: self.id.clone(),
                     session_id: session_id.clone(),
                     assigned_server: self.assigned_node.clone(),
 
-                    // TODO: set based on 1) permissions and 2) user requested settings
-                    can_listen: true,
-                    can_speak: true,
+                    can_listen: !initial_deafened,
+                    can_speak: !initial_muted,
+                    // TODO:
                     can_screen: true,
                     can_video: true,
                 },
+                60,
             )
             .await?;
         Ok(token)
     }
 
     pub async fn leave_user(&mut self, session_id: &String) -> Result<()> {
-        self.members.retain(|x| x.1 != *session_id);
+        self.members.retain(|x| x.id != *session_id);
         if self.members.is_empty() {
             let time = chrono::Utc::now().timestamp_millis();
             self.empty_since = Some(time);
         }
         self.update().await?;
         
-        let member_ids: Vec<String> = self.members.iter().map(|(user_id, _)| user_id.clone()).collect();
+        let member_ids: Vec<String> = self.members.iter().map(|session| session.user_id.clone()).collect();
         Call::update(&self.id, member_ids).await?;
         
         Ok(())
@@ -473,7 +505,7 @@ impl ActiveCall {
             .del::<std::string::String, ()>(format!("call:{}", self.id))
             .await?;
         
-        let member_ids: Vec<String> = self.members.iter().map(|(user_id, _)| user_id.clone()).collect();
+        let member_ids: Vec<String> = self.members.iter().map(|session| session.user_id.clone()).collect();
         Call::update(&self.id, member_ids).await?;
         
         redis

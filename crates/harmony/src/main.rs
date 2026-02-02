@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 pub mod authentication;
 pub mod errors;
 pub mod methods;
@@ -7,6 +5,8 @@ pub mod request;
 pub mod services;
 
 use authentication::authenticate;
+use once_cell::sync::OnceCell;
+use rapid::socket::RpcClients;
 use rapid::socket::RpcServer;
 use services::database;
 use services::redis;
@@ -16,6 +16,8 @@ use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberI
 use tracing::info;
 
 use crate::services::environment::LISTEN_ADDRESS;
+
+static RPC_CLIENTS: OnceCell<RpcClients> = OnceCell::new();
 
 #[tokio::main]
 async fn main() {
@@ -36,12 +38,10 @@ async fn main() {
     
     redis::create_streams().await.expect("Failed to initialize Redis streams");
     info!("Initialized Redis streams");
-    
-    voice::spawn_voice_events();
 
     let listen_address = LISTEN_ADDRESS.to_owned();
     info!("Starting server at {listen_address}");
-    RpcServer::new(Box::new(|token| Box::pin(authenticate(token))))
+    let server = RpcServer::new(Box::new(|token| Box::pin(authenticate(token))))
         .register("GET_CHANNEL", methods::channels::get_channel)
         .register("GET_CHANNELS", methods::channels::get_channels)
         .register("CREATE_INVITE", methods::invites::create_invite)
@@ -53,6 +53,11 @@ async fn main() {
         .register("CREATE_CALL_TOKEN", methods::voice::create_call_token)
         .register("START_CALL", methods::voice::start_call)
         .register("END_CALL", methods::voice::end_call)
-        .start(listen_address)
-        .await;
+        .register("UPDATE_VOICE_STATE", methods::voice::update_voice_state)
+        .register("GET_CALL_MEMBERS", methods::voice::get_call_members);
+    
+    RPC_CLIENTS.set(server.clients()).expect("Failed to set RPC clients");
+    voice::spawn_voice_events();
+    
+    server.start(listen_address).await;
 }

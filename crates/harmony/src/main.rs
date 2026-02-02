@@ -10,10 +10,10 @@ use authentication::authenticate;
 use rapid::socket::RpcServer;
 use services::database;
 use services::redis;
-// use services::webrtc;
-
-use log::info;
 use services::voice;
+
+use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing::info;
 
 use crate::services::environment::LISTEN_ADDRESS;
 
@@ -22,7 +22,10 @@ async fn main() {
     // TODO: environment, negotiate encryption
 
     dotenvy::dotenv().ok();
-    env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
+    tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(EnvFilter::from_default_env())
+        .init();
 
     database::connect().await;
     info!("Connected to database");

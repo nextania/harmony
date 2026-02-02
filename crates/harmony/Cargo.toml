@@ -21,8 +21,8 @@ num_cpus = "1.16.0"
 ulid = "1.0.0"
 
 dotenvy = "0.15.7"
-env_logger = "0.11.0"
-log = "0.4.20"
+tracing = "0.1.37"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 
 async-tungstenite = { version = "0.30.0", features = [
     "tokio-runtime",

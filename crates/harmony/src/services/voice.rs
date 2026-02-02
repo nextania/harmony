@@ -3,7 +3,7 @@ use std::time::Duration;
 use dashmap::DashMap;
 use futures_util::StreamExt;
 use lazy_static::lazy_static;
-use log::info;
+use tracing::info;
 use pulse_api::{NodeDescription, NodeEvent, NodeEventKind, Region, SessionData};
 use redis::{AsyncCommands, FromRedisValue, ToRedisArgs};
 use serde::{Deserialize, Serialize};
@@ -122,7 +122,7 @@ pub fn spawn_voice_events() {
             let reply = match result {
                 Ok(reply) => reply,
                 Err(e) => {
-                    log::error!("Failed to read from stream: {:?}", e);
+                    tracing::error!("Failed to read from stream: {:?}", e);
                     time::sleep(Duration::from_secs(1)).await;
                     continue;
                 }
@@ -135,7 +135,7 @@ pub fn spawn_voice_events() {
                     let event_data = match stream_id.map.get("data") {
                         Some(redis::Value::BulkString(bytes)) => bytes,
                         _ => {
-                            log::warn!("Invalid stream message format");
+                            tracing::warn!("Invalid stream message format");
                             continue;
                         }
                     };
@@ -143,7 +143,7 @@ pub fn spawn_voice_events() {
                     let payload: NodeEvent = match deserialize(event_data) {
                         Ok(p) => p,
                         Err(e) => {
-                            log::error!("Failed to deserialize event: {:?}", e);
+                            tracing::error!("Failed to deserialize event: {:?}", e);
                             let _ = connection.xack::<_, _, _, ()>(
                                 "voice:events:user-lifecycle",
                                 "harmony-servers",
@@ -166,7 +166,7 @@ pub fn spawn_voice_events() {
                     };
                     
                     if let Err(e) = process_result {
-                        log::error!("Failed to process event: {:?}", e);
+                        tracing::error!("Failed to process event: {:?}", e);
                         // should be retried later
                         continue;
                     }
@@ -205,7 +205,7 @@ pub fn spawn_voice_events() {
 async fn process_user_disconnect(session_id: &str, call_id: &str) -> Result<()> {
     if let Ok(Some(mut call)) = ActiveCall::get(&call_id.to_string()).await {
         if let Err(e) = call.leave_user(&session_id.to_string()).await {
-            log::error!("Failed to remove user {} from call {}: {:?}", session_id, call_id, e);
+            tracing::error!("Failed to remove user {} from call {}: {:?}", session_id, call_id, e);
             return Err(e);
         } else {
             info!("User {} disconnected from call {}", session_id, call_id);
@@ -220,18 +220,18 @@ async fn process_user_connect(session_id: &str, call_id: &str) -> Result<()> {
         if let Some(mut call) = call {
             call.empty_since = None;
             if let Err(e) = call.update().await {
-                log::error!("Failed to update call {} in redis: {:?}", call_id, e);
+                tracing::error!("Failed to update call {} in redis: {:?}", call_id, e);
                 return Err(e);
             }
             let member_ids: Vec<String> = call.members.iter().map(|(user_id, _)| user_id.clone()).collect();
             if let Err(e) = Call::update(&call_id.to_string(), member_ids).await {
-                log::error!("Failed to update call {} in database: {:?}", call_id, e);
+                tracing::error!("Failed to update call {} in database: {:?}", call_id, e);
                 return Err(e);
             }
         } else {
             // TODO: this is most likely due to the call expiring while user is connecting
             // this should RESTORE the call into memory
-            log::warn!("Call {} not found when user {} tried to connect", call_id, session_id);
+            tracing::warn!("Call {} not found when user {} tried to connect", call_id, session_id);
         }
     }
     Ok(())
@@ -366,7 +366,7 @@ impl ActiveCall {
                         break;
                     }
                     Err(e) => {
-                        log::error!("Failed to get call {}: {:?}", call_id, e);
+                        tracing::error!("Failed to get call {}: {:?}", call_id, e);
                         continue;
                     }
                 };
@@ -377,7 +377,7 @@ impl ActiveCall {
                     if now - empty_time >= EMPTY_TIMEOUT_MS {
                         info!("Call {} has been empty for 5 minutes, ending call", call_id);
                         if let Err(e) = call.end().await {
-                            log::error!("Failed to end call {}: {:?}", call_id, e);
+                            tracing::error!("Failed to end call {}: {:?}", call_id, e);
                         }
                         break;
                     }

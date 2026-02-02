@@ -3,20 +3,24 @@ use std::time::Duration;
 use dashmap::DashMap;
 use futures_util::StreamExt;
 use lazy_static::lazy_static;
-use tracing::info;
 use pulse_api::{NodeDescription, NodeEvent, NodeEventKind, Region, SessionData};
 use redis::{AsyncCommands, FromRedisValue, ToRedisArgs, ToSingleRedisArg};
 use serde::{Deserialize, Serialize};
 use tokio::{task, time};
+use tracing::info;
 
 use crate::{
-    RPC_CLIENTS, errors::{Error, Result}, methods::{Event, UserJoinedCallEvent, UserLeftCallEvent, emit_to_ids}, request::Request, services::encryption::generate_token
+    RPC_CLIENTS,
+    errors::{Error, Result},
+    methods::{Event, UserJoinedCallEvent, UserLeftCallEvent, emit_to_ids},
+    request::Request,
+    services::encryption::generate_token,
 };
 
 use super::{
     database::calls::Call,
     encryption::{deserialize, serialize},
-    redis::{get_connection, get_pubsub, INSTANCE_ID},
+    redis::{INSTANCE_ID, get_connection, get_pubsub},
 };
 
 lazy_static! {
@@ -99,25 +103,24 @@ pub fn spawn_voice_events() {
             }
         }
     });
-    
+
     // stream for user lifecycle events
     task::spawn(async move {
         let mut connection = get_connection().await;
         let consumer_name = INSTANCE_ID.clone();
-        
+
         loop {
-            let result = connection.xread_options::<
-                _, _,
-                redis::streams::StreamReadReply,
-            >(
-                &["voice:events:user-lifecycle"], 
-                &[">"],
-                &redis::streams::StreamReadOptions::default()
-                    .group("harmony-servers", &consumer_name)
-                    .block(5000)
-                    .count(10),
-            ).await;
-            
+            let result = connection
+                .xread_options::<_, _, redis::streams::StreamReadReply>(
+                    &["voice:events:user-lifecycle"],
+                    &[">"],
+                    &redis::streams::StreamReadOptions::default()
+                        .group("harmony-servers", &consumer_name)
+                        .block(5000)
+                        .count(10),
+                )
+                .await;
+
             let reply = match result {
                 Ok(reply) => reply,
                 Err(e) => {
@@ -126,11 +129,11 @@ pub fn spawn_voice_events() {
                     continue;
                 }
             };
-            
+
             for stream_key in &reply.keys {
                 for stream_id in &stream_key.ids {
                     let message_id = &stream_id.id;
-                    
+
                     let event_data = match stream_id.map.get("data") {
                         Some(redis::Value::BulkString(bytes)) => bytes,
                         _ => {
@@ -138,48 +141,52 @@ pub fn spawn_voice_events() {
                             continue;
                         }
                     };
-                    
+
                     let payload: NodeEvent = match deserialize(event_data) {
                         Ok(p) => p,
                         Err(e) => {
                             tracing::error!("Failed to deserialize event: {:?}", e);
-                            let _ = connection.xack::<_, _, _, ()>(
-                                "voice:events:user-lifecycle",
-                                "harmony-servers",
-                                &[message_id],
-                            ).await;
+                            let _ = connection
+                                .xack::<_, _, _, ()>(
+                                    "voice:events:user-lifecycle",
+                                    "harmony-servers",
+                                    &[message_id],
+                                )
+                                .await;
                             continue;
                         }
                     };
-                    
+
                     let process_result = match payload.event {
-                        NodeEventKind::UserDisconnect { ref id, ref call_id } => {
-                            process_user_disconnect(id, call_id).await
-                        }
-                        NodeEventKind::UserConnect { ref id, ref call_id } => {
-                            process_user_connect(id, call_id).await
-                        }
-                        _ => {
-                            Ok(())
-                        }
+                        NodeEventKind::UserDisconnect {
+                            ref id,
+                            ref call_id,
+                        } => process_user_disconnect(id, call_id).await,
+                        NodeEventKind::UserConnect {
+                            ref id,
+                            ref call_id,
+                        } => process_user_connect(id, call_id).await,
+                        _ => Ok(()),
                     };
-                    
+
                     if let Err(e) = process_result {
                         tracing::error!("Failed to process event: {:?}", e);
                         // should be retried later
                         continue;
                     }
-                    
-                    let _ = connection.xack::<_, _, _, ()>(
-                        "voice:events:user-lifecycle",
-                        "harmony-servers",
-                        &[message_id],
-                    ).await;
+
+                    let _ = connection
+                        .xack::<_, _, _, ()>(
+                            "voice:events:user-lifecycle",
+                            "harmony-servers",
+                            &[message_id],
+                        )
+                        .await;
                 }
             }
         }
     });
-    
+
     // monitor node timeout
     task::spawn(async move {
         loop {
@@ -202,16 +209,23 @@ pub fn spawn_voice_events() {
 async fn process_user_disconnect(session_id: &str, call_id: &str) -> Result<()> {
     if let Ok(Some(mut call)) = ActiveCall::get(&call_id.to_string()).await {
         if let Err(e) = call.leave_user(&session_id.to_string()).await {
-            tracing::error!("Failed to remove user {} from call {}: {:?}", session_id, call_id, e);
+            tracing::error!(
+                "Failed to remove user {} from call {}: {:?}",
+                session_id,
+                call_id,
+                e
+            );
             return Err(e);
         } else {
             info!("User {} disconnected from call {}", session_id, call_id);
-            
+
             let clients = RPC_CLIENTS.get().expect("RPC clients not initialized");
-            let member_user_ids: Vec<String> = call.members.iter()
+            let member_user_ids: Vec<String> = call
+                .members
+                .iter()
                 .map(|session| session.user_id.clone())
                 .collect();
-            
+
             emit_to_ids(
                 clients.clone(),
                 &member_user_ids,
@@ -234,33 +248,40 @@ async fn process_user_connect(session_id: &str, call_id: &str) -> Result<()> {
                 tracing::error!("Failed to update call {} in redis: {:?}", call_id, e);
                 return Err(e);
             }
-            let member_ids: Vec<String> = call.members.iter().map(|session| session.user_id.clone()).collect();
+            let member_ids: Vec<String> = call
+                .members
+                .iter()
+                .map(|session| session.user_id.clone())
+                .collect();
             if let Err(e) = Call::update(&call_id.to_string(), member_ids.clone()).await {
                 tracing::error!("Failed to update call {} in database: {:?}", call_id, e);
                 return Err(e);
             }
-            
-            let Some(session) = call.members.iter()
-                .find(|session| session.id == session_id) else {
-                    return Err(Error::NotFound);
+
+            let Some(session) = call.members.iter().find(|session| session.id == session_id) else {
+                return Err(Error::NotFound);
             };
-                // including the one who just joined
-                let clients = RPC_CLIENTS.get().expect("RPC clients not initialized");
-                emit_to_ids(
-                    clients.clone(),
-                    &member_ids,
-                    Event::UserJoinedCall(UserJoinedCallEvent {
-                        call_id: call_id.to_string(),
-                            user_id: session.user_id.clone(),
-                            session_id: session.id.clone(),
-                            muted: session.muted,
-                            deafened: session.deafened,
-                        }),
-                    );
+            // including the one who just joined
+            let clients = RPC_CLIENTS.get().expect("RPC clients not initialized");
+            emit_to_ids(
+                clients.clone(),
+                &member_ids,
+                Event::UserJoinedCall(UserJoinedCallEvent {
+                    call_id: call_id.to_string(),
+                    user_id: session.user_id.clone(),
+                    session_id: session.id.clone(),
+                    muted: session.muted,
+                    deafened: session.deafened,
+                }),
+            );
         } else {
             // TODO: this is most likely due to the call expiring while user is connecting
             // this should RESTORE the call into memory
-            tracing::warn!("Call {} not found when user {} tried to connect", call_id, session_id);
+            tracing::warn!(
+                "Call {} not found when user {} tried to connect",
+                call_id,
+                session_id
+            );
         }
     }
     Ok(())
@@ -292,15 +313,11 @@ impl FromRedisValue for ActiveCall {
                 let data = deserialize(bytes);
                 match data {
                     Ok(data) => Ok(data),
-                    Err(_) => Err(redis::ParsingError::from(
-                        "Deserialization error",
-                    )),
+                    Err(_) => Err(redis::ParsingError::from("Deserialization error")),
                 }
             }
 
-            _ => Err(redis::ParsingError::from(
-                "Format error",
-            )),
+            _ => Err(redis::ParsingError::from("Format error")),
         }
     }
 }
@@ -318,28 +335,33 @@ impl ToRedisArgs for ActiveCall {
 }
 
 impl ActiveCall {
-    pub async fn create(channel: &String, initiator: &str, preferred_region: Option<Region>) -> Result<ActiveCall> {
+    pub async fn create(
+        channel: &String,
+        initiator: &str,
+        preferred_region: Option<Region>,
+    ) -> Result<ActiveCall> {
         let mut redis = get_connection().await;
         let call = Self::get_in_channel(channel).await?;
         if call.is_some() {
             return Err(Error::AlreadyExists);
         }
         // assign node
-        let assigned_node = if let Some(region) = preferred_region &&let Some(node) = AVAILABLE_NODES
+        let assigned_node = if let Some(region) = preferred_region
+            && let Some(node) = AVAILABLE_NODES
                 .iter()
                 .find(|n| n.region == region)
-                .map(|n| n.id.clone()) {
-                    
+                .map(|n| n.id.clone())
+        {
+            node
+        } else {
+            // fallback to any node
+            let node = AVAILABLE_NODES.iter().next().map(|n| n.id.clone());
+            if let Some(node) = node {
                 node
             } else {
-                // fallback to any node
-                let node = AVAILABLE_NODES.iter().next().map(|n| n.id.clone());
-                if let Some(node) = node {
-                    node
-                } else {
-                    return Err(Error::NoVoiceNodesAvailable);
-                }
-            };
+                return Err(Error::NoVoiceNodesAvailable);
+            }
+        };
         let time = chrono::Utc::now().timestamp_millis();
         let call = ActiveCall {
             id: ulid::Ulid::new().to_string(),
@@ -350,17 +372,11 @@ impl ActiveCall {
             empty_since: Some(time),
         };
         redis
-            .set::<String, ActiveCall, ()>(
-                format!("call:{}", call.id),
-                call.clone(),
-            )
+            .set::<String, ActiveCall, ()>(format!("call:{}", call.id), call.clone())
             .await
             .unwrap();
         redis
-            .set::<String, String, ()>(
-                format!("call:channel:{}", channel),
-                call.id.clone(),
-            )
+            .set::<String, String, ()>(format!("call:channel:{}", channel), call.id.clone())
             .await
             .unwrap();
         let stored_call = Call {
@@ -378,13 +394,14 @@ impl ActiveCall {
         task::spawn(async move {
             const EMPTY_TIMEOUT_MS: i64 = 5 * 60 * 1000; // 5 minutes
             let mut last_empty = time;
-            
+
             loop {
                 // sleep until last_empty + EMPTY_TIMEOUT_MS
                 time::sleep(Duration::from_millis(
                     (last_empty + EMPTY_TIMEOUT_MS - chrono::Utc::now().timestamp_millis()) as u64,
-                )).await;
-                
+                ))
+                .await;
+
                 let call = match ActiveCall::get(&call_id).await {
                     Ok(Some(call)) => call,
                     Ok(None) => {
@@ -396,9 +413,10 @@ impl ActiveCall {
                         continue;
                     }
                 };
-                
-                if call.members.is_empty() 
-                && let Some(empty_time) = call.empty_since {
+
+                if call.members.is_empty()
+                    && let Some(empty_time) = call.empty_since
+                {
                     let now = chrono::Utc::now().timestamp_millis();
                     if now - empty_time >= EMPTY_TIMEOUT_MS {
                         info!("Call {} has been empty for 5 minutes, ending call", call_id);
@@ -408,7 +426,6 @@ impl ActiveCall {
                         break;
                     }
                     last_empty = empty_time;
-                    
                 }
             }
         });
@@ -444,8 +461,13 @@ impl ActiveCall {
             .await?;
         Ok(())
     }
-    
-    pub async fn get_token(&mut self, user_id: &String, initial_muted: bool, initial_deafened: bool) -> Result<String> {
+
+    pub async fn get_token(
+        &mut self,
+        user_id: &String,
+        initial_muted: bool,
+        initial_deafened: bool,
+    ) -> Result<String> {
         let session_id = ulid::Ulid::new().to_string();
         self.members.push(CallSession {
             id: session_id.clone(),
@@ -455,10 +477,14 @@ impl ActiveCall {
             deafened: initial_deafened,
         });
         self.update().await?;
-        
-        let member_ids: Vec<String> = self.members.iter().map(|session| session.user_id.clone()).collect();
+
+        let member_ids: Vec<String> = self
+            .members
+            .iter()
+            .map(|session| session.user_id.clone())
+            .collect();
         Call::update(&self.id, member_ids).await?;
-        
+
         let token = generate_token();
         let mut redis = get_connection().await;
         redis
@@ -488,40 +514,48 @@ impl ActiveCall {
             self.empty_since = Some(time);
         }
         self.update().await?;
-        
-        let member_ids: Vec<String> = self.members.iter().map(|session| session.user_id.clone()).collect();
+
+        let member_ids: Vec<String> = self
+            .members
+            .iter()
+            .map(|session| session.user_id.clone())
+            .collect();
         Call::update(&self.id, member_ids).await?;
-        
+
         Ok(())
     }
 
     pub async fn end(&self) -> Result<()> {
         let mut redis = get_connection().await;
-        
+
         redis
             .del::<std::string::String, ()>(format!("call:channel:{}", self.channel_id))
             .await?;
         redis
             .del::<std::string::String, ()>(format!("call:{}", self.id))
             .await?;
-        
-        let member_ids: Vec<String> = self.members.iter().map(|session| session.user_id.clone()).collect();
+
+        let member_ids: Vec<String> = self
+            .members
+            .iter()
+            .map(|session| session.user_id.clone())
+            .collect();
         Call::update(&self.id, member_ids).await?;
-        
+
         redis
             .publish::<&str, NodeEvent, ()>(
                 "nodes",
                 NodeEvent {
-                    id: "server".to_owned(),
+                    id: INSTANCE_ID.clone(),
                     event: NodeEventKind::CallEnded {
                         call_id: self.id.clone(),
                     },
                 },
             )
             .await?;
-        
+
         info!("Call {} ended", self.id);
-        
+
         Ok(())
     }
 }

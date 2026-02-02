@@ -11,7 +11,7 @@ pub struct Call {
     pub id: String,
     pub tracks: DashMap<String, TrackInfo>,
     pub consumers: DashMap<String, Arc<ArcSwap<HashSet<String>>>>, // track -> set of session ids
-    pub members: DashMap<String, ()>, // session ids in this call
+    pub members: DashMap<String, ()>,                              // session ids in this call
 }
 
 impl Call {
@@ -59,7 +59,7 @@ impl Call {
         let track_id = track_info.id.clone();
         let media_hint = track_info.media_hint.clone();
         let info_session_id = track_info.session_id.clone();
-        
+
         self.tracks.insert(track_info.id.clone(), track_info);
 
         for member in self.members.iter() {
@@ -86,7 +86,7 @@ impl Call {
         self.consumers.remove(track_id);
 
         // TODO: remove from session state producers
-        
+
         for member in self.members.iter() {
             if member.key() == session_id {
                 continue;
@@ -102,7 +102,11 @@ impl Call {
     }
 
     pub fn get_mapped_track_id(&self, track_id: &str, session_id: &str) -> Option<String> {
-        if let Some(track_info) = self.tracks.iter().find(|t| t.client_track_id == track_id && t.session_id == session_id) {
+        if let Some(track_info) = self
+            .tracks
+            .iter()
+            .find(|t| t.client_track_id == track_id && t.session_id == session_id)
+        {
             return Some(track_info.id.clone());
         }
         None
@@ -126,14 +130,17 @@ impl Call {
             for session_id in sessions.iter() {
                 let Some(session) = GLOBAL_SESSIONS.get(session_id) else {
                     // shouldn't happen
-                    warn!("Session {} not found while dispatching track {}", session_id, track_id);
+                    warn!(
+                        "Session {} not found while dispatching track {}",
+                        session_id, track_id
+                    );
                     continue;
                 };
-                
+
                 if !session.session_data.read().await.can_listen {
                     continue; // skip deafened users
                 }
-                
+
                 let consumer_connection = session.connection.clone();
                 drop(session); // Release lock before sending
 
@@ -144,15 +151,20 @@ impl Call {
                     warn!("Failed to serialize track data for track {}", track_id);
                     continue;
                 };
-                
+
                 if let Err(e) = consumer_connection.send_datagram(payload) {
-                    warn!("Failed to forward track {} data to session {}: {:?}", track_id, session_id, e);
+                    warn!(
+                        "Failed to forward track {} data to session {}: {:?}",
+                        track_id, session_id, e
+                    );
                 } else {
-                    debug!("Forwarded track {} data to session {}", track_id, session_id);
+                    debug!(
+                        "Forwarded track {} data to session {}",
+                        track_id, session_id
+                    );
                 }
             }
         }
-
     }
 
     pub fn add_member(&self, session_id: String) {

@@ -1,4 +1,4 @@
-use once_cell::sync::{OnceCell, Lazy};
+use once_cell::sync::{Lazy, OnceCell};
 use redis::{AsyncCommands, Client, aio::MultiplexedConnection};
 use ulid::Ulid;
 
@@ -32,7 +32,13 @@ pub async fn get_pubsub() -> redis::aio::PubSub {
 
 pub async fn create_streams() -> redis::RedisResult<()> {
     let mut conn = get_connection().await;
-    let _ = conn.xgroup_create_mkstream::<&str, &str, &str, ()>("voice:events:user-lifecycle", "harmony-servers", "0").await;
-    
+    let _ = conn
+        .xgroup_create_mkstream::<&str, &str, &str, ()>(
+            "voice:events:user-lifecycle",
+            "harmony-servers",
+            "0",
+        )
+        .await;
+
     Ok(())
 }

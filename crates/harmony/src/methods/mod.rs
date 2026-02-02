@@ -87,29 +87,19 @@ pub enum CreateChannelType {
 }
 
 pub fn emit_to_id(clients: RpcClients, user_id: &str, event: Event) {
-    clients.emit_by(
-        event,
-        |client| {
-            let i = client.get_user::<User>().map(|u| u.id.clone());
-            i == Some(user_id.to_owned())
-        },
-    );
+    clients.emit_by(event, |client| {
+        let i = client.get_user::<User>().map(|u| u.id.clone());
+        i == Some(user_id.to_owned())
+    });
 }
 
-pub fn emit_to_ids(
-    clients: RpcClients,
-    user_ids: &[String],
-    event: Event,
-) {
-    clients.emit_by(
-        event,
-        |client| {
-            let i = client.get_user::<User>().map(|u| u.id.clone());
-            if let Some(user_id) = i {
-                user_ids.contains(&user_id)
-            } else {
-                false
-            }
-        },
-    );
+pub fn emit_to_ids(clients: RpcClients, user_ids: &[String], event: Event) {
+    clients.emit_by(event, |client| {
+        let i = client.get_user::<User>().map(|u| u.id.clone());
+        if let Some(user_id) = i {
+            user_ids.contains(&user_id)
+        } else {
+            false
+        }
+    });
 }

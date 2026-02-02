@@ -84,15 +84,11 @@ impl FromRedisValue for NodeEvent {
                 let data = deserialize(bytes);
                 match data {
                     Ok(data) => Ok(data),
-                    Err(_) => Err(redis::ParsingError::from(
-                        "Deserialization error",
-                    )),
+                    Err(_) => Err(redis::ParsingError::from("Deserialization error")),
                 }
             }
 
-            _ => Err(redis::ParsingError::from(
-                "Format error",
-            )),
+            _ => Err(redis::ParsingError::from("Format error")),
         }
     }
 }
@@ -116,15 +112,11 @@ impl FromRedisValue for SessionData {
                 let data = deserialize(bytes);
                 match data {
                     Ok(data) => Ok(data),
-                    Err(_) => Err(redis::ParsingError::from(
-                        "Deserialization error",
-                    )),
+                    Err(_) => Err(redis::ParsingError::from("Deserialization error")),
                 }
             }
 
-            _ => Err(redis::ParsingError::from(
-                "Format error",
-            )),
+            _ => Err(redis::ParsingError::from("Format error")),
         }
     }
 }
@@ -171,23 +163,12 @@ pub enum MediaHint {
 
 #[derive(Archive, Clone, Debug, rkyv::Deserialize, rkyv::Serialize)]
 pub enum WtMessageC2S {
-    Connect {
-        session_token: String,
-    }, 
+    Connect { session_token: String },
     Disconnect {},
-    StartProduce {
-        id: String,
-        media_hint: MediaHint,
-    }, 
-    StopProduce {
-        id: String,
-    }, 
-    StartConsume {
-        id: String,
-    }, 
-    StopConsume {
-        id: String,
-    }, 
+    StartProduce { id: String, media_hint: MediaHint },
+    StopProduce { id: String },
+    StartConsume { id: String },
+    StopConsume { id: String },
     Heartbeat {},
 }
 

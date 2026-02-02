@@ -8,7 +8,10 @@ use serde_json::json;
 
 use crate::{
     errors::{Error, Result},
-    services::{database::users::User, environment::{AS_TOKEN, AS_URI}},
+    services::{
+        database::users::User,
+        environment::{AS_TOKEN, AS_URI},
+    },
 };
 
 // Important: This only accepts a token and will not sign a token.
@@ -46,12 +49,17 @@ pub async fn validate_token(token: &str) -> rapid::errors::Result<AsUser> {
     if !resp.status().is_success() {
         return Err(rapid::errors::Error::InvalidToken);
     }
-    let as_user = resp.json::<AsUser>().await.map_err(|_| rapid::errors::Error::InternalError)?;
+    let as_user = resp
+        .json::<AsUser>()
+        .await
+        .map_err(|_| rapid::errors::Error::InternalError)?;
     Ok(as_user)
 }
 
 pub fn check_authenticated(state: &RpcState) -> Result<Arc<User>> {
-    state.client().get_user::<User>()
+    state
+        .client()
+        .get_user::<User>()
         .cloned()
         .ok_or(Error::NotAuthenticated)
         .and_then(|user| Ok(user.into()))

@@ -12,8 +12,8 @@ use services::database;
 use services::redis;
 use services::voice;
 
-use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 use tracing::info;
+use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::services::environment::LISTEN_ADDRESS;
 
@@ -35,8 +35,10 @@ async fn main() {
     redis::connect();
     redis::get_connection().await;
     info!("Connected to Redis");
-    
-    redis::create_streams().await.expect("Failed to initialize Redis streams");
+
+    redis::create_streams()
+        .await
+        .expect("Failed to initialize Redis streams");
     info!("Initialized Redis streams");
 
     let listen_address = LISTEN_ADDRESS.to_owned();
@@ -55,9 +57,11 @@ async fn main() {
         .register("END_CALL", methods::voice::end_call)
         .register("UPDATE_VOICE_STATE", methods::voice::update_voice_state)
         .register("GET_CALL_MEMBERS", methods::voice::get_call_members);
-    
-    RPC_CLIENTS.set(server.clients()).expect("Failed to set RPC clients");
+
+    RPC_CLIENTS
+        .set(server.clients())
+        .expect("Failed to set RPC clients");
     voice::spawn_voice_events();
-    
+
     server.start(listen_address).await;
 }

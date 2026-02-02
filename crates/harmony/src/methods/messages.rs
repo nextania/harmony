@@ -17,10 +17,7 @@ pub struct GetMessagesMethod {
     after: Option<String>,
 }
 
-pub async fn get_messages(
-    state: RpcState,
-    data: RpcValue<GetMessagesMethod>,
-) -> impl RpcResponder {
+pub async fn get_messages(state: RpcState, data: RpcValue<GetMessagesMethod>) -> impl RpcResponder {
     check_authenticated(&state)?;
     let data = data.into_inner();
     let channel = Channel::get(&data.channel_id).await?;
@@ -48,10 +45,7 @@ pub struct SendMessageMethod {
     content: String,
 }
 
-pub async fn send_message(
-    state: RpcState,
-    data: RpcValue<SendMessageMethod>,
-) -> impl RpcResponder {
+pub async fn send_message(state: RpcState, data: RpcValue<SendMessageMethod>) -> impl RpcResponder {
     let user = check_authenticated(&state)?;
     let data = data.into_inner();
     let trimmed = data.content.trim();

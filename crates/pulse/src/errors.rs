@@ -46,7 +46,6 @@ impl From<tokio::io::Error> for Error {
     }
 }
 
-
 impl From<SendError> for Error {
     fn from(e: SendError) -> Self {
         error!("{}", e);

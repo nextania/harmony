@@ -52,7 +52,6 @@ impl RpcClient {
         &self.id
     }
 
-    
     pub fn emit<T: Serialize + Send + Clone + 'static>(&self, data: T) {
         let mut socket = self.socket.clone();
         let data = data.clone();
@@ -137,19 +136,14 @@ impl<'a> Clone for Box<dyn 'a + CloneableAuthenticateFn> {
     }
 }
 
-pub trait MethodFn:
-    Fn(RpcState, Value) -> BoxFuture<'static, Value> + Send + Sync
-{
+pub trait MethodFn: Fn(RpcState, Value) -> BoxFuture<'static, Value> + Send + Sync {
     fn clone_box<'a>(&self) -> Box<dyn 'a + MethodFn>
     where
         Self: 'a;
 }
 impl<F> MethodFn for F
 where
-    F: Fn(RpcState, Value) -> BoxFuture<'static, Value>
-        + Clone
-        + Send
-        + Sync,
+    F: Fn(RpcState, Value) -> BoxFuture<'static, Value> + Clone + Send + Sync,
 {
     fn clone_box<'a>(&self) -> Box<dyn 'a + MethodFn>
     where
@@ -167,11 +161,7 @@ impl<'a> Clone for Box<dyn 'a + MethodFn> {
 pub trait Handler<G>: Clone + 'static {
     type Output;
     type Future: Future<Output = Self::Output>;
-    fn call(
-        &self,
-        state: RpcState,
-        request: G,
-    ) -> Self::Future;
+    fn call(&self, state: RpcState, request: G) -> Self::Future;
 }
 
 impl<F, G, Fut> Handler<G> for F
@@ -181,11 +171,7 @@ where
 {
     type Output = Fut::Output;
     type Future = Fut;
-    fn call(
-        &self,
-        state: RpcState,
-        request: G,
-    ) -> Self::Future {
+    fn call(&self, state: RpcState, request: G) -> Self::Future {
         self(state, request)
     }
 }
@@ -194,10 +180,7 @@ where
 pub struct RpcClients(Arc<DashMap<String, RpcClient>>);
 
 impl RpcClients {
-    pub fn emit_all<T: Serialize + Send + Clone + 'static>(
-        &self,
-        data: T,
-    ) {
+    pub fn emit_all<T: Serialize + Send + Clone + 'static>(&self, data: T) {
         for client in self.0.iter() {
             client.value().emit(data.clone());
         }
@@ -229,7 +212,10 @@ impl RpcState {
     }
 
     pub fn client(&self) -> RpcClient {
-        self.clients.0.get(&self.id).map(|c| c.value().clone())
+        self.clients
+            .0
+            .get(&self.id)
+            .map(|c| c.value().clone())
             .expect("Failed to get client")
     }
 
@@ -265,21 +251,19 @@ impl RpcServer {
         F::Future: Send + 'static,
     {
         info!("Registering method: {}", name);
-        let x = Box::new(
-            move |state: RpcState, val: Value| {
-                let method = method.clone();
-                let n: Pin<Box<dyn Future<Output = Value> + Send>> = Box::pin(async move {
-                    let g = G::from_value(val);
-                    let g = match g {
-                        Ok(g) => g,
-                        Err(e) => return RpcValue(e).into_value(),
-                    };
-                    let res = method.call(state, g).await;
-                    res.into_value()
-                });
-                n
-            },
-        );
+        let x = Box::new(move |state: RpcState, val: Value| {
+            let method = method.clone();
+            let n: Pin<Box<dyn Future<Output = Value> + Send>> = Box::pin(async move {
+                let g = G::from_value(val);
+                let g = match g {
+                    Ok(g) => g,
+                    Err(e) => return RpcValue(e).into_value(),
+                };
+                let res = method.call(state, g).await;
+                res.into_value()
+            });
+            n
+        });
         self.methods.insert(name.to_string(), x);
         self
     }
@@ -472,9 +456,14 @@ pub async fn handle_packet(
                         error: Error::InvalidMethod,
                     });
                 };
-                let result = method(RpcState {
-                    clients: clients.clone(), id: user_id.clone()
-                }, data).await;
+                let result = method(
+                    RpcState {
+                        clients: clients.clone(),
+                        id: user_id.clone(),
+                    },
+                    data,
+                )
+                .await;
                 serialize(&RpcApiResponse {
                     id: Some(id),
                     response: Some(result),
@@ -498,5 +487,3 @@ pub fn deserialize<T: for<'a> Deserialize<'a>>(buf: &[u8]) -> Result<T, rmp_serd
     let mut deserializer = Deserializer::new(buf);
     Deserialize::deserialize(&mut deserializer)
 }
-
-

@@ -2,9 +2,7 @@ use rapid::socket::{RpcResponder, RpcState, RpcValue};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    authentication::check_authenticated,
-    errors::Error,
-    services::database::channels::Channel,
+    authentication::check_authenticated, errors::Error, services::database::channels::Channel,
 };
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -13,10 +11,7 @@ pub struct GetChannelMethod {
     id: String,
 }
 
-pub async fn get_channel(
-    state: RpcState,
-    data: RpcValue<GetChannelMethod>,
-) -> impl RpcResponder {
+pub async fn get_channel(state: RpcState, data: RpcValue<GetChannelMethod>) -> impl RpcResponder {
     let data = data.into_inner();
     let user = check_authenticated(&state)?;
     let channel = Channel::get(&data.id).await?;
@@ -41,10 +36,7 @@ pub struct GetChannelResponse {
 #[serde(rename_all = "camelCase")]
 pub struct GetChannelsMethod {}
 
-pub async fn get_channels(
-    state: RpcState,
-    _: RpcValue<GetChannelsMethod>,
-) -> impl RpcResponder {
+pub async fn get_channels(state: RpcState, _: RpcValue<GetChannelsMethod>) -> impl RpcResponder {
     let user = check_authenticated(&state)?;
     let channels = user.get_channels().await?;
     Ok::<_, Error>(RpcValue(GetChannelsResponse { channels }))

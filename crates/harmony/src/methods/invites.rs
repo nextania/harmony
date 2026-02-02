@@ -68,10 +68,7 @@ pub struct GetInviteMethod {
     code: String,
 }
 
-pub async fn get_invite(
-    state: RpcState,
-    data: RpcValue<GetInviteMethod>,
-) -> impl RpcResponder {
+pub async fn get_invite(state: RpcState, data: RpcValue<GetInviteMethod>) -> impl RpcResponder {
     let data = data.into_inner();
     let user = check_authenticated(&state)?;
     let invite = Invite::get(&data.code).await?;
@@ -135,10 +132,7 @@ pub struct GetInvitesMethod {
     channel_id: String,
 }
 
-pub async fn get_invites(
-    state: RpcState,
-    data: RpcValue<GetInvitesMethod>,
-) -> impl RpcResponder {
+pub async fn get_invites(state: RpcState, data: RpcValue<GetInvitesMethod>) -> impl RpcResponder {
     let data = data.into_inner();
     let user = check_authenticated(&state)?;
     let channel = Channel::get(&data.channel_id).await?;

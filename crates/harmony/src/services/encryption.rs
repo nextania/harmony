@@ -21,8 +21,7 @@ pub fn random_number(size: usize) -> Vec<u8> {
 
 pub fn generate_token() -> String {
     let rng = rand::rng();
-    rng
-        .sample_iter(&Alphanumeric)
+    rng.sample_iter(&Alphanumeric)
         .take(64)
         .map(char::from)
         .collect()

@@ -11,7 +11,7 @@ pub mod wt;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
-    
+
     tracing_subscriber::registry()
         .with(fmt::layer())
         .with(EnvFilter::from_default_env())
@@ -20,8 +20,8 @@ async fn main() -> anyhow::Result<()> {
     redis::connect();
     redis::get_connection().await;
     info!("Connected to Redis");
-    
+
     redis::listen();
-    
+
     wt::listen().await
 }

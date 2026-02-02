@@ -17,7 +17,7 @@ use crate::{
 use super::{
     database::calls::Call,
     encryption::{deserialize, serialize},
-    redis::{get_connection, get_pubsub},
+    redis::{get_connection, get_pubsub, INSTANCE_ID},
 };
 
 lazy_static! {
@@ -48,6 +48,7 @@ impl Node {
 }
 
 pub fn spawn_voice_events() {
+    // node events
     task::spawn(async move {
         let mut pubsub = get_pubsub().await;
         pubsub.subscribe("nodes").await.unwrap();
@@ -57,7 +58,7 @@ pub fn spawn_voice_events() {
                 "nodes",
                 NodeEvent {
                     event: NodeEventKind::Query,
-                    id: "server".to_owned(),
+                    id: INSTANCE_ID.clone(),
                 },
             )
             .await
@@ -95,46 +96,92 @@ pub fn spawn_voice_events() {
                     AVAILABLE_NODES.remove(&id);
                     info!("Node {} disconnected", id);
                 }
-                NodeEvent {
-                    event: NodeEventKind::UserDisconnect { id: session_id, call_id },
-                    ..
-                } => {
-                    // TODO: emit event to all clients in the call
-                    if let Ok(Some(mut call)) = ActiveCall::get(&call_id).await {
-                        if let Err(e) = call.leave_user(&session_id).await {
-                            log::error!("Failed to remove user {} from call {}: {:?}", session_id, call_id, e);
-                        } else {
-                            info!("User {} disconnected from call {}", session_id, call_id);
-                        }
-                    }
-                }
-                NodeEvent {
-                    event: NodeEventKind::UserConnect { id: session_id, call_id },
-                    ..
-                } => {
-                    // TODO: emit event to all clients in the call 
-                    info!("User {} connected to call {}", session_id, call_id);
-                    if let Ok(call) = ActiveCall::get(&call_id).await {
-                        if let Some(mut call) = call {
-                            call.empty_since = None;
-                            if let Err(e) = call.update().await {
-                                log::error!("Failed to update call {} in redis: {:?}", call_id, e);
-                            }
-                            let member_ids: Vec<String> = call.members.iter().map(|(user_id, _)| user_id.clone()).collect();
-                            if let Err(e) = Call::update(&call_id, member_ids).await {
-                                log::error!("Failed to update call {} in database: {:?}", call_id, e);
-                            }
-                        } else {
-                            // TODO: this is most likely due to the call expiring while user is connecting
-                            // this should RESTORE the call into memory
-                            log::warn!("Call {} not found when user {} tried to connect", call_id, session_id);
-                        }
-                    }
-                }
-                NodeEvent { .. } => {}
+                _ => {}
             }
         }
     });
+    
+    // stream for user lifecycle events
+    task::spawn(async move {
+        let mut connection = get_connection().await;
+        let consumer_name = INSTANCE_ID.clone();
+        
+        loop {
+            let result = connection.xread_options::<
+                _, _,
+                redis::streams::StreamReadReply,
+            >(
+                &["voice:events:user-lifecycle"], 
+                &[">"],
+                &redis::streams::StreamReadOptions::default()
+                    .group("harmony-servers", &consumer_name)
+                    .block(5000)
+                    .count(10),
+            ).await;
+            
+            let reply = match result {
+                Ok(reply) => reply,
+                Err(e) => {
+                    log::error!("Failed to read from stream: {:?}", e);
+                    time::sleep(Duration::from_secs(1)).await;
+                    continue;
+                }
+            };
+            
+            for stream_key in &reply.keys {
+                for stream_id in &stream_key.ids {
+                    let message_id = &stream_id.id;
+                    
+                    let event_data = match stream_id.map.get("data") {
+                        Some(redis::Value::BulkString(bytes)) => bytes,
+                        _ => {
+                            log::warn!("Invalid stream message format");
+                            continue;
+                        }
+                    };
+                    
+                    let payload: NodeEvent = match deserialize(event_data) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            log::error!("Failed to deserialize event: {:?}", e);
+                            let _ = connection.xack::<_, _, _, ()>(
+                                "voice:events:user-lifecycle",
+                                "harmony-servers",
+                                &[message_id],
+                            ).await;
+                            continue;
+                        }
+                    };
+                    
+                    let process_result = match payload.event {
+                        NodeEventKind::UserDisconnect { ref id, ref call_id } => {
+                            process_user_disconnect(id, call_id).await
+                        }
+                        NodeEventKind::UserConnect { ref id, ref call_id } => {
+                            process_user_connect(id, call_id).await
+                        }
+                        _ => {
+                            Ok(())
+                        }
+                    };
+                    
+                    if let Err(e) = process_result {
+                        log::error!("Failed to process event: {:?}", e);
+                        // should be retried later
+                        continue;
+                    }
+                    
+                    let _ = connection.xack::<_, _, _, ()>(
+                        "voice:events:user-lifecycle",
+                        "harmony-servers",
+                        &[message_id],
+                    ).await;
+                }
+            }
+        }
+    });
+    
+    // monitor node timeout
     task::spawn(async move {
         loop {
             let time = chrono::Utc::now().timestamp_millis();
@@ -151,6 +198,43 @@ pub fn spawn_voice_events() {
             time::sleep(std::time::Duration::from_millis(1000)).await;
         }
     });
+}
+
+// TODO: broadcast these events to all users in call
+
+async fn process_user_disconnect(session_id: &str, call_id: &str) -> Result<()> {
+    if let Ok(Some(mut call)) = ActiveCall::get(&call_id.to_string()).await {
+        if let Err(e) = call.leave_user(&session_id.to_string()).await {
+            log::error!("Failed to remove user {} from call {}: {:?}", session_id, call_id, e);
+            return Err(e);
+        } else {
+            info!("User {} disconnected from call {}", session_id, call_id);
+        }
+    }
+    Ok(())
+}
+
+async fn process_user_connect(session_id: &str, call_id: &str) -> Result<()> {
+    info!("User {} connected to call {}", session_id, call_id);
+    if let Ok(call) = ActiveCall::get(&call_id.to_string()).await {
+        if let Some(mut call) = call {
+            call.empty_since = None;
+            if let Err(e) = call.update().await {
+                log::error!("Failed to update call {} in redis: {:?}", call_id, e);
+                return Err(e);
+            }
+            let member_ids: Vec<String> = call.members.iter().map(|(user_id, _)| user_id.clone()).collect();
+            if let Err(e) = Call::update(&call_id.to_string(), member_ids).await {
+                log::error!("Failed to update call {} in database: {:?}", call_id, e);
+                return Err(e);
+            }
+        } else {
+            // TODO: this is most likely due to the call expiring while user is connecting
+            // this should RESTORE the call into memory
+            log::warn!("Call {} not found when user {} tried to connect", call_id, session_id);
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

@@ -27,10 +27,13 @@ async fn main() {
     database::connect().await;
     info!("Connected to database");
 
-    // run DB migrations as necessary
-
-    redis::connect().await;
+    redis::connect();
+    redis::get_connection().await;
     info!("Connected to Redis");
+    
+    redis::create_streams().await.expect("Failed to initialize Redis streams");
+    info!("Initialized Redis streams");
+    
     voice::spawn_voice_events();
 
     let listen_address = LISTEN_ADDRESS.to_owned();

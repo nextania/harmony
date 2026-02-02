@@ -120,15 +120,17 @@ async fn handle_session(
             }
         }
         let mut redis_conn = crate::redis::get_connection().await;
-        let _ = redis_conn.publish::<&str, NodeEvent, ()>(
-            "nodes",
-            NodeEvent {
-                id: session_id.to_string(),
-                event: NodeEventKind::UserDisconnect {
-                    id: state.session_id.clone(),
-                    call_id: state.call_id.clone(),
-                },
+        let event = NodeEvent {
+            id: session_id.to_string(),
+            event: NodeEventKind::UserDisconnect {
+                id: state.session_id.clone(),
+                call_id: state.call_id.clone(),
             },
+        };
+        let _: Result<(), redis::RedisError> = redis_conn.xadd::<_, _, _, _, ()>(
+            "voice:events:user-lifecycle",
+            "*",
+            &[("data", event)],
         ).await;
     }
     
@@ -404,18 +406,20 @@ async fn handle_connect(
     }).await?;
     
     let mut redis_conn = crate::redis::get_connection().await;
-    redis_conn.publish::<&str, NodeEvent, ()>(
-        "nodes",
-        NodeEvent {
-            id: state.id.clone(),
-            event: NodeEventKind::UserConnect {
-                // Note: session_id here refers to the instance of the user,
-                // as opposed to the specific connection
-                id: session_data.session_id.clone(),
-                call_id: session_data.call_id.clone(),
-            },
+    let event = NodeEvent {
+        id: state.id.clone(),
+        event: NodeEventKind::UserConnect {
+            // Note: session_id here refers to the instance of the user,
+            // as opposed to the specific connection
+            id: session_data.session_id.clone(),
+            call_id: session_data.call_id.clone(),
         },
-    ).await?;
+    };
+    let _: Result<(), redis::RedisError> = redis_conn.xadd::<_, _, _, _, ()>(
+        "voice:events:user-lifecycle",
+        "*",
+        &[("data", event)],
+    ).await;
     
     redis_conn.expire::<_, ()>(&format!("session:{}", session_token), 60).await?;
     

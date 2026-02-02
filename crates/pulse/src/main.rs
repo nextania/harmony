@@ -21,5 +21,7 @@ async fn main() -> anyhow::Result<()> {
     redis::get_connection().await;
     info!("Connected to Redis");
     
+    redis::listen();
+    
     wt::listen().await
 }

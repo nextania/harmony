@@ -44,7 +44,6 @@ pub async fn create_call_token(
     let token = call
         .get_token(&user.id, data.initial_muted, data.initial_deafened)
         .await?;
-    // TODO: return all users in the call with their states
     Ok(RpcValue(CreateCallTokenResponse { token }))
 }
 

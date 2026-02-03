@@ -371,7 +371,6 @@ async fn handle_connect(
         let _ = old_session
             .message_tx
             .send(WtMessageS2C::Disconnected { reconnect: None });
-        // TODO:
         old_session
             .connection
             .close(0u32.into(), b"Session replaced by reconnection");
@@ -562,6 +561,8 @@ async fn handle_stop_produce(
         return Ok(());
     };
     call.stop_producing(&state.id, &global_track_id);
+    let mut session = state.session_data.write().await;
+    session.producers.remove(&track_id);
 
     send_message(
         send,

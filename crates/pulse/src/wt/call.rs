@@ -85,8 +85,6 @@ impl Call {
         self.tracks.remove(track_id);
         self.consumers.remove(track_id);
 
-        // TODO: remove from session state producers
-
         for member in self.members.iter() {
             if member.key() == session_id {
                 continue;

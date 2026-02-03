@@ -37,7 +37,7 @@ pub struct Node {
 
 impl Node {
     pub fn suppress(&self) {
-        // TODO: disable node and clean up calls (move to other server if possible)
+        // TODO:!! disable node and clean up calls (move to other server if possible)
     }
 
     pub fn new(id: String, description: NodeDescription) -> Self {
@@ -204,6 +204,30 @@ pub fn spawn_voice_events() {
             time::sleep(std::time::Duration::from_millis(1000)).await;
         }
     });
+
+    // move expired calls to database
+    task::spawn(async move {
+        loop {
+            let mut redis = get_connection().await;
+            let time = chrono::Utc::now().timestamp_millis() - 30000;
+            let expired_calls: Vec<(String, i64)> = redis.zpopmin("voice:empty-calls", 1).await.unwrap_or_default();
+            let call_id = expired_calls.get(0);
+            if let Some(call_id) = call_id {
+                // if it's not expired, re-add and wait until expired
+                if call_id.1 > time {
+                    let _ = redis.zadd::<_, _, _, ()>("voice:empty-calls", &call_id.0, call_id.1).await;
+                    time::sleep(Duration::from_millis((call_id.1 - time) as u64)).await;
+                    continue;
+                }
+                if let Ok(Some(call)) = ActiveCall::get(&call_id.0).await {
+                    if let Err(e) = call.end().await {
+                        tracing::error!("Failed to end call {}: {:?}", call_id.0, e);
+                        continue;
+                    }
+                }
+            }
+        }
+    });
 }
 
 async fn process_user_disconnect(session_id: &str, call_id: &str) -> Result<()> {
@@ -244,6 +268,17 @@ async fn process_user_connect(session_id: &str, call_id: &str) -> Result<()> {
     if let Ok(call) = ActiveCall::get(&call_id.to_string()).await {
         if let Some(mut call) = call {
             call.empty_since = None;
+            // remove item from pending sessions
+            let session: Vec<CallSession> = call.pending_sessions.extract_if(.., |s| s.id == session_id).collect();
+            let Some(session) = session.get(0) else {
+                tracing::warn!(
+                    "Session {} not found in pending sessions for call {}",
+                    session_id,
+                    call_id
+                );
+                return Err(Error::NotFound);
+            };
+            call.members.push(session.clone());
             if let Err(e) = call.update().await {
                 tracing::error!("Failed to update call {} in redis: {:?}", call_id, e);
                 return Err(e);
@@ -253,14 +288,6 @@ async fn process_user_connect(session_id: &str, call_id: &str) -> Result<()> {
                 .iter()
                 .map(|session| session.user_id.clone())
                 .collect();
-            if let Err(e) = Call::update(&call_id.to_string(), member_ids.clone()).await {
-                tracing::error!("Failed to update call {} in database: {:?}", call_id, e);
-                return Err(e);
-            }
-
-            let Some(session) = call.members.iter().find(|session| session.id == session_id) else {
-                return Err(Error::NotFound);
-            };
             // including the one who just joined
             let clients = RPC_CLIENTS.get().expect("RPC clients not initialized");
             emit_to_ids(
@@ -275,7 +302,7 @@ async fn process_user_connect(session_id: &str, call_id: &str) -> Result<()> {
                 }),
             );
         } else {
-            // TODO: this is most likely due to the call expiring while user is connecting
+            // TODO:!! this is most likely due to the call expiring while user is connecting
             // this should RESTORE the call into memory
             tracing::warn!(
                 "Call {} not found when user {} tried to connect",
@@ -295,6 +322,7 @@ pub struct ActiveCall {
     pub channel_id: String,
     pub assigned_node: String,
     pub empty_since: Option<i64>,
+    pub pending_sessions: Vec<CallSession>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -370,6 +398,7 @@ impl ActiveCall {
             channel_id: channel.clone(),
             assigned_node,
             empty_since: Some(time),
+            pending_sessions: vec![],
         };
         redis
             .set::<String, ActiveCall, ()>(format!("call:{}", call.id), call.clone())
@@ -379,6 +408,11 @@ impl ActiveCall {
             .set::<String, String, ()>(format!("call:channel:{}", channel), call.id.clone())
             .await
             .unwrap();
+        redis.zadd::<_, _, _, ()>(
+            "voice:empty-calls",
+            &call.id,
+            time,
+        ).await?;
         let stored_call = Call {
             channel_id: channel.clone(),
             id: call.id.clone(),
@@ -388,53 +422,6 @@ impl ActiveCall {
             initiator: initiator.to_owned(),
         };
         stored_call.create().await?;
-        let call_id = call.id.clone();
-        // FIXME: this links a task to a specific server instance
-        // if that instance goes down, the call will never be cleaned up
-        task::spawn(async move {
-            const EMPTY_TIMEOUT_MS: i64 = 5 * 60 * 1000; // 5 minutes
-            let mut last_empty = time;
-
-            loop {
-                // sleep until last_empty + EMPTY_TIMEOUT_MS
-                time::sleep(Duration::from_millis(
-                    (last_empty + EMPTY_TIMEOUT_MS - chrono::Utc::now().timestamp_millis()) as u64,
-                ))
-                .await;
-
-                let call = match ActiveCall::get(&call_id).await {
-                    Ok(Some(call)) => call,
-                    Ok(None) => {
-                        info!("Call {} no longer exists, stopping monitor", call_id);
-                        break;
-                    }
-                    Err(e) => {
-                        tracing::error!("Failed to get call {}: {:?}", call_id, e);
-                        continue;
-                    }
-                };
-
-                if call.members.is_empty()
-                    && let Some(empty_time) = call.empty_since
-                {
-                    let now = chrono::Utc::now().timestamp_millis();
-                    if now - empty_time >= EMPTY_TIMEOUT_MS {
-                        info!("Call {} has been empty for 5 minutes, ending call", call_id);
-                        if let Err(e) = call.end().await {
-                            tracing::error!("Failed to end call {}: {:?}", call_id, e);
-                        }
-                        break;
-                    }
-                    last_empty = empty_time;
-                }
-            }
-        });
-
-        task::spawn(async move {
-            loop {
-                // TODO: periodically update ended_at in db
-            }
-        });
         Ok(call)
     }
 
@@ -459,6 +446,16 @@ impl ActiveCall {
         redis
             .set::<String, ActiveCall, ActiveCall>(format!("call:{}", self.id), self.clone())
             .await?;
+        
+        let member_ids: Vec<String> = self
+            .members
+            .iter()
+            .map(|session| session.user_id.clone())
+            .collect();
+        if let Err(e) = Call::update(&self.id.to_string(), member_ids.clone()).await {
+            tracing::error!("Failed to update call {} in database: {:?}", self.id, e);
+            return Err(e);
+        }
         Ok(())
     }
 
@@ -469,7 +466,7 @@ impl ActiveCall {
         initial_deafened: bool,
     ) -> Result<String> {
         let session_id = ulid::Ulid::new().to_string();
-        self.members.push(CallSession {
+        self.pending_sessions.push(CallSession {
             id: session_id.clone(),
             user_id: user_id.clone(),
             call_id: self.id.clone(),
@@ -477,13 +474,6 @@ impl ActiveCall {
             deafened: initial_deafened,
         });
         self.update().await?;
-
-        let member_ids: Vec<String> = self
-            .members
-            .iter()
-            .map(|session| session.user_id.clone())
-            .collect();
-        Call::update(&self.id, member_ids).await?;
 
         let token = generate_token();
         let mut redis = get_connection().await;
@@ -497,7 +487,7 @@ impl ActiveCall {
 
                     can_listen: !initial_deafened,
                     can_speak: !initial_muted,
-                    // TODO:
+                    // TODO:!! support limiting video/screen
                     can_screen: true,
                     can_video: true,
                 },
@@ -512,15 +502,14 @@ impl ActiveCall {
         if self.members.is_empty() {
             let time = chrono::Utc::now().timestamp_millis();
             self.empty_since = Some(time);
+            let mut redis = get_connection().await;
+            redis.zadd::<_, _, _, ()>(
+                "voice:empty-calls",
+                &self.id,
+                time,
+            ).await?;
         }
         self.update().await?;
-
-        let member_ids: Vec<String> = self
-            .members
-            .iter()
-            .map(|session| session.user_id.clone())
-            .collect();
-        Call::update(&self.id, member_ids).await?;
 
         Ok(())
     }

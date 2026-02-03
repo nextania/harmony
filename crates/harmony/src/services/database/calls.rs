@@ -14,7 +14,6 @@ pub struct Call {
 }
 
 impl Call {
-    // save in mongodb
     pub async fn create(&self) -> Result<()> {
         let database = super::get_database();
         database
@@ -23,9 +22,8 @@ impl Call {
             .await?;
         Ok(())
     }
-    // updating it periodically creates persistence
+    
     pub async fn update(id: &String, members: Vec<String>) -> Result<()> {
-        // TODO: only push changes
         let database = super::get_database();
         database
             .collection::<Call>("calls")
@@ -34,8 +32,12 @@ impl Call {
                     "id": id,
                 },
                 doc! {
+                    "$addToSet": {
+                        "joined_members": {
+                            "$each": members
+                        }
+                    },
                     "$set": {
-                        "joined_members": members,
                         "ended_at": chrono::Utc::now().timestamp_millis(),
                     },
                 },

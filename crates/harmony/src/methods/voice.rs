@@ -168,9 +168,7 @@ pub async fn update_voice_state(
             deafened: session.deafened,
         },
     };
-    redis
-        .publish::<&str, NodeEvent, ()>("nodes", event)
-        .await?;
+    redis.publish::<&str, NodeEvent, ()>("nodes", event).await?;
 
     let member_user_ids: Vec<String> = call.members.iter().map(|s| s.user_id.clone()).collect();
 

@@ -22,7 +22,7 @@ impl Call {
             .await?;
         Ok(())
     }
-    
+
     pub async fn update(id: &String, members: Vec<String>) -> Result<()> {
         let database = super::get_database();
         database

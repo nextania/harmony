@@ -210,12 +210,17 @@ pub fn spawn_voice_events() {
         loop {
             let mut redis = get_connection().await;
             let time = chrono::Utc::now().timestamp_millis() - 30000;
-            let expired_calls: Vec<(String, i64)> = redis.zpopmin("voice:empty-calls", 1).await.unwrap_or_default();
+            let expired_calls: Vec<(String, i64)> = redis
+                .zpopmin("voice:empty-calls", 1)
+                .await
+                .unwrap_or_default();
             let call_id = expired_calls.get(0);
             if let Some(call_id) = call_id {
                 // if it's not expired, re-add and wait until expired
                 if call_id.1 > time {
-                    let _ = redis.zadd::<_, _, _, ()>("voice:empty-calls", &call_id.0, call_id.1).await;
+                    let _ = redis
+                        .zadd::<_, _, _, ()>("voice:empty-calls", &call_id.0, call_id.1)
+                        .await;
                     time::sleep(Duration::from_millis((call_id.1 - time) as u64)).await;
                     continue;
                 }
@@ -269,7 +274,10 @@ async fn process_user_connect(session_id: &str, call_id: &str) -> Result<()> {
         if let Some(mut call) = call {
             call.empty_since = None;
             // remove item from pending sessions
-            let session: Vec<CallSession> = call.pending_sessions.extract_if(.., |s| s.id == session_id).collect();
+            let session: Vec<CallSession> = call
+                .pending_sessions
+                .extract_if(.., |s| s.id == session_id)
+                .collect();
             let Some(session) = session.get(0) else {
                 tracing::warn!(
                     "Session {} not found in pending sessions for call {}",
@@ -408,11 +416,9 @@ impl ActiveCall {
             .set::<String, String, ()>(format!("call:channel:{}", channel), call.id.clone())
             .await
             .unwrap();
-        redis.zadd::<_, _, _, ()>(
-            "voice:empty-calls",
-            &call.id,
-            time,
-        ).await?;
+        redis
+            .zadd::<_, _, _, ()>("voice:empty-calls", &call.id, time)
+            .await?;
         let stored_call = Call {
             channel_id: channel.clone(),
             id: call.id.clone(),
@@ -446,7 +452,7 @@ impl ActiveCall {
         redis
             .set::<String, ActiveCall, ActiveCall>(format!("call:{}", self.id), self.clone())
             .await?;
-        
+
         let member_ids: Vec<String> = self
             .members
             .iter()
@@ -503,11 +509,9 @@ impl ActiveCall {
             let time = chrono::Utc::now().timestamp_millis();
             self.empty_since = Some(time);
             let mut redis = get_connection().await;
-            redis.zadd::<_, _, _, ()>(
-                "voice:empty-calls",
-                &self.id,
-                time,
-            ).await?;
+            redis
+                .zadd::<_, _, _, ()>("voice:empty-calls", &self.id, time)
+                .await?;
         }
         self.update().await?;
 

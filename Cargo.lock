@@ -2940,6 +2940,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "pulse-protocol"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chacha20poly1305",
+ "dashmap",
+ "openmls",
+ "openmls_basic_credential",
+ "openmls_rust_crypto",
+ "openmls_traits",
+ "pulse-api",
+ "rkyv",
+ "thiserror 2.0.18",
+ "tls_codec",
+ "tokio",
+ "tracing",
+ "wtransport",
+]
+
+[[package]]
 name = "quinn"
 version = "0.11.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"

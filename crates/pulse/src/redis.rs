@@ -107,11 +107,12 @@ pub fn listen() -> () {
                                 for track in session_data.producers.values() {
                                     if matches!(track.media_hint, pulse_api::MediaHint::Audio) {
                                         for member_id in call.members.iter() {
-                                            if *member_id.key() == session_id {
+                                            let member_key: &String = member_id.key();
+                                            if member_key == &session_id {
                                                 continue;
                                             }
                                             if let Some(member_session) =
-                                                crate::wt::GLOBAL_SESSIONS.get(member_id.key())
+                                                crate::wt::GLOBAL_SESSIONS.get(member_key)
                                             {
                                                 let _ = member_session.message_tx.send(
                                                     pulse_api::WtMessageS2C::TrackUnavailable {
@@ -178,7 +179,8 @@ pub fn listen() -> () {
                 } => {
                     if let Some((_, call)) = crate::wt::GLOBAL_CALLS.remove(&call_id) {
                         for member_id in call.members.iter() {
-                            if let Some(session) = crate::wt::GLOBAL_SESSIONS.get(member_id.key()) {
+                            let member_key: &String = member_id.key();
+                            if let Some(session) = crate::wt::GLOBAL_SESSIONS.get(member_key) {
                                 let _ = session.message_tx.send(
                                     pulse_api::WtMessageS2C::Disconnected { reconnect: None },
                                 );

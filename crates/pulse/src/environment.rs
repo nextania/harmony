@@ -3,6 +3,8 @@ use std::{env, net::IpAddr};
 use lazy_static::lazy_static;
 use pulse_api::Region;
 
+use crate::mls::ExternalSenderIdentity;
+
 lazy_static! {
     pub static ref LISTEN_ADDRESS: String =
         env::var("LISTEN_ADDRESS").unwrap_or("0.0.0.0:3001".to_string());
@@ -17,4 +19,10 @@ lazy_static! {
         .expect("REGION must be set")
         .parse()
         .expect("Invalid region");
+    
+    /// External sender identity for MLS group management
+    /// Generated once at startup and used for all Add/Remove proposals
+    pub static ref EXTERNAL_SENDER: ExternalSenderIdentity = 
+        ExternalSenderIdentity::generate("pulse")
+            .expect("Failed to generate external sender identity");
 }

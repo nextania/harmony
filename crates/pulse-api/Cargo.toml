@@ -10,3 +10,6 @@ redis = "1.0.3"
 serde = { version = "1.0.144", features = ["derive"] }
 rmp-serde = "1.1.2"
 rkyv = "0.8.14"
+
+# MLS dependencies
+tls_codec = "0.4"

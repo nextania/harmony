@@ -5,6 +5,7 @@ use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberI
 
 pub mod environment;
 pub mod errors;
+pub mod mls;
 pub mod redis;
 pub mod wt;
 

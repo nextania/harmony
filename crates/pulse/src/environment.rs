@@ -19,10 +19,10 @@ lazy_static! {
         .expect("REGION must be set")
         .parse()
         .expect("Invalid region");
-    
+
     /// External sender identity for MLS group management
     /// Generated once at startup and used for all Add/Remove proposals
-    pub static ref EXTERNAL_SENDER: ExternalSenderIdentity = 
+    pub static ref EXTERNAL_SENDER: ExternalSenderIdentity =
         ExternalSenderIdentity::generate("pulse")
             .expect("Failed to generate external sender identity");
 }

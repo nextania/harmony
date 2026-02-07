@@ -214,7 +214,7 @@ pub fn spawn_voice_events() {
                 .zpopmin("voice:empty-calls", 1)
                 .await
                 .unwrap_or_default();
-            let call_id = expired_calls.get(0);
+            let call_id = expired_calls.first();
             if let Some(call_id) = call_id {
                 // if it's not expired, re-add and wait until expired
                 if call_id.1 > time {
@@ -224,11 +224,11 @@ pub fn spawn_voice_events() {
                     time::sleep(Duration::from_millis((call_id.1 - time) as u64)).await;
                     continue;
                 }
-                if let Ok(Some(call)) = ActiveCall::get(&call_id.0).await {
-                    if let Err(e) = call.end().await {
-                        tracing::error!("Failed to end call {}: {:?}", call_id.0, e);
-                        continue;
-                    }
+                if let Ok(Some(call)) = ActiveCall::get(&call_id.0).await
+                    && let Err(e) = call.end().await
+                {
+                    tracing::error!("Failed to end call {}: {:?}", call_id.0, e);
+                    continue;
                 }
             }
         }
@@ -278,7 +278,7 @@ async fn process_user_connect(session_id: &str, call_id: &str) -> Result<()> {
                 .pending_sessions
                 .extract_if(.., |s| s.id == session_id)
                 .collect();
-            let Some(session) = session.get(0) else {
+            let Some(session) = session.first() else {
                 tracing::warn!(
                     "Session {} not found in pending sessions for call {}",
                     session_id,
@@ -467,14 +467,14 @@ impl ActiveCall {
 
     pub async fn get_token(
         &mut self,
-        user_id: &String,
+        user_id: &str,
         initial_muted: bool,
         initial_deafened: bool,
     ) -> Result<String> {
         let session_id = ulid::Ulid::new().to_string();
         self.pending_sessions.push(CallSession {
             id: session_id.clone(),
-            user_id: user_id.clone(),
+            user_id: user_id.to_string(),
             call_id: self.id.clone(),
             muted: initial_muted,
             deafened: initial_deafened,

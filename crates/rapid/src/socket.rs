@@ -68,18 +68,18 @@ impl RpcClient {
 // pub type RpcMethod<T: RpcRequest> = dyn Fn(RpcClients, String, T) -> impl RpcResponder;
 
 pub trait RpcResponder {
-    fn into_value(&self) -> Value;
+    fn into_value(self) -> Value;
 }
 
 pub struct RpcValue<T>(pub T);
 
 impl<T: Serialize> RpcResponder for RpcValue<T> {
-    fn into_value(&self) -> Value {
+    fn into_value(self) -> Value {
         to_value(&self.0).unwrap()
     }
 }
 impl<T: RpcResponder, U: RpcResponder> RpcResponder for Result<T, U> {
-    fn into_value(&self) -> Value {
+    fn into_value(self) -> Value {
         match self {
             Ok(value) => value.into_value(),
             Err(error) => error.into_value(),
@@ -375,9 +375,7 @@ async fn start_client(
                 )
                 .await;
                 let mut client = clients.0.get_mut(&id.clone()).unwrap();
-                client
-                    .send(response.expect("Failed to serialize").into())
-                    .await;
+                client.send(response.expect("Failed to serialize")).await;
             }
             Message::Close(_) => {
                 debug!("Received close");
@@ -398,9 +396,9 @@ pub struct RpcApiResponse {
     response: Option<Value>,
 }
 
-impl Into<Value> for Error {
-    fn into(self) -> Value {
-        to_value(&self).unwrap()
+impl From<Error> for Value {
+    fn from(value: Error) -> Value {
+        to_value(&value).unwrap()
     }
 }
 
@@ -409,9 +407,9 @@ struct RpcApiError {
     error: Error,
 }
 
-impl Into<Value> for RpcApiError {
-    fn into(self) -> Value {
-        to_value(&self).unwrap()
+impl From<RpcApiError> for Value {
+    fn from(value: RpcApiError) -> Value {
+        to_value(&value).unwrap()
     }
 }
 
@@ -435,9 +433,9 @@ pub async fn handle_packet(
                 .map(|user| {
                     let mut client = clients.0.get_mut(user_id).unwrap();
                     client.user = Some(Arc::new(user));
-                    return serialize(&RpcApiEvent::Identify {});
+                    serialize(&RpcApiEvent::Identify {})
                 })
-                .unwrap_or_else(|e| serialize(&RpcApiError { error: e.into() })),
+                .unwrap_or_else(|e| serialize(&RpcApiError { error: e })),
             RpcApiRequest::Heartbeat {} => {
                 let mut client = clients.0.get_mut(user_id).unwrap();
                 client.heartbeat_tx.send(()).await.unwrap();

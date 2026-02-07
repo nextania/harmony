@@ -7,12 +7,12 @@ use pulse_api::{
     WtTrackData,
 };
 use redis::AsyncCommands;
-use tokio::{task, time};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
+use tokio::sync::{Mutex, RwLock, mpsc};
 use tokio::time::Instant;
+use tokio::{task, time};
 use ulid::Ulid;
 use wtransport::endpoint::endpoint_side::Server;
 use wtransport::{Endpoint, ServerConfig};
@@ -117,7 +117,7 @@ async fn handle_session(
             for global_id in producer_global_ids {
                 call.stop_producing(&state.id, &global_id);
             }
-            
+
             broadcast_proposals(&call).await;
         }
         let mut redis_conn = crate::redis::get_connection().await;
@@ -140,10 +140,9 @@ async fn broadcast_proposals(call: &Call) {
     if let Some((proposals, recipients, epoch)) = proposals {
         for recipient in recipients {
             if let Some(session) = GLOBAL_SESSIONS.get(&recipient) {
-                let _ = session
-                    .message_tx
-                    .send(WtMessageS2C::MlsProposals { proposals: proposals.clone() });
-                
+                let _ = session.message_tx.send(WtMessageS2C::MlsProposals {
+                    proposals: proposals.clone(),
+                });
             }
         }
         let state = call.mls_state.clone();
@@ -153,7 +152,7 @@ async fn broadcast_proposals(call: &Call) {
             // if no commits received after 10 seconds,
             // then destroy the call
             let state = state.lock().await;
-            if state.pending_commit.is_some()  && state.current_epoch == epoch {
+            if state.pending_commit.is_some() && state.current_epoch == epoch {
                 GLOBAL_CALLS.remove(&id);
                 info!("Destroyed call {} due to inactivity", id);
             }
@@ -278,11 +277,9 @@ async fn handle_datagram(payload: &[u8], session: &SessionState) -> anyhow::Resu
 
     let session_inner = session.session_data.read().await;
     let track_info = session_inner.producers.get(&track_id).unwrap();
-    if matches!(track_info.media_hint, MediaHint::Audio) {
-        if !session_inner.can_speak {
-            // drop muted audio packets
-            return Ok(());
-        }
+    if matches!(track_info.media_hint, MediaHint::Audio) && !session_inner.can_speak {
+        // drop muted audio packets
+        return Ok(());
     }
 
     call.dispatch(&track_id, &message.data).await;
@@ -318,11 +315,23 @@ async fn handle_message(
     message_tx: mpsc::UnboundedSender<WtMessageS2C>,
 ) -> anyhow::Result<()> {
     let Some(state) = GLOBAL_SESSIONS.get(session_id) else {
-        let WtMessageC2S::Connect { session_token, key_package } = message else {
+        let WtMessageC2S::Connect {
+            session_token,
+            key_package,
+        } = message
+        else {
             warn!("Received message before authentication");
             return Ok(());
         };
-        handle_connect(session_token, key_package, send, session_id, connection, message_tx).await?;
+        handle_connect(
+            session_token,
+            key_package,
+            send,
+            session_id,
+            connection,
+            message_tx,
+        )
+        .await?;
         return Ok(());
     };
     let state = state.value();
@@ -346,7 +355,11 @@ async fn handle_message(
         WtMessageC2S::Heartbeat {} => {
             handle_heartbeat(send, state).await?;
         }
-        WtMessageC2S::MlsCommit { commit_data, epoch, welcome_data } => {
+        WtMessageC2S::MlsCommit {
+            commit_data,
+            epoch,
+            welcome_data,
+        } => {
             handle_mls_commit(commit_data, epoch, welcome_data, send, state).await?;
         }
         WtMessageC2S::CommitAck { epoch } => {
@@ -370,9 +383,7 @@ async fn handle_connect(
 ) -> anyhow::Result<()> {
     let mut redis_conn = crate::redis::get_connection().await;
 
-    let session_data: Option<String> = redis_conn
-        .get(&format!("session:{}", session_token))
-        .await?;
+    let session_data: Option<String> = redis_conn.get(format!("session:{}", session_token)).await?;
 
     let session_data = match session_data {
         Some(data) => {
@@ -446,12 +457,12 @@ async fn handle_connect(
                 pending_acks: HashSet::new(),
                 full_members: Vec::new(),
                 pending_epoch_change: false,
-                pending_members: Vec::new(),   
+                pending_members: Vec::new(),
             })),
         });
-    
+
     let is_first_member = call.members.is_empty();
-    
+
     call.add_member(state.id.clone(), key_package).await;
     broadcast_proposals(&call).await;
 
@@ -469,7 +480,7 @@ async fn handle_connect(
         },
     )
     .await?;
-    
+
     // if this is the first member, send external sender credential for group initialization
     // TODO: initialize external sender keys per call
     if is_first_member {
@@ -479,7 +490,7 @@ async fn handle_connect(
         let external_sender_signature_key = crate::environment::EXTERNAL_SENDER
             .signature_public_key()
             .clone();
-        
+
         send_message(
             send,
             WtMessageS2C::InitializeGroup {
@@ -488,8 +499,11 @@ async fn handle_connect(
             },
         )
         .await?;
-        
-        info!("Sent InitializeGroup to first member in call {}", session_data.call_id);
+
+        info!(
+            "Sent InitializeGroup to first member in call {}",
+            session_data.call_id
+        );
     }
 
     let mut redis_conn = crate::redis::get_connection().await;
@@ -699,26 +713,33 @@ async fn handle_mls_commit(
         warn!("Call {} not found for session {}", state.call_id, state.id);
         return Ok(());
     };
-    
+
     // only choose the first commit for a given epoch even though everyone should be sending commits
     let mut mls_state = call.mls_state.lock().await;
-    let Some(pending_commit) = mls_state.pending_commit.take() else { 
+    let Some(pending_commit) = mls_state.pending_commit.take() else {
         // already claimed by another commit, ignore
         return Ok(());
     };
     if mls_state.current_epoch != epoch {
-        warn!("Received commit for epoch {}, but current epoch is {}", epoch, mls_state.current_epoch);
+        warn!(
+            "Received commit for epoch {}, but current epoch is {}",
+            epoch, mls_state.current_epoch
+        );
         return Ok(());
     }
-    let new_members = pending_commit.proposals.iter().filter_map(|p| {
-        if let PendingProposal::Add { session_id, .. } = p {
-            Some(session_id.clone())
-        } else {
-            None
-        }
-    }).collect::<Vec<_>>();
+    let new_members = pending_commit
+        .proposals
+        .iter()
+        .filter_map(|p| {
+            if let PendingProposal::Add { session_id, .. } = p {
+                Some(session_id.clone())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
 
-    // broadcast commit to all members (clients should ONLY apply the commit broadcast 
+    // broadcast commit to all members (clients should ONLY apply the commit broadcast
     // by the server, since the chosen one is not necessarily the client's own commit)
     for recipient in mls_state.full_members.iter() {
         if let Some(session) = GLOBAL_SESSIONS.get(recipient) {
@@ -740,8 +761,11 @@ async fn handle_mls_commit(
         // add new member to full members
         mls_state.full_members.push(new_member.clone());
     }
-    mls_state.pending_epoch_change = true; 
-    info!("Forwarded MLS commit to all members of call {}", state.call_id);
+    mls_state.pending_epoch_change = true;
+    info!(
+        "Forwarded MLS commit to all members of call {}",
+        state.call_id
+    );
     // when all members have acknowledged OR when task times out, increment epoch and broadcast epoch ready
     let call_id = state.call_id.clone();
     task::spawn(async move {
@@ -756,42 +780,45 @@ async fn handle_mls_commit(
                 // broadcast epoch ready
                 for recipient in call.mls_state.lock().await.full_members.iter() {
                     if let Some(session) = GLOBAL_SESSIONS.get(recipient) {
-                        let _ = session.message_tx.send(WtMessageS2C::EpochReady { epoch: new_epoch });
+                        let _ = session
+                            .message_tx
+                            .send(WtMessageS2C::EpochReady { epoch: new_epoch });
                     }
                 }
                 info!("Advanced to epoch {} for call {}", new_epoch, call_id);
             } else {
-                info!("Epoch already advanced for call {}, current epoch is {}", call_id, call.mls_state.lock().await.current_epoch);
-                return;
+                info!(
+                    "Epoch already advanced for call {}, current epoch is {}",
+                    call_id,
+                    call.mls_state.lock().await.current_epoch
+                );
             }
         }
     });
     Ok(())
 }
 
-async fn handle_commit_ack(
-    epoch: u64,
-    state: &SessionState,
-) -> anyhow::Result<()> {
+async fn handle_commit_ack(epoch: u64, state: &SessionState) -> anyhow::Result<()> {
     let Some(call) = GLOBAL_CALLS.get(&state.call_id) else {
         warn!("Call {} not found for session {}", state.call_id, state.id);
         return Ok(());
     };
-    
+
     let all_acked = call.record_commit_ack(&state.id, epoch).await;
-    
+
     if all_acked {
         // broadcast epoch ready if this was the last ack needed
         let new_epoch = call.increment_epoch().await;
         if let Some(new_epoch) = new_epoch {
             for recipient in call.mls_state.lock().await.full_members.iter() {
                 if let Some(session) = GLOBAL_SESSIONS.get(recipient) {
-                    let _ = session.message_tx.send(WtMessageS2C::EpochReady { epoch: new_epoch });
-                } 
+                    let _ = session
+                        .message_tx
+                        .send(WtMessageS2C::EpochReady { epoch: new_epoch });
+                }
             }
         }
     }
-    
+
     Ok(())
 }
-

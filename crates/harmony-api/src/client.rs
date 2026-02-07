@@ -246,7 +246,7 @@ impl HarmonyClient {
     }
 
     async fn handle_binary_message(state: Arc<RwLock<ClientState>>, data: &[u8]) -> Result<()> {
-        let mut deserializer = rmp_serde::Deserializer::new(&data[..]);
+        let mut deserializer = rmp_serde::Deserializer::new(data);
         let value: Value = match serde::Deserialize::deserialize(&mut deserializer) {
             Ok(v) => v,
             Err(e) => {
@@ -258,16 +258,15 @@ impl HarmonyClient {
         if let Some(id_value) = value
             .as_map()
             .and_then(|m| m.iter().find(|(k, _)| k.as_str() == Some("id")))
+            && let Some(id) = id_value.1.as_str()
         {
-            if let Some(id) = id_value.1.as_str() {
-                let mut state_lock = state.write().await;
-                if let Some(sender) = state_lock.pending_requests.remove(id) {
-                    let _ = sender.send(value);
-                    return Ok(());
-                }
-                // Request doesn't exist
+            let mut state_lock = state.write().await;
+            if let Some(sender) = state_lock.pending_requests.remove(id) {
+                let _ = sender.send(value);
                 return Ok(());
             }
+            // Request doesn't exist
+            return Ok(());
         }
 
         if let Ok(event_wrapper) = rmpv::ext::from_value::<RpcApiEvent>(value.clone()) {
@@ -478,7 +477,7 @@ async fn connect(client: &HarmonyClient, is_reconnect: bool) -> Result<()> {
                 Ok(Message::Binary(data)) => {
                     if let Err(e) = HarmonyClient::handle_binary_message(
                         state_clone.clone(),
-                        &data.to_vec().as_slice(),
+                        data.to_vec().as_slice(),
                     )
                     .await
                     {

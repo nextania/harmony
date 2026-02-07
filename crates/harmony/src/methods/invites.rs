@@ -51,7 +51,7 @@ pub async fn delete_invite(
     let invite = Invite::get(&data.id).await?;
     let channel = Channel::get(&invite.channel_id).await?;
     if !channel.is_manager(&user.id) {
-        return Err(Error::MissingPermission);
+        Err(Error::MissingPermission)
     } else {
         invite.delete().await?;
         Ok(RpcValue(DeleteInviteResponse {}))

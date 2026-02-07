@@ -31,7 +31,7 @@ pub async fn authenticate(token: String) -> rapid::errors::Result<Box<dyn Any + 
     };
     Ok(Box::new(user))
 }
-static CLIENT: Lazy<reqwest::Client> = Lazy::new(|| reqwest::Client::new());
+static CLIENT: Lazy<reqwest::Client> = Lazy::new(reqwest::Client::new);
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct AsUser {
@@ -62,11 +62,11 @@ pub fn check_authenticated(state: &RpcState) -> Result<Arc<User>> {
         .get_user::<User>()
         .cloned()
         .ok_or(Error::NotAuthenticated)
-        .and_then(|user| Ok(user.into()))
+        .map(|user| user.into())
 }
 
 impl RpcResponder for Error {
-    fn into_value(&self) -> Value {
+    fn into_value(self) -> Value {
         to_value(self).unwrap()
     }
 }

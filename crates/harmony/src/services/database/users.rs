@@ -307,16 +307,12 @@ impl User {
         let users = super::get_database().collection::<User>("users");
         let contacts = self.contacts.iter().map(|contact| async {
             if contact.relationship == Relationship::Established {
-                let user = users
+                users
                     .find_one(doc! {
                         "id": &contact.id
                     })
                     .await
-                    .ok()?;
-                match user {
-                    Some(user) => Some(user),
-                    None => None,
-                }
+                    .ok()?
             } else {
                 None
             }
@@ -338,14 +334,11 @@ impl User {
                 })
                 .await
                 .ok()?;
-            match user {
-                Some(user) => Some(ContactExtended {
-                    id: contact.id.clone(),
-                    relationship: contact.relationship.clone(),
-                    user,
-                }),
-                None => None,
-            }
+            user.map(|user| ContactExtended {
+                id: contact.id.clone(),
+                relationship: contact.relationship.clone(),
+                user,
+            })
         });
         let contacts: Vec<ContactExtended> = futures_util::future::join_all(contacts)
             .await

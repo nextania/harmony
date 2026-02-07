@@ -163,21 +163,30 @@ pub enum MediaHint {
 
 #[derive(Archive, Clone, Debug, rkyv::Deserialize, rkyv::Serialize)]
 pub enum WtMessageC2S {
-    Connect { 
+    Connect {
         session_token: String,
         key_package: Vec<u8>, // Serialized MLS KeyPackage
     },
     Disconnect {},
-    StartProduce { id: String, media_hint: MediaHint },
-    StopProduce { id: String },
-    StartConsume { id: String },
-    StopConsume { id: String },
+    StartProduce {
+        id: String,
+        media_hint: MediaHint,
+    },
+    StopProduce {
+        id: String,
+    },
+    StartConsume {
+        id: String,
+    },
+    StopConsume {
+        id: String,
+    },
     Heartbeat {},
     // MLS coordination messages
     MlsCommit {
-        commit_data: Vec<u8>, 
-        epoch: u64, 
-        welcome_data: Option<Vec<u8>>, 
+        commit_data: Vec<u8>,
+        epoch: u64,
+        welcome_data: Option<Vec<u8>>,
     },
     CommitAck {
         epoch: u64,
@@ -222,11 +231,11 @@ pub enum WtMessageS2C {
     Heartbeat {},
     // MLS coordination messages
     MlsProposals {
-        proposals: Vec<Vec<u8>>, 
+        proposals: Vec<Vec<u8>>,
     },
     MlsCommit {
         epoch: u64, // new epoch
-        commit_data: Vec<u8>, 
+        commit_data: Vec<u8>,
         welcome_data: Option<Vec<u8>>,
     },
     EpochReady {

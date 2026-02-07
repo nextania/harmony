@@ -25,7 +25,7 @@ pub struct Call {
 #[derive(Clone, Debug)]
 pub struct MlsState {
     pub pending_members: Vec<PendingMember>, // members waiting for Add proposals
-    pub pending_proposals: Vec<PendingProposal>, // proposals waiting to be flushed 
+    pub pending_proposals: Vec<PendingProposal>, // proposals waiting to be flushed
     // if we're currently waiting on a commit, new proposals should be queued here
     // when proposals are flushed, all of them should be included in the next commit
     pub pending_commit: Option<PendingCommit>,
@@ -37,7 +37,7 @@ pub struct MlsState {
 
 #[derive(Clone, Debug)]
 pub struct PendingCommit {
-    pub proposals: Vec<PendingProposal>, 
+    pub proposals: Vec<PendingProposal>,
 }
 
 #[derive(Clone, Debug)]
@@ -48,7 +48,7 @@ pub enum PendingProposal {
     },
     Remove {
         session_id: String,
-    }
+    },
 }
 
 impl Call {
@@ -218,12 +218,18 @@ impl Call {
                 session_id: session_id.clone(),
                 key_package,
             });
-            info!("Added pending Add proposal for session {} to call {}", session_id, self.id);
-        }  else {
+            info!(
+                "Added pending Add proposal for session {} to call {}",
+                session_id, self.id
+            );
+        } else {
             // if this is the first member, we can just add them without a proposal
             let mut state = self.mls_state.lock().await;
             state.full_members.push(session_id.clone());
-            info!("Added first member {} to call {}, initialized MLS group with epoch 0", session_id, self.id);
+            info!(
+                "Added first member {} to call {}, initialized MLS group with epoch 0",
+                session_id, self.id
+            );
         }
         self.members.insert(session_id, ());
     }
@@ -250,31 +256,32 @@ impl Call {
         } else {
             // if the removed member was pending, just remove them without a proposal
             state.pending_members.retain(|m| m.session_id != session_id);
-            state.pending_proposals.retain(|p| {
-                match p {
-                    PendingProposal::Add { session_id: s, .. } => s != session_id,
-                    PendingProposal::Remove { session_id: s } => s != session_id,
-                }
+            state.pending_proposals.retain(|p| match p {
+                PendingProposal::Add { session_id: s, .. } => s != session_id,
+                PendingProposal::Remove { session_id: s } => s != session_id,
             });
         }
     }
-    
+
     pub async fn flush_proposals(&self) -> Option<(Vec<Vec<u8>>, Vec<String>, u64)> {
         // TODO: check if we're already waiting for a commit
         // if so, then return; when that commit finishes or times out,
         // the task associated with that commit should call this again
         let mut state = self.mls_state.lock().await;
         let pending_proposals = std::mem::take(&mut state.pending_proposals);
-        state.pending_commit = Some(PendingCommit { proposals: pending_proposals.clone() });
-        let proposals = pending_proposals.iter().filter_map(|p| {
-            match p {
+        state.pending_commit = Some(PendingCommit {
+            proposals: pending_proposals.clone(),
+        });
+        let proposals = pending_proposals
+            .iter()
+            .filter_map(|p| match p {
                 PendingProposal::Add { key_package, .. } => {
                     let proposal_result = crate::environment::EXTERNAL_SENDER.create_add_proposal(
                         self.id.as_bytes(),
                         state.current_epoch,
                         key_package,
                     );
-                    
+
                     let proposal_data = match proposal_result {
                         Ok(data) => data,
                         Err(e) => {
@@ -283,15 +290,16 @@ impl Call {
                         }
                     };
                     Some(proposal_data)
-                },
+                }
                 PendingProposal::Remove { session_id } => {
                     let idx = state.full_members.iter().position(|s| s == session_id)?;
-                    let proposal_result = crate::environment::EXTERNAL_SENDER.create_remove_proposal(
-                        self.id.as_bytes(),
-                        state.current_epoch,
-                        idx as u32,
-                    );
-                    
+                    let proposal_result = crate::environment::EXTERNAL_SENDER
+                        .create_remove_proposal(
+                            self.id.as_bytes(),
+                            state.current_epoch,
+                            idx as u32,
+                        );
+
                     let proposal_data = match proposal_result {
                         Ok(data) => data,
                         Err(e) => {
@@ -301,13 +309,13 @@ impl Call {
                     };
                     Some(proposal_data)
                 }
-            }
-        }).collect::<Vec<_>>();
-        
+            })
+            .collect::<Vec<_>>();
+
         let recipients = state.full_members.clone();
         Some((proposals, recipients, state.current_epoch))
     }
-    
+
     pub async fn increment_epoch(&self) -> Option<u64> {
         let mut state = self.mls_state.lock().await;
         if state.pending_epoch_change {
@@ -325,23 +333,34 @@ impl Call {
     pub async fn record_commit_ack(&self, session_id: &str, epoch: u64) -> bool {
         let mut state = self.mls_state.lock().await;
         if !state.pending_epoch_change {
-            warn!("Received commit ack from session {} for epoch {}, but no epoch change is pending", session_id, epoch);
+            warn!(
+                "Received commit ack from session {} for epoch {}, but no epoch change is pending",
+                session_id, epoch
+            );
             return false;
         }
         if epoch != state.current_epoch + 1 {
-            warn!("Received commit ack for epoch {}, but next epoch is {}", epoch, state.current_epoch + 1);
+            warn!(
+                "Received commit ack for epoch {}, but next epoch is {}",
+                epoch,
+                state.current_epoch + 1
+            );
             return false;
         }
         state.pending_acks.remove(session_id);
-        
+
         let all_acked = state.pending_acks.is_empty();
-        
+
         if all_acked {
             info!("All members have acknowledged commit for call {}", self.id);
         } else {
-            debug!("Session {} acknowledged commit, {} remaining", session_id, state.pending_acks.len());
+            debug!(
+                "Session {} acknowledged commit, {} remaining",
+                session_id,
+                state.pending_acks.len()
+            );
         }
-        
+
         all_acked
     }
 }

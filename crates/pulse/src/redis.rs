@@ -35,7 +35,7 @@ pub async fn get_pubsub() -> redis::aio::PubSub {
         .expect("Failed to get connection")
 }
 
-pub fn listen() -> () {
+pub fn listen() {
     // node events
     task::spawn(async move {
         let mut pubsub = get_pubsub().await;
@@ -102,24 +102,22 @@ pub fn listen() -> () {
                         session_data.can_speak = !muted;
                         session_data.can_listen = !deafened;
 
-                        if muted {
-                            if let Some(call) = crate::wt::GLOBAL_CALLS.get(&call_id) {
-                                for track in session_data.producers.values() {
-                                    if matches!(track.media_hint, pulse_api::MediaHint::Audio) {
-                                        for member_id in call.members.iter() {
-                                            let member_key: &String = member_id.key();
-                                            if member_key == &session_id {
-                                                continue;
-                                            }
-                                            if let Some(member_session) =
-                                                crate::wt::GLOBAL_SESSIONS.get(member_key)
-                                            {
-                                                let _ = member_session.message_tx.send(
-                                                    pulse_api::WtMessageS2C::TrackUnavailable {
-                                                        id: track.id.clone(),
-                                                    },
-                                                );
-                                            }
+                        if muted && let Some(call) = crate::wt::GLOBAL_CALLS.get(&call_id) {
+                            for track in session_data.producers.values() {
+                                if matches!(track.media_hint, pulse_api::MediaHint::Audio) {
+                                    for member_id in call.members.iter() {
+                                        let member_key: &String = member_id.key();
+                                        if member_key == &session_id {
+                                            continue;
+                                        }
+                                        if let Some(member_session) =
+                                            crate::wt::GLOBAL_SESSIONS.get(member_key)
+                                        {
+                                            let _ = member_session.message_tx.send(
+                                                pulse_api::WtMessageS2C::TrackUnavailable {
+                                                    id: track.id.clone(),
+                                                },
+                                            );
                                         }
                                     }
                                 }
@@ -216,6 +214,4 @@ pub fn listen() -> () {
             time::sleep(Duration::from_secs(5)).await;
         }
     });
-
-    ()
 }

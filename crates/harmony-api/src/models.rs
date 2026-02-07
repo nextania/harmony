@@ -117,8 +117,7 @@ impl Message {
     }
 
     pub fn edited_at_datetime(&self) -> Option<DateTime<Utc>> {
-        self.edited_at
-            .and_then(|ts| DateTime::from_timestamp_millis(ts))
+        self.edited_at.and_then(DateTime::from_timestamp_millis)
     }
 }
 

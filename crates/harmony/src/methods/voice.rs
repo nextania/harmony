@@ -138,10 +138,10 @@ pub async fn update_voice_state(
     let mut session = call.members[member_index].clone();
     let muted_changed = data
         .muted
-        .map_or(false, |new_muted| new_muted != session.muted);
+        .is_some_and(|new_muted| new_muted != session.muted);
     let deafened_changed = data
         .deafened
-        .map_or(false, |new_deafened| new_deafened != session.deafened);
+        .is_some_and(|new_deafened| new_deafened != session.deafened);
     if !muted_changed && !deafened_changed {
         return Ok(RpcValue(UpdateVoiceStateResponse {
             muted: session.muted,

@@ -19,6 +19,7 @@ pub struct CreateCallTokenMethod {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct CreateCallTokenResponse {
+    id: String,
     token: String,
 }
 
@@ -41,10 +42,10 @@ pub async fn create_call_token(
     if !user.in_channel(&channel).await? {
         return Err(Error::NotFound);
     }
-    let token = call
-        .get_token(&user.id, data.initial_muted, data.initial_deafened)
+    let (id, token) = call
+        .create_token(&user.id, data.initial_muted, data.initial_deafened)
         .await?;
-    Ok(RpcValue(CreateCallTokenResponse { token }))
+    Ok(RpcValue(CreateCallTokenResponse { id, token }))
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

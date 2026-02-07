@@ -465,12 +465,12 @@ impl ActiveCall {
         Ok(())
     }
 
-    pub async fn get_token(
+    pub async fn create_token(
         &mut self,
         user_id: &str,
         initial_muted: bool,
         initial_deafened: bool,
-    ) -> Result<String> {
+    ) -> Result<(String, String)> {
         let session_id = ulid::Ulid::new().to_string();
         self.pending_sessions.push(CallSession {
             id: session_id.clone(),
@@ -500,7 +500,7 @@ impl ActiveCall {
                 60,
             )
             .await?;
-        Ok(token)
+        Ok((session_id, token))
     }
 
     pub async fn leave_user(&mut self, session_id: &String) -> Result<()> {

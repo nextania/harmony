@@ -45,7 +45,7 @@ pub fn listen() {
             .expect("Failed to subscribe");
         let mut connection = get_connection().await;
         if let Err(e) = connection
-            .publish::<&str, NodeEvent, NodeEvent>(
+            .publish::<&str, NodeEvent, ()>(
                 "nodes",
                 NodeEvent {
                     event: NodeEventKind::Description(NodeDescription {
@@ -65,7 +65,7 @@ pub fn listen() {
             if payload.id == *INSTANCE_ID {
                 continue;
             }
-            println!("Received: {:?}", payload);
+            debug!("Received: {:?}", payload);
             match payload {
                 NodeEvent {
                     event: NodeEventKind::Query,
@@ -204,7 +204,7 @@ pub fn listen() {
         let i = INSTANCE_ID.clone();
         loop {
             if let Err(e) = c
-                .publish::<&str, NodeEvent, NodeEvent>(
+                .publish::<&str, NodeEvent, ()>(
                     "nodes",
                     NodeEvent {
                         event: NodeEventKind::Ping,

@@ -1,5 +1,7 @@
+use std::time::Duration;
+
 use once_cell::sync::{Lazy, OnceCell};
-use redis::{AsyncCommands, Client, aio::MultiplexedConnection};
+use redis::{AsyncCommands, AsyncConnectionConfig, Client, aio::MultiplexedConnection};
 use ulid::Ulid;
 
 use super::environment::REDIS_URI;
@@ -18,7 +20,9 @@ pub fn get_client() -> &'static Client {
 
 pub async fn get_connection() -> MultiplexedConnection {
     get_client()
-        .get_multiplexed_async_connection()
+        .get_multiplexed_async_connection_with_config(
+            &AsyncConnectionConfig::default().set_response_timeout(Some(Duration::from_secs(10))),
+        )
         .await
         .expect("Failed to get connection")
 }
@@ -32,13 +36,18 @@ pub async fn get_pubsub() -> redis::aio::PubSub {
 
 pub async fn create_streams() -> redis::RedisResult<()> {
     let mut conn = get_connection().await;
-    let _ = conn
+    let e = conn
         .xgroup_create_mkstream::<&str, &str, &str, ()>(
             "voice:events:user-lifecycle",
             "harmony-servers",
             "0",
         )
         .await;
+    if let Err(e) = e {
+        if !e.to_string().contains("BUSYGROUP") {
+            return Err(e);
+        }
+    }
 
     Ok(())
 }

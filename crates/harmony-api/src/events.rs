@@ -49,10 +49,7 @@ pub enum Event {
     },
     /// A user left a call
     #[serde(rename_all = "camelCase")]
-    UserLeftCall {
-        call_id: String,
-        session_id: String,
-    },
+    UserLeftCall { call_id: String, session_id: String },
     /// A user's voice state changed (muted/deafened)
     #[serde(rename_all = "camelCase")]
     UserVoiceStateChanged {

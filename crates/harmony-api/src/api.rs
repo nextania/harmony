@@ -222,7 +222,11 @@ impl HarmonyClient {
     }
 
     /// Start a call in a channel
-    pub async fn start_call(&self, channel_id: &str, preferred_region: Option<&str>) -> Result<StartCallResponse> {
+    pub async fn start_call(
+        &self,
+        channel_id: &str,
+        preferred_region: Option<&str>,
+    ) -> Result<StartCallResponse> {
         #[derive(Serialize)]
         struct Params {
             id: String,

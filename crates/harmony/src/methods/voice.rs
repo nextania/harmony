@@ -41,7 +41,11 @@ pub async fn create_call_token(
     let (id, token) = call
         .create_token(&user.id, data.initial_muted, data.initial_deafened)
         .await?;
-    Ok(RpcValue(CreateCallTokenResponse { id, token, server_address }))
+    Ok(RpcValue(CreateCallTokenResponse {
+        id,
+        token,
+        server_address,
+    }))
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

@@ -386,9 +386,7 @@ impl ActiveCall {
         }
         // assign node
         let (assigned_node, server_address) = if let Some(region) = preferred_region
-            && let Some(node) = AVAILABLE_NODES
-                .iter()
-                .find(|n| n.region == region)
+            && let Some(node) = AVAILABLE_NODES.iter().find(|n| n.region == region)
         {
             (node.id.clone(), node.server_address.clone())
         } else {

@@ -130,11 +130,17 @@ impl HarmonyClient {
             .map_err(Into::into)
     }
 
-    pub fn start_call(&self, channel_id: String, preferred_region: Option<String>) -> HarmonyResult<StartCallResponse> {
+    pub fn start_call(
+        &self,
+        channel_id: String,
+        preferred_region: Option<String>,
+    ) -> HarmonyResult<StartCallResponse> {
         let inner = self.inner.clone();
         self.runtime
             .block_on(async move {
-                let response = inner.start_call(&channel_id, preferred_region.as_deref()).await?;
+                let response = inner
+                    .start_call(&channel_id, preferred_region.as_deref())
+                    .await?;
                 Ok::<StartCallResponse, harmony_api::HarmonyError>(response.into())
             })
             .map_err(Into::into)

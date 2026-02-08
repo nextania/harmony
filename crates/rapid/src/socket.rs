@@ -37,7 +37,7 @@ pub struct RpcClient {
 }
 
 impl RpcClient {
-    pub async fn send(&mut self, data: Vec<u8>) {
+    async fn send(&mut self, data: Vec<u8>) {
         self.socket
             .send(Message::Binary(data.into()))
             .await
@@ -58,7 +58,11 @@ impl RpcClient {
         task::spawn(async move {
             socket
                 .send(Message::Binary(
-                    serialize(&data).expect("Failed to serialize").into(),
+                    serialize(&RpcMessageS2C::Event {
+                        event: to_value(&data).expect("Failed to serialize"),
+                    })
+                    .expect("Failed to serialize")
+                    .into(),
                 ))
                 .await
         });
@@ -281,7 +285,7 @@ impl RpcServer {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum RpcApiRequest {
+pub enum RpcMessageC2S {
     #[serde(rename_all = "camelCase")]
     Identify {
         token: String,
@@ -297,13 +301,23 @@ pub enum RpcApiRequest {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE", tag = "type")]
-pub enum RpcApiEvent {
+pub enum RpcMessageS2C {
     #[serde(rename_all = "camelCase")]
     Hello {
         public_key: Vec<u8>,
     },
     Identify {},
     Heartbeat {},
+    Error {
+        error: Error,
+    },
+    Message {
+        id: String,
+        data: Value,
+    },
+    Event {
+        event: Value,
+    },
 }
 
 async fn start_client(
@@ -328,7 +342,7 @@ async fn start_client(
     let id = generate_id();
     let secret = EphemeralSecret::random_from_rng(OsRng);
     let public_key = PublicKey::from(&secret);
-    let val = RpcApiEvent::Hello {
+    let val = RpcMessageS2C::Hello {
         public_key: public_key.to_bytes().to_vec(),
     };
     s.send(Message::Binary(
@@ -375,7 +389,9 @@ async fn start_client(
                 )
                 .await;
                 let mut client = clients.0.get_mut(&id.clone()).unwrap();
-                client.send(response.expect("Failed to serialize")).await;
+                client
+                    .send(serialize(&response).expect("Failed to serialize"))
+                    .await;
             }
             Message::Close(_) => {
                 debug!("Received close");
@@ -390,42 +406,18 @@ async fn start_client(
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
-pub struct RpcApiResponse {
-    id: Option<String>,
-    response: Option<Value>,
-}
-
-impl From<Error> for Value {
-    fn from(value: Error) -> Value {
-        to_value(&value).unwrap()
-    }
-}
-
-#[derive(Clone, Debug, Serialize)]
-struct RpcApiError {
-    error: Error,
-}
-
-impl From<RpcApiError> for Value {
-    fn from(value: RpcApiError) -> Value {
-        to_value(&value).unwrap()
-    }
-}
-
 pub async fn handle_packet(
     bin: Vec<u8>,
     clients: &RpcClients,
     user_id: &String,
     authenticate: AuthenticateFn,
     methods: Arc<DashMap<String, Box<dyn MethodFn>>>,
-) -> Result<Vec<u8>, rmp_serde::encode::Error> {
-    let result = deserialize::<RpcApiRequest>(bin.as_slice());
+) -> RpcMessageS2C {
+    let result = deserialize::<RpcMessageC2S>(bin.as_slice());
     if let Ok(r) = result {
         debug!("Received: {:?}", r);
         match r {
-            // TODO: fix this to return Event instead
-            RpcApiRequest::Identify {
+            RpcMessageC2S::Identify {
                 token,
                 public_key: _,
             } => authenticate(token.clone())
@@ -433,26 +425,26 @@ pub async fn handle_packet(
                 .map(|user| {
                     let mut client = clients.0.get_mut(user_id).unwrap();
                     client.user = Some(Arc::new(user));
-                    serialize(&RpcApiEvent::Identify {})
+                    RpcMessageS2C::Identify {}
                 })
-                .unwrap_or_else(|e| serialize(&RpcApiError { error: e })),
-            RpcApiRequest::Heartbeat {} => {
+                .unwrap_or_else(|e| RpcMessageS2C::Error { error: e }),
+            RpcMessageC2S::Heartbeat {} => {
                 let mut client = clients.0.get_mut(user_id).unwrap();
                 client.heartbeat_tx.send(()).await.unwrap();
-                serialize(&RpcApiEvent::Heartbeat {})
+                RpcMessageS2C::Heartbeat {}
             }
-            RpcApiRequest::Message { id, method, data } => {
+            RpcMessageC2S::Message { id, method, data } => {
                 // check if id is a uuid
                 if Uuid::try_parse(&id).is_err() {
-                    return serialize(&RpcApiError {
+                    return RpcMessageS2C::Error {
                         error: Error::InvalidRequestId,
-                    });
+                    };
                 }
                 let method = methods.get(&method);
                 let Some(method) = method else {
-                    return serialize(&RpcApiError {
+                    return RpcMessageS2C::Error {
                         error: Error::InvalidMethod,
-                    });
+                    };
                 };
                 let result = method(
                     RpcState {
@@ -462,16 +454,13 @@ pub async fn handle_packet(
                     data,
                 )
                 .await;
-                serialize(&RpcApiResponse {
-                    id: Some(id),
-                    response: Some(result),
-                })
+                RpcMessageS2C::Message { id, data: result }
             }
         }
     } else {
-        serialize(&RpcApiError {
+        RpcMessageS2C::Error {
             error: Error::InvalidMethod,
-        })
+        }
     }
 }
 

@@ -13,7 +13,7 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::error::{HarmonyError, Result};
-use crate::events::{Event, EventHandler, NoOpEventHandler, RpcApiEvent};
+use crate::events::{Event, EventHandler, NoOpEventHandler, RpcMessageS2C};
 
 /// Configuration for the Harmony client
 #[derive(Clone, Debug)]
@@ -68,13 +68,6 @@ enum RpcApiRequest {
         method: String,
         data: Value,
     },
-}
-
-#[derive(Debug, Deserialize)]
-struct RpcApiResponse {
-    #[allow(dead_code)]
-    id: Option<String>,
-    response: Option<Value>,
 }
 
 struct ClientState {
@@ -255,42 +248,18 @@ impl HarmonyClient {
             }
         };
 
-        if let Some(id_value) = value
-            .as_map()
-            .and_then(|m| m.iter().find(|(k, _)| k.as_str() == Some("id")))
-            && let Some(id) = id_value.1.as_str()
-        {
-            let mut state_lock = state.write().await;
-            if let Some(sender) = state_lock.pending_requests.remove(id) {
-                let _ = sender.send(value);
-                return Ok(());
-            }
-            // Request doesn't exist
-            return Ok(());
-        }
-
-        if let Ok(event_wrapper) = rmpv::ext::from_value::<RpcApiEvent>(value.clone()) {
+        if let Ok(event_wrapper) = rmpv::ext::from_value::<RpcMessageS2C>(value.clone()) {
             match event_wrapper {
-                RpcApiEvent::Identify {} => {
+                RpcMessageS2C::Identify {} => {
                     println!("Authentication successful");
                 }
-                RpcApiEvent::Message { event } => {
+                RpcMessageS2C::Event { event } => {
                     if let Ok(event) = rmpv::ext::from_value::<Event>(event) {
                         let state_lock = state.read().await;
                         let handler = state_lock.event_handler.clone();
                         drop(state_lock);
 
                         match event {
-                            Event::Connected => handler.on_connected(),
-                            Event::Disconnected => handler.on_disconnected(),
-                            Event::Reconnecting {
-                                attempt,
-                                max_attempts,
-                            } => handler.on_reconnecting(attempt, max_attempts),
-                            Event::Reconnected => handler.on_reconnected(),
-                            Event::ReconnectionFailed { attempts } => {
-                                handler.on_reconnection_failed(attempts)
-                            }
                             Event::UserJoinedCall {
                                 call_id,
                                 user_id,
@@ -319,8 +288,18 @@ impl HarmonyClient {
                                 muted,
                                 deafened,
                             ),
+                            _ => unreachable!(), 
                         }
                     }
+                }
+                RpcMessageS2C::Message { id, data } => {
+                    let mut state_lock = state.write().await;
+                    if let Some(sender) = state_lock.pending_requests.remove(&id) {
+                        let _ = sender.send(data);
+                        return Ok(());
+                    }
+                    // Request doesn't exist
+                    return Ok(());
                 }
                 _ => {}
             }
@@ -390,14 +369,8 @@ impl HarmonyClient {
             })?
             .ok_or_else(|| HarmonyError::Internal("Response channel closed".to_string()))?;
 
-        let response: RpcApiResponse = rmpv::ext::from_value(response_value)?;
-
-        if let Some(response_data) = response.response {
-            let result: R = rmpv::ext::from_value(response_data)?;
-            Ok(result)
-        } else {
-            Err(HarmonyError::Internal("Missing response data".to_string()))
-        }
+        let result: R = rmpv::ext::from_value(response_value)?;
+        Ok(result)
     }
 
     pub async fn is_connected(&self) -> bool {

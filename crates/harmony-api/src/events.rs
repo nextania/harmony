@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 /// Events that can be received from the server
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum RpcApiEvent {
+pub enum RpcMessageS2C {
     /// Initial connection information
     #[serde(rename_all = "camelCase")]
     Hello {
@@ -15,6 +15,10 @@ pub enum RpcApiEvent {
     Identify {},
     Heartbeat {},
     Message {
+        id: String,
+        data: Value,
+    },
+    Event {
         event: Value,
     },
 }

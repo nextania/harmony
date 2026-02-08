@@ -291,6 +291,34 @@ impl HarmonyClient {
                             Event::ReconnectionFailed { attempts } => {
                                 handler.on_reconnection_failed(attempts)
                             }
+                            Event::UserJoinedCall {
+                                call_id,
+                                user_id,
+                                session_id,
+                                muted,
+                                deafened,
+                            } => handler.on_user_joined_call(
+                                &call_id,
+                                &user_id,
+                                &session_id,
+                                muted,
+                                deafened,
+                            ),
+                            Event::UserLeftCall {
+                                call_id,
+                                session_id,
+                            } => handler.on_user_left_call(&call_id, &session_id),
+                            Event::UserVoiceStateChanged {
+                                call_id,
+                                session_id,
+                                muted,
+                                deafened,
+                            } => handler.on_user_voice_state_changed(
+                                &call_id,
+                                &session_id,
+                                muted,
+                                deafened,
+                            ),
                         }
                     }
                 }

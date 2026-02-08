@@ -242,35 +242,63 @@ impl From<harmony_api::Invite> for Invite {
 }
 
 #[derive(Clone, Debug, uniffi::Record)]
-pub struct ActiveCall {
+pub struct StartCallResponse {
     pub id: String,
-    pub channel_id: String,
-    pub participants: Vec<String>,
-    pub started_at: i64,
 }
 
-impl From<harmony_api::ActiveCall> for ActiveCall {
-    fn from(call: harmony_api::ActiveCall) -> Self {
+impl From<harmony_api::StartCallResponse> for StartCallResponse {
+    fn from(response: harmony_api::StartCallResponse) -> Self {
+        Self { id: response.id }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct CreateCallTokenResponse {
+    pub id: String,
+    pub token: String,
+    pub server_address: String,
+}
+
+impl From<harmony_api::CreateCallTokenResponse> for CreateCallTokenResponse {
+    fn from(response: harmony_api::CreateCallTokenResponse) -> Self {
         Self {
-            id: call.id,
-            channel_id: call.channel_id,
-            participants: call.participants,
-            started_at: call.started_at,
+            id: response.id,
+            token: response.token,
+            server_address: response.server_address,
         }
     }
 }
 
 #[derive(Clone, Debug, uniffi::Record)]
-pub struct RtcAuthorization {
-    pub channel_id: String,
-    pub user_id: String,
+pub struct UpdateVoiceStateResponse {
+    pub muted: bool,
+    pub deafened: bool,
 }
 
-impl From<harmony_api::RtcAuthorization> for RtcAuthorization {
-    fn from(auth: harmony_api::RtcAuthorization) -> Self {
+impl From<harmony_api::UpdateVoiceStateResponse> for UpdateVoiceStateResponse {
+    fn from(response: harmony_api::UpdateVoiceStateResponse) -> Self {
         Self {
-            channel_id: auth.channel_id,
-            user_id: auth.user_id,
+            muted: response.muted,
+            deafened: response.deafened,
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct CallMember {
+    pub user_id: String,
+    pub session_id: String,
+    pub muted: bool,
+    pub deafened: bool,
+}
+
+impl From<harmony_api::CallMember> for CallMember {
+    fn from(member: harmony_api::CallMember) -> Self {
+        Self {
+            user_id: member.user_id,
+            session_id: member.session_id,
+            muted: member.muted,
+            deafened: member.deafened,
         }
     }
 }

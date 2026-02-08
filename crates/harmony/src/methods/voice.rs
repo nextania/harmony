@@ -21,12 +21,7 @@ pub struct CreateCallTokenMethod {
 pub struct CreateCallTokenResponse {
     id: String,
     token: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct RtcAuthorization {
-    channel_id: String,
-    user_id: String,
+    server_address: String,
 }
 
 pub async fn create_call_token(
@@ -42,10 +37,11 @@ pub async fn create_call_token(
     if !user.in_channel(&channel).await? {
         return Err(Error::NotFound);
     }
+    let server_address = call.server_address.clone();
     let (id, token) = call
         .create_token(&user.id, data.initial_muted, data.initial_deafened)
         .await?;
-    Ok(RpcValue(CreateCallTokenResponse { id, token }))
+    Ok(RpcValue(CreateCallTokenResponse { id, token, server_address }))
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

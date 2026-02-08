@@ -30,9 +30,10 @@ lazy_static! {
 
 #[derive(Clone, Debug)]
 pub struct Node {
-    id: String,
-    region: Region,
-    last_ping: i64,
+    pub id: String,
+    pub region: Region,
+    pub server_address: String,
+    pub last_ping: i64,
 }
 
 impl Node {
@@ -45,6 +46,7 @@ impl Node {
         Node {
             id,
             region: description.region,
+            server_address: description.server_address,
             last_ping: time,
         }
     }
@@ -329,6 +331,7 @@ pub struct ActiveCall {
     pub members: Vec<CallSession>,
     pub channel_id: String,
     pub assigned_node: String,
+    pub server_address: String,
     pub empty_since: Option<i64>,
     pub pending_sessions: Vec<CallSession>,
 }
@@ -382,18 +385,17 @@ impl ActiveCall {
             return Err(Error::AlreadyExists);
         }
         // assign node
-        let assigned_node = if let Some(region) = preferred_region
+        let (assigned_node, server_address) = if let Some(region) = preferred_region
             && let Some(node) = AVAILABLE_NODES
                 .iter()
                 .find(|n| n.region == region)
-                .map(|n| n.id.clone())
         {
-            node
+            (node.id.clone(), node.server_address.clone())
         } else {
             // fallback to any node
-            let node = AVAILABLE_NODES.iter().next().map(|n| n.id.clone());
+            let node = AVAILABLE_NODES.iter().next();
             if let Some(node) = node {
-                node
+                (node.id.clone(), node.server_address.clone())
             } else {
                 return Err(Error::NoVoiceNodesAvailable);
             }
@@ -405,6 +407,7 @@ impl ActiveCall {
             members: vec![],
             channel_id: channel.clone(),
             assigned_node,
+            server_address,
             empty_since: Some(time),
             pending_sessions: vec![],
         };

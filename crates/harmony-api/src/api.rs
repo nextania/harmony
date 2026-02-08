@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::{Channel, HarmonyClient, Invite, Message};
+use crate::{
+    CallMember, Channel, CreateCallTokenResponse, GetCallMembersResponse, HarmonyClient, Invite,
+    Message, StartCallResponse, UpdateVoiceStateResponse,
+};
 
 impl HarmonyClient {
     /// Get a specific channel by ID
@@ -219,83 +222,60 @@ impl HarmonyClient {
     }
 
     /// Start a call in a channel
-    pub async fn start_call(&self, channel_id: &str) -> Result<()> {
-        #[derive(Serialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Params {
-            channel_id: String,
-        }
-
-        #[derive(Deserialize)]
-        struct Response {}
-
-        let _: Response = self
-            .send_request(
-                "START_CALL",
-                Params {
-                    channel_id: channel_id.to_string(),
-                },
-            )
-            .await?;
-
-        Ok(())
-    }
-
-    /// Join a call in a channel
-    pub async fn join_call(&self, channel_id: &str, sdp: &str) -> Result<String> {
+    pub async fn start_call(&self, channel_id: &str, preferred_region: Option<&str>) -> Result<StartCallResponse> {
         #[derive(Serialize)]
         struct Params {
             id: String,
-            sdp: String,
+            preferred_region: Option<String>,
         }
 
-        #[derive(Deserialize)]
-        struct Response {
-            sdp: String,
-        }
-
-        let response: Response = self
+        let response: StartCallResponse = self
             .send_request(
-                "JOIN_CALL",
+                "START_CALL",
                 Params {
                     id: channel_id.to_string(),
-                    sdp: sdp.to_string(),
+                    preferred_region: preferred_region.map(|s| s.to_string()),
                 },
             )
             .await?;
 
-        Ok(response.sdp)
+        Ok(response)
     }
 
-    /// Leave a call in a channel
-    pub async fn leave_call(&self, channel_id: &str) -> Result<()> {
+    /// Create a call token (session ID + token) for joining a call via Pulse
+    pub async fn create_call_token(
+        &self,
+        channel_id: &str,
+        initial_muted: bool,
+        initial_deafened: bool,
+    ) -> Result<CreateCallTokenResponse> {
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
         struct Params {
-            channel_id: String,
+            id: String,
+            initial_muted: bool,
+            initial_deafened: bool,
         }
 
-        #[derive(Deserialize)]
-        struct Response {}
-
-        let _: Response = self
+        let response: CreateCallTokenResponse = self
             .send_request(
-                "LEAVE_CALL",
+                "CREATE_CALL_TOKEN",
                 Params {
-                    channel_id: channel_id.to_string(),
+                    id: channel_id.to_string(),
+                    initial_muted,
+                    initial_deafened,
                 },
             )
             .await?;
 
-        Ok(())
+        Ok(response)
     }
 
-    /// End a call in a channel
+    /// End a call in a channel (requires manager permission)
     pub async fn end_call(&self, channel_id: &str) -> Result<()> {
         #[derive(Serialize)]
-        #[serde(rename_all = "camelCase")]
         struct Params {
-            channel_id: String,
+            id: String,
         }
 
         #[derive(Deserialize)]
@@ -305,11 +285,58 @@ impl HarmonyClient {
             .send_request(
                 "END_CALL",
                 Params {
-                    channel_id: channel_id.to_string(),
+                    id: channel_id.to_string(),
                 },
             )
             .await?;
 
         Ok(())
+    }
+
+    /// Update voice state (muted/deafened) for the current user in a call
+    pub async fn update_voice_state(
+        &self,
+        channel_id: &str,
+        muted: Option<bool>,
+        deafened: Option<bool>,
+    ) -> Result<UpdateVoiceStateResponse> {
+        #[derive(Serialize)]
+        struct Params {
+            id: String,
+            muted: Option<bool>,
+            deafened: Option<bool>,
+        }
+
+        let response: UpdateVoiceStateResponse = self
+            .send_request(
+                "UPDATE_VOICE_STATE",
+                Params {
+                    id: channel_id.to_string(),
+                    muted,
+                    deafened,
+                },
+            )
+            .await?;
+
+        Ok(response)
+    }
+
+    /// Get all members currently in a call
+    pub async fn get_call_members(&self, channel_id: &str) -> Result<Vec<CallMember>> {
+        #[derive(Serialize)]
+        struct Params {
+            id: String,
+        }
+
+        let response: GetCallMembersResponse = self
+            .send_request(
+                "GET_CALL_MEMBERS",
+                Params {
+                    id: channel_id.to_string(),
+                },
+            )
+            .await?;
+
+        Ok(response.members)
     }
 }

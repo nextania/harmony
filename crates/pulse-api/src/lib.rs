@@ -24,6 +24,7 @@ pub struct SessionData {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct NodeDescription {
     pub region: Region,
+    pub server_address: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

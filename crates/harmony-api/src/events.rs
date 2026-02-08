@@ -38,6 +38,29 @@ pub enum Event {
     Reconnected,
     /// Reconnection failed permanently
     ReconnectionFailed { attempts: u32 },
+    /// A user joined a call
+    #[serde(rename_all = "camelCase")]
+    UserJoinedCall {
+        call_id: String,
+        user_id: String,
+        session_id: String,
+        muted: bool,
+        deafened: bool,
+    },
+    /// A user left a call
+    #[serde(rename_all = "camelCase")]
+    UserLeftCall {
+        call_id: String,
+        session_id: String,
+    },
+    /// A user's voice state changed (muted/deafened)
+    #[serde(rename_all = "camelCase")]
+    UserVoiceStateChanged {
+        call_id: String,
+        session_id: String,
+        muted: bool,
+        deafened: bool,
+    },
 }
 
 /// Event handler trait for processing incoming events
@@ -65,6 +88,30 @@ pub trait EventHandler: Send + Sync {
 
     /// Handle permanent reconnection failure
     fn on_reconnection_failed(&self, _attempts: u32) {}
+
+    /// Handle a user joining a call
+    fn on_user_joined_call(
+        &self,
+        _call_id: &str,
+        _user_id: &str,
+        _session_id: &str,
+        _muted: bool,
+        _deafened: bool,
+    ) {
+    }
+
+    /// Handle a user leaving a call
+    fn on_user_left_call(&self, _call_id: &str, _session_id: &str) {}
+
+    /// Handle a user's voice state changing
+    fn on_user_voice_state_changed(
+        &self,
+        _call_id: &str,
+        _session_id: &str,
+        _muted: bool,
+        _deafened: bool,
+    ) {
+    }
 }
 
 /// Default event handler that does nothing
@@ -94,5 +141,36 @@ impl EventHandler for PrintEventHandler {
 
     fn on_reconnection_failed(&self, attempts: u32) {
         println!("Failed to reconnect after {} attempts", attempts);
+    }
+
+    fn on_user_joined_call(
+        &self,
+        call_id: &str,
+        user_id: &str,
+        session_id: &str,
+        muted: bool,
+        deafened: bool,
+    ) {
+        println!(
+            "User {} joined call {} (session: {}, muted: {}, deafened: {})",
+            user_id, call_id, session_id, muted, deafened
+        );
+    }
+
+    fn on_user_left_call(&self, call_id: &str, session_id: &str) {
+        println!("Session {} left call {}", session_id, call_id);
+    }
+
+    fn on_user_voice_state_changed(
+        &self,
+        call_id: &str,
+        session_id: &str,
+        muted: bool,
+        deafened: bool,
+    ) {
+        println!(
+            "Voice state changed in call {} for session {}: muted={}, deafened={}",
+            call_id, session_id, muted, deafened
+        );
     }
 }

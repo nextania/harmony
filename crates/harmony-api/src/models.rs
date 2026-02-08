@@ -159,15 +159,34 @@ impl Invite {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct ActiveCall {
+pub struct StartCallResponse {
     pub id: String,
-    pub channel_id: String,
-    pub participants: Vec<String>,
-    pub started_at: i64,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct RtcAuthorization {
-    pub channel_id: String,
+#[serde(rename_all = "camelCase")]
+pub struct CreateCallTokenResponse {
+    pub id: String,
+    pub token: String,
+    pub server_address: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct UpdateVoiceStateResponse {
+    pub muted: bool,
+    pub deafened: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CallMember {
     pub user_id: String,
+    pub session_id: String,
+    pub muted: bool,
+    pub deafened: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct GetCallMembersResponse {
+    pub members: Vec<CallMember>,
 }

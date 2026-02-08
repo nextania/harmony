@@ -7,7 +7,7 @@ use redis::{AsyncCommands, Client, aio::MultiplexedConnection};
 use tokio::{task, time};
 use ulid::Ulid;
 
-use crate::environment::{REDIS_URI, REGION};
+use crate::environment::{PUBLIC_ADDRESS, REDIS_URI, REGION};
 
 static REDIS: OnceCell<Client> = OnceCell::new();
 pub static INSTANCE_ID: Lazy<String> = Lazy::new(|| Ulid::new().to_string());
@@ -48,7 +48,10 @@ pub fn listen() {
             .publish::<&str, NodeEvent, NodeEvent>(
                 "nodes",
                 NodeEvent {
-                    event: NodeEventKind::Description(NodeDescription { region: *REGION }),
+                    event: NodeEventKind::Description(NodeDescription {
+                        region: *REGION,
+                        server_address: PUBLIC_ADDRESS.clone(),
+                    }),
                     id: INSTANCE_ID.clone(),
                 },
             )
@@ -74,6 +77,7 @@ pub fn listen() {
                             NodeEvent {
                                 event: NodeEventKind::Description(NodeDescription {
                                     region: *REGION,
+                                    server_address: PUBLIC_ADDRESS.clone(),
                                 }),
                                 id: INSTANCE_ID.clone(),
                             },

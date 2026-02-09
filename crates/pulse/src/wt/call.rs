@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, sync::{Arc, atomic::Ordering}};
 
 use arc_swap::ArcSwap;
 use dashmap::DashMap;
@@ -172,7 +172,7 @@ impl Call {
                     continue;
                 };
 
-                if !session.session_data.read().await.can_listen {
+                if !session.can_listen.load(Ordering::SeqCst) {
                     continue; // skip deafened users
                 }
 

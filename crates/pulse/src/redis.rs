@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::atomic::Ordering, time::Duration};
 
 use futures::StreamExt;
 use once_cell::sync::{Lazy, OnceCell};
@@ -99,12 +99,11 @@ pub fn listen() {
                         let session_id = session.id.clone();
                         let call_id = session.call_id.clone();
 
-                        let mut session_data = session.session_data.write().await;
-                        session_data.can_speak = !muted;
-                        session_data.can_listen = !deafened;
+                        session.can_speak.store(!muted, Ordering::SeqCst);
+                        session.can_listen.store(!deafened, Ordering::SeqCst);
 
                         if muted && let Some(call) = crate::wt::GLOBAL_CALLS.get(&call_id) {
-                            for track in session_data.producers.values() {
+                            for track in session.producers.iter() {
                                 if matches!(track.media_hint, pulse_api::MediaHint::Audio) {
                                     for member_id in call.members.iter() {
                                         let member_key: &String = member_id.key();

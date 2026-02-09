@@ -7,11 +7,11 @@ use pulse_api::{
     WtTrackData,
 };
 use redis::AsyncCommands;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::sync::{Mutex, RwLock, mpsc};
+use tokio::sync::{Mutex, mpsc};
 use tokio::time::Instant;
 use tokio::{task, time};
 use ulid::Ulid;
@@ -20,16 +20,6 @@ use wtransport::{Endpoint, ServerConfig};
 
 use crate::redis::INSTANCE_ID;
 use crate::wt::call::{Call, MlsState, PendingProposal};
-
-#[derive(Clone, Debug)]
-pub struct SessionInner {
-    // TODO:?
-    pub can_listen: bool,
-    pub can_speak: bool,
-    pub can_video: bool,
-    pub can_screen: bool,
-    pub producers: HashMap<String, TrackInfo>, // track_id -> TrackInfo
-}
 
 #[derive(Clone, Debug)]
 pub struct TrackInfo {
@@ -47,10 +37,14 @@ pub struct SessionState {
     pub session_id: String,
     pub call_id: String,
     pub session_token: String,
-    pub session_data: Arc<RwLock<SessionInner>>,
     pub connection: Arc<wtransport::Connection>,
     pub message_tx: mpsc::UnboundedSender<WtMessageS2C>,
     pub last_activity: Arc<AtomicU64>,
+    pub can_listen: Arc<AtomicBool>,
+    pub can_speak: Arc<AtomicBool>,
+    pub can_video: Arc<AtomicBool>,
+    pub can_screen: Arc<AtomicBool>,
+    pub producers: Arc<DashMap<String, TrackInfo>>, // track_id -> TrackInfo
 }
 
 impl SessionState {
@@ -115,13 +109,12 @@ async fn handle_session(
         let state_data = state.clone();
         drop(state);
         GLOBAL_SESSIONS.remove(&state_data.session_id);
-        let session = state_data.session_data.read().await;
 
         if let Some(call) = GLOBAL_CALLS.get(&state_data.call_id) {
             call.remove_member(&state_data.session_id).await;
             call.stop_consuming_all(&state_data.session_id);
             let producer_global_ids: Vec<String> =
-                session.producers.values().map(|t| t.id.clone()).collect();
+                state_data.producers.iter().map(|t| t.id.clone()).collect();
             for global_id in producer_global_ids {
                 call.stop_producing(&state_data.session_id, &global_id);
             }
@@ -288,16 +281,13 @@ async fn handle_datagram(payload: &[u8], session: &SessionState) -> anyhow::Resu
         return Ok(());
     };
 
-    let session_inner = session.session_data.read().await;
-    let track_info = session_inner.producers.get(&track_id).unwrap();
-    if matches!(track_info.media_hint, MediaHint::Audio) && !session_inner.can_speak {
+    let track_info = session.producers.get(&track_id).unwrap();
+    if matches!(track_info.media_hint, MediaHint::Audio) && !session.can_speak.load(Ordering::SeqCst) {
         // drop muted audio packets
         return Ok(());
     }
 
     call.dispatch(&track_id, &message.data).await;
-
-    drop(session_inner);
 
     Ok(())
 }
@@ -441,13 +431,11 @@ async fn handle_connect(
         session_id: session_data.session_id.clone(),
         call_id: session_data.call_id.clone(),
         session_token: session_token.clone(),
-        session_data: Arc::new(RwLock::new(SessionInner {
-            can_listen: session_data.can_listen,
-            can_speak: session_data.can_speak,
-            can_video: session_data.can_video,
-            can_screen: session_data.can_screen,
-            producers: HashMap::new(), // TODO: copy producers from previous session, if any
-        })),
+        can_listen: Arc::new(AtomicBool::new(session_data.can_listen)),
+        can_speak: Arc::new(AtomicBool::new(session_data.can_speak)),
+        can_video: Arc::new(AtomicBool::new(session_data.can_video)),
+        can_screen: Arc::new(AtomicBool::new(session_data.can_screen)),
+        producers: Arc::new(DashMap::new()), // TODO: copy producers from previous session, if any
         connection: Arc::new(connection.clone()),
         message_tx: message_tx.clone(),
         last_activity: Arc::new(AtomicU64::new(now())),
@@ -544,7 +532,7 @@ async fn handle_start_consume(
     send: &mut wtransport::stream::SendStream,
     state: &SessionState,
 ) -> anyhow::Result<()> {
-    if !state.session_data.read().await.can_listen {
+    if !state.can_listen.load(Ordering::SeqCst) {
         warn!("Cannot consume track while deafened");
         return Ok(());
     }
@@ -583,11 +571,10 @@ async fn handle_start_produce(
     send: &mut wtransport::stream::SendStream,
     state: &SessionState,
 ) -> anyhow::Result<()> {
-    let mut session_data = state.session_data.write().await;
     let allowed = match media_hint {
-        MediaHint::Audio => session_data.can_speak,
-        MediaHint::Video => session_data.can_video,
-        MediaHint::ScreenAudio | MediaHint::ScreenVideo => session_data.can_screen,
+        MediaHint::Audio => state.can_speak.load(Ordering::SeqCst),
+        MediaHint::Video => state.can_video.load(Ordering::SeqCst),
+        MediaHint::ScreenAudio | MediaHint::ScreenVideo => state.can_screen.load(Ordering::SeqCst),
     };
 
     if !allowed {
@@ -595,7 +582,7 @@ async fn handle_start_produce(
         return Ok(());
     }
 
-    for track in session_data.producers.values() {
+    for track in state.producers.iter() {
         if std::mem::discriminant(&track.media_hint) == std::mem::discriminant(&media_hint) {
             warn!("Already producing track of type {:?}", media_hint);
             return Ok(());
@@ -614,10 +601,9 @@ async fn handle_start_produce(
         producer_session: state.clone(),
     };
 
-    session_data
+    state
         .producers
         .insert(global_track_id.clone(), track_info.clone());
-    drop(session_data);
 
     let Some(call) = GLOBAL_CALLS.get(&state.call_id) else {
         warn!("Call {} not found for session {}", state.call_id, state.id);
@@ -656,9 +642,7 @@ async fn handle_stop_produce(
     };
     call.stop_producing(&state.session_id, &global_track_id);
     drop(call);
-    let mut session = state.session_data.write().await;
-    session.producers.remove(&global_track_id);
-    drop(session);
+    state.producers.remove(&global_track_id);
     send_message(
         send,
         WtMessageS2C::ProduceStopped {

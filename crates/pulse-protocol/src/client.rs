@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use dashmap::DashMap;
-use pulse_api::{MediaHint, WtMessageC2S, WtMessageS2C};
+use pulse_api::{AvailableTrack, MediaHint, WtMessageC2S, WtMessageS2C};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::events::PulseEvent;
@@ -178,17 +178,17 @@ impl PulseClient {
     /// are missed. Returns a receiver that yields raw media data for this track.
     ///
     /// Waits for the server to confirm with `ConsumeStarted` before returning.
-    pub async fn consume_track(&self, id: String) -> Result<mpsc::UnboundedReceiver<Vec<u8>>> {
-        let rx = self.media_router.subscribe(&id);
+    pub async fn consume_track(&self, track: &AvailableTrack) -> Result<mpsc::UnboundedReceiver<Vec<u8>>> {
+        let rx = self.media_router.subscribe(&track);
 
         match self
-            .send_and_wait(&id, WtMessageC2S::StartConsume { id: id.clone() })
+            .send_and_wait(&track.id, WtMessageC2S::StartConsume { id: track.id.clone() })
             .await
         {
             Ok(()) => Ok(rx),
             Err(e) => {
                 // Clean up on failure
-                self.media_router.unsubscribe(&id);
+                self.media_router.unsubscribe(&track.id);
                 Err(e).context("Timed out waiting for ConsumeStarted")
             }
         }
@@ -277,14 +277,7 @@ async fn event_loop(
                 match datagram_result {
                     Ok(track_data) => {
                         if mls.has_group() {
-                            match mls.decrypt_media(&track_data.id, &track_data.data) {
-                                Ok(plaintext) => {
-                                    media_router.dispatch(&track_data.id, plaintext);
-                                }
-                                Err(e) => {
-                                    tracing::warn!("Failed to decrypt media for track {}: {e:#}", track_data.id);
-                                }
-                            }
+                            media_router.dispatch(&track_data.id, track_data.data, &mls);
                         } else {
                             tracing::warn!("Received media before MLS group initialized; dropping");
                         }
@@ -302,7 +295,7 @@ async fn event_loop(
                     }
                     ClientCommand::SendMedia { track_id, data } => {
                         if mls.has_group() {
-                            match mls.encrypt_media(&track_id, &data) {
+                            match mls.encrypt_media(&data) {
                                 Ok(ciphertext) => {
                                     if let Err(e) = transport::send_datagram(&connection, &track_id, &ciphertext) {
                                         tracing::warn!("Failed to send encrypted media: {e:#}");

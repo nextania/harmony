@@ -1,6 +1,9 @@
 use dashmap::DashMap;
+use pulse_api::AvailableTrack;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+
+use crate::MlsClient;
 
 /// Routes incoming media datagrams to per-track receivers.
 ///
@@ -10,7 +13,7 @@ use tokio::sync::mpsc;
 /// each track they subscribe to.
 #[derive(Clone)]
 pub struct MediaRouter {
-    senders: Arc<DashMap<String, mpsc::UnboundedSender<Vec<u8>>>>,
+    senders: Arc<DashMap<String, (String, mpsc::UnboundedSender<Vec<u8>>)>>,
 }
 
 impl MediaRouter {
@@ -24,9 +27,9 @@ impl MediaRouter {
     ///
     /// Called before sending `StartConsume` to the server so that no datagrams
     /// arriving between the request and confirmation are missed.
-    pub fn subscribe(&self, track_id: &str) -> mpsc::UnboundedReceiver<Vec<u8>> {
+    pub fn subscribe(&self, track: &AvailableTrack) -> mpsc::UnboundedReceiver<Vec<u8>> {
         let (tx, rx) = mpsc::unbounded_channel();
-        self.senders.insert(track_id.to_string(), tx);
+        self.senders.insert(track.id.clone(), (track.session_id.to_string(), tx));
         rx
     }
 
@@ -41,11 +44,19 @@ impl MediaRouter {
     /// Dispatch incoming media data to the appropriate per-track receiver.
     ///
     /// If no subscriber exists for the track ID, the data is silently dropped.
-    pub fn dispatch(&self, track_id: &str, data: Vec<u8>) {
+    pub fn dispatch(&self, track_id: &str, data: Vec<u8>, mls: &MlsClient) {
         if let Some(sender) = self.senders.get(track_id) {
-            if sender.send(data).is_err() {
-                drop(sender);
-                self.senders.remove(track_id);
+            let decrypted =  mls.decrypt_media(&sender.0, &data);
+            match decrypted {
+                Ok(plaintext) => {
+                    if sender.1.send(plaintext).is_err() {
+                        drop(sender);
+                        self.senders.remove(track_id);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to decrypt media for track {}: {e:#}", track_id);
+                }
             }
         }
     }

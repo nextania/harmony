@@ -32,15 +32,16 @@ pub struct MlsClient {
     previous_keys_expiry: Option<Instant>,
     media_epoch: Option<u64>,
     call_id: String,
+    session_id: String,
 }
 
 impl MlsClient {
     /// Create a new MLS client identity with a fresh key pair.
     ///
     /// `client_id` is an opaque identifier (e.g. the session ID) embedded in the credential.
-    pub fn new(client_id: &str, call_id: &str) -> Result<Self> {
+    pub fn new(session_id: &str, call_id: &str) -> Result<Self> {
         let provider = OpenMlsRustCrypto::default();
-        let credential = BasicCredential::new(client_id.as_bytes().to_vec());
+        let credential = BasicCredential::new(session_id.as_bytes().to_vec());
         let signer = SignatureKeyPair::new(CIPHERSUITE.signature_algorithm())
             .map_err(|_| anyhow::anyhow!("Failed to generate signature key pair"))?;
         signer
@@ -63,6 +64,7 @@ impl MlsClient {
             previous_keys_expiry: None,
             media_epoch: None,
             call_id: call_id.to_string(),
+            session_id: session_id.to_string(),
         })
     }
 
@@ -298,8 +300,8 @@ impl MlsClient {
     /// Encrypt media payload data for a given track using MLS exporter secret.
     ///
     /// Returns `nonce || ciphertext` where the nonce is 12 bytes.
-    pub fn encrypt_media(&self, track_id: &str, plaintext: &[u8]) -> Result<Vec<u8>> {
-        let key = self.media_key_current(track_id)?;
+    pub fn encrypt_media(&self, plaintext: &[u8]) -> Result<Vec<u8>> {
+        let key = self.media_key_current(&self.session_id)?;
         let cipher = ChaCha20Poly1305::new(Key::from_slice(&key));
 
         let mut nonce_bytes = [0u8; MEDIA_NONCE_LEN];
@@ -311,7 +313,7 @@ impl MlsClient {
                 nonce,
                 Payload {
                     msg: plaintext,
-                    aad: track_id.as_bytes(),
+                    aad: self.session_id.as_bytes(),
                 },
             )
             .map_err(|_| anyhow::anyhow!("Failed to encrypt media payload"))?;
@@ -325,12 +327,12 @@ impl MlsClient {
     /// Decrypt media payload data for a given track using MLS exporter secret.
     ///
     /// Expects `nonce || ciphertext` where the nonce is 12 bytes.
-    pub fn decrypt_media(&self, track_id: &str, data: &[u8]) -> Result<Vec<u8>> {
+    pub fn decrypt_media(&self, sender_id: &str, data: &[u8]) -> Result<Vec<u8>> {
         if data.len() < MEDIA_NONCE_LEN + 16 {
             bail!("Encrypted media payload too short");
         }
 
-        let key = self.media_key_current(track_id)?;
+        let key = self.media_key_current(sender_id)?;
         let cipher = ChaCha20Poly1305::new(Key::from_slice(&key));
 
         let (nonce_bytes, ciphertext) = data.split_at(MEDIA_NONCE_LEN);
@@ -341,7 +343,7 @@ impl MlsClient {
                 nonce,
                 Payload {
                     msg: ciphertext,
-                    aad: track_id.as_bytes(),
+                    aad: sender_id.as_bytes(),
                 },
             )
             .map_err(|_| anyhow::anyhow!("Failed to decrypt media payload"));
@@ -353,14 +355,14 @@ impl MlsClient {
         // try decrypting with previous key if within grace period
         if let Some(expiry) = self.previous_keys_expiry
             && Instant::now() < expiry
-            && let Some(prev_key) = self.previous_media_keys.get(track_id)
+            && let Some(prev_key) = self.previous_media_keys.get(sender_id)
         {
             let prev_cipher = ChaCha20Poly1305::new(Key::from_slice(prev_key.value()));
             let prev_plaintext = prev_cipher.decrypt(
                 nonce,
                 Payload {
                     msg: ciphertext,
-                    aad: track_id.as_bytes(),
+                    aad: sender_id.as_bytes(),
                 },
             );
             if let Ok(prev_plaintext) = prev_plaintext {
@@ -372,24 +374,24 @@ impl MlsClient {
         ))
     }
 
-    fn media_key_current(&self, track_id: &str) -> Result<[u8; MEDIA_KEY_LEN]> {
-        if let Some(key) = self.media_keys.get(track_id) {
+    fn media_key_current(&self, sender_id: &str) -> Result<[u8; MEDIA_KEY_LEN]> {
+        if let Some(key) = self.media_keys.get(sender_id) {
             return Ok(*key);
         }
 
-        let key = self.export_media_key(track_id)?;
-        self.media_keys.insert(track_id.to_string(), key);
+        let key = self.export_media_key(sender_id)?;
+        self.media_keys.insert(sender_id.to_string(), key);
         Ok(key)
     }
 
-    fn export_media_key(&self, track_id: &str) -> Result<[u8; MEDIA_KEY_LEN]> {
+    fn export_media_key(&self, sender_id: &str) -> Result<[u8; MEDIA_KEY_LEN]> {
         let group = self.group.as_ref().context("MLS group not initialized")?;
 
         let key_bytes = group
             .export_secret(
                 self.provider.crypto(),
                 MEDIA_LABEL,
-                track_id.as_bytes(),
+                sender_id.as_bytes(),
                 MEDIA_KEY_LEN,
             )
             .context("Failed to export media key")?;

@@ -145,7 +145,7 @@ impl MlsClient {
         let group = self.group.as_mut().context("MLS group not initialized")?;
 
         let proposals = proposals.iter().map(|p| {
-            let mls_message_in = MlsMessageIn::tls_deserialize(&mut proposal_bytes.as_slice())
+            let mls_message_in = MlsMessageIn::tls_deserialize(&mut p.as_slice())
                 .context("Failed to deserialize proposal MlsMessageIn")?;
             let protocol_message = mls_message_in
                 .try_into_protocol_message()

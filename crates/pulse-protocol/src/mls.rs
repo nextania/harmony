@@ -26,7 +26,7 @@ pub struct MlsClient {
     signer: SignatureKeyPair,
     credential_with_key: CredentialWithKey,
     group: Option<MlsGroup>,
-    has_pending_commit: bool,
+    pending_commit: Option<Vec<u8>>,
     media_keys: DashMap<String, [u8; MEDIA_KEY_LEN]>,
     previous_media_keys: DashMap<String, [u8; MEDIA_KEY_LEN]>,
     previous_keys_expiry: Option<Instant>,
@@ -57,7 +57,7 @@ impl MlsClient {
             signer,
             credential_with_key,
             group: None,
-            has_pending_commit: false,
+            pending_commit: None,
             media_keys: DashMap::new(),
             previous_media_keys: DashMap::new(),
             previous_keys_expiry: None,
@@ -123,7 +123,7 @@ impl MlsClient {
         .context("Failed to create MLS group")?;
 
         self.group = Some(group);
-        self.has_pending_commit = false;
+        self.pending_commit = None;
         self.media_keys.clear();
         self.previous_media_keys.clear();
         self.previous_keys_expiry = None;
@@ -191,7 +191,7 @@ impl MlsClient {
             .transpose()?;
 
         let epoch = group.epoch().as_u64();
-        self.has_pending_commit = true;
+        self.pending_commit = Some(commit_data.clone());
 
         tracing::debug!(epoch, "Created MLS commit");
         Ok((commit_data, epoch, welcome_data))
@@ -206,29 +206,38 @@ impl MlsClient {
     /// For new members joining via welcome, call `join_from_welcome` instead.
     pub fn apply_commit(&mut self, commit_data: &[u8]) -> Result<()> {
         let group = self.group.as_mut().context("MLS group not initialized")?;
+        if commit_data == self.pending_commit.as_deref().unwrap_or(&[]) {
+            // our own commit
+            group.merge_pending_commit(&self.provider)
+                .context("Failed to merge pending commit")?;
+            self.pending_commit = None;
+            tracing::debug!(epoch = group.epoch().as_u64(), "Applied own MLS commit");
+            Ok(())
+        } else {
+            // foreign commit
+            let mls_message_in = MlsMessageIn::tls_deserialize(&mut commit_data.to_vec().as_slice())
+                .context("Failed to deserialize commit MlsMessageIn")?;
+            let protocol_message = mls_message_in
+                .try_into_protocol_message()
+                .map_err(|_| anyhow::anyhow!("Expected a protocol message for commit"))?;
 
-        let mls_message_in = MlsMessageIn::tls_deserialize(&mut commit_data.to_vec().as_slice())
-            .context("Failed to deserialize commit MlsMessageIn")?;
-        let protocol_message = mls_message_in
-            .try_into_protocol_message()
-            .map_err(|_| anyhow::anyhow!("Expected a protocol message for commit"))?;
+            let processed = group
+                .process_message(&self.provider, protocol_message)
+                .context("Failed to process commit message")?;
 
-        let processed = group
-            .process_message(&self.provider, protocol_message)
-            .context("Failed to process commit message")?;
-
-        match processed.into_content() {
-            ProcessedMessageContent::StagedCommitMessage(staged_commit) => {
-                group
-                    .merge_staged_commit(&self.provider, *staged_commit)
-                    .context("Failed to merge staged commit")?;
+            match processed.into_content() {
+                ProcessedMessageContent::StagedCommitMessage(staged_commit) => {
+                    group
+                        .merge_staged_commit(&self.provider, *staged_commit)
+                        .context("Failed to merge staged commit")?;
+                }
+                _ => bail!("Expected a StagedCommitMessage from commit data"),
             }
-            _ => bail!("Expected a StagedCommitMessage from commit data"),
-        }
 
-        self.has_pending_commit = false;
-        tracing::debug!(epoch = group.epoch().as_u64(), "Applied MLS commit");
-        Ok(())
+            self.pending_commit = None;
+            tracing::debug!(epoch = group.epoch().as_u64(), "Applied MLS commit");
+            Ok(())
+        }
     }
 
     /// Join an existing MLS group from a welcome message.
@@ -259,7 +268,7 @@ impl MlsClient {
             "Joined MLS group from welcome"
         );
         self.group = Some(group);
-        self.has_pending_commit = false;
+        self.pending_commit = None;
         self.media_keys.clear();
         self.previous_media_keys.clear();
         self.previous_keys_expiry = None;

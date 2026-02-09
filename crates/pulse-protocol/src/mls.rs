@@ -144,7 +144,7 @@ impl MlsClient {
     ) -> Result<(Vec<u8>, u64, Option<Vec<u8>>)> {
         let group = self.group.as_mut().context("MLS group not initialized")?;
 
-        for proposal_bytes in proposals {
+        let proposals = proposals.iter().map(|p| {
             let mls_message_in = MlsMessageIn::tls_deserialize(&mut proposal_bytes.as_slice())
                 .context("Failed to deserialize proposal MlsMessageIn")?;
             let protocol_message = mls_message_in
@@ -154,16 +154,19 @@ impl MlsClient {
                 .process_message(&self.provider, protocol_message)
                 .context("Failed to process proposal message")?;
 
-            // Ensure it's actually a proposal
-            match processed.into_content() {
-                ProcessedMessageContent::ProposalMessage(_)
-                | ProcessedMessageContent::ExternalJoinProposalMessage(_) => {}
+            let content = processed.into_content();
+            match content {
+                ProcessedMessageContent::ProposalMessage(p) => {
+                    return Ok(p.proposal().clone());
+                }
                 _ => bail!("Expected a proposal message, got something else"),
             }
-        }
+        }).collect::<Result<Vec<_>>>()?;
 
         let bundle = group
             .commit_builder()
+            .consume_proposal_store(false)
+            .add_proposals(proposals)
             .load_psks(self.provider.storage())
             .context("Failed to load PSKs")?
             .build(

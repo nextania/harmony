@@ -226,6 +226,7 @@ pub fn spawn_voice_events() {
                     time::sleep(Duration::from_millis((call_id.1 - time) as u64)).await;
                     continue;
                 }
+                // TODO: handle dead nodes that cause calls to be stuck in memory and never expire
                 if let Ok(Some(call)) = ActiveCall::get(&call_id.0).await
                     && let Err(e) = call.end().await
                 {

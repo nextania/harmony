@@ -95,10 +95,7 @@ pub fn listen() {
                         },
                     ..
                 } => {
-                    if let Some(session) = crate::wt::GLOBAL_SESSIONS
-                        .iter()
-                        .find(|s| s.session_id == id)
-                    {
+                    if let Some(session) = crate::wt::GLOBAL_SESSIONS.get(&id) {
                         let session_id = session.id.clone();
                         let call_id = session.call_id.clone();
 
@@ -134,11 +131,7 @@ pub fn listen() {
                     event: NodeEventKind::UserDisconnect { id, .. },
                     ..
                 } => {
-                    if let Some((_, session)) = crate::wt::GLOBAL_SESSIONS
-                        .iter()
-                        .find(|s| s.session_id == id)
-                        .map(|s| (s.id.clone(), s.clone()))
-                    {
+                    if let Some(session) = crate::wt::GLOBAL_SESSIONS.get(&id) {
                         let _ = session
                             .message_tx
                             .send(pulse_api::WtMessageS2C::Disconnected { reconnect: None });
@@ -158,11 +151,7 @@ pub fn listen() {
                         },
                     ..
                 } => {
-                    if let Some((_, session)) = crate::wt::GLOBAL_SESSIONS
-                        .iter()
-                        .find(|s| s.session_id == id)
-                        .map(|s| (s.id.clone(), s.clone()))
-                    {
+                    if let Some(session) = crate::wt::GLOBAL_SESSIONS.get(&id) {
                         let _ = session
                             .message_tx
                             .send(pulse_api::WtMessageS2C::Disconnected {

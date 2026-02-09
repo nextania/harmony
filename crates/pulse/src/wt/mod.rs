@@ -9,7 +9,8 @@ use pulse_api::{
 use redis::AsyncCommands;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::{Mutex, RwLock, mpsc};
 use tokio::time::Instant;
 use tokio::{task, time};
@@ -28,7 +29,6 @@ pub struct SessionInner {
     pub can_video: bool,
     pub can_screen: bool,
     pub producers: HashMap<String, TrackInfo>, // track_id -> TrackInfo
-    pub last_activity: Instant,
 }
 
 #[derive(Clone, Debug)]
@@ -50,11 +50,12 @@ pub struct SessionState {
     pub session_data: Arc<RwLock<SessionInner>>,
     pub connection: Arc<wtransport::Connection>,
     pub message_tx: mpsc::UnboundedSender<WtMessageS2C>,
+    pub last_activity: Arc<AtomicU64>,
 }
 
 impl SessionState {
-    async fn update_activity(&self) {
-        self.session_data.write().await.last_activity = Instant::now();
+    fn update_activity(&self) {
+        self.last_activity.store(now(), Ordering::SeqCst);
     }
 }
 
@@ -94,7 +95,7 @@ async fn handle_session(
     let session = session_request.accept().await?;
     info!("New WT session from {}", session.remote_address());
 
-    let session_id = ulid::Ulid::new().to_string();
+    let unique_id = ulid::Ulid::new().to_string();
     let connection = Arc::new(session);
 
     let message_pair = mpsc::unbounded_channel::<WtMessageS2C>();
@@ -102,30 +103,37 @@ async fn handle_session(
     let (mut send, mut recv) = connection.accept_bi().await?;
 
     let result =
-        handle_session_loop(&connection, &mut send, &mut recv, &session_id, message_pair).await;
+        handle_session_loop(&connection, &mut send, &mut recv, &unique_id, message_pair).await;
 
-    info!("Cleaning up session {}", session_id);
+    info!("Cleaning up session {}", unique_id);
 
-    if let Some((_, state)) = GLOBAL_SESSIONS.remove(&session_id) {
-        let session = state.session_data.read().await;
+    if let Some((_, state)) = GLOBAL_SESSIONS
+        .iter()
+        .find(|s| s.id == unique_id)
+        .map(|s| (s.key().clone(), s.value().clone()))
+    {
+        let state_data = state.clone();
+        drop(state);
+        GLOBAL_SESSIONS.remove(&state_data.session_id);
+        let session = state_data.session_data.read().await;
 
-        if let Some(call) = GLOBAL_CALLS.get(&state.call_id) {
-            call.remove_member(&session_id).await;
-            call.stop_consuming_all(&session_id);
+        if let Some(call) = GLOBAL_CALLS.get(&state_data.call_id) {
+            call.remove_member(&state_data.session_id).await;
+            call.stop_consuming_all(&state_data.session_id);
             let producer_global_ids: Vec<String> =
                 session.producers.values().map(|t| t.id.clone()).collect();
             for global_id in producer_global_ids {
-                call.stop_producing(&state.id, &global_id);
+                call.stop_producing(&state_data.session_id, &global_id);
             }
 
             broadcast_proposals(&call).await;
         }
         let mut redis_conn = crate::redis::get_connection().await;
         let event = NodeEvent {
-            id: session_id.to_string(),
+            id: INSTANCE_ID.to_string(),
             event: NodeEventKind::UserDisconnect {
-                id: state.session_id.clone(),
-                call_id: state.call_id.clone(),
+                id: state_data.session_id.clone(),
+                call_id: state_data.call_id.clone(),
             },
         };
         let _: Result<(), redis::RedisError> = redis_conn
@@ -151,6 +159,7 @@ async fn broadcast_proposals(call: &Call) {
             time::sleep(Duration::from_secs(10)).await;
             // if no commits received after 10 seconds,
             // then destroy the call
+            // TODO: decide whether we should resend
             let state = state.lock().await;
             if state.pending_commit.is_some() && state.current_epoch == epoch {
                 GLOBAL_CALLS.remove(&id);
@@ -175,14 +184,18 @@ async fn handle_session_loop(
     let connected = Instant::now();
 
     loop {
-        let timeout_duration = if let Some(session) = GLOBAL_SESSIONS.get(session_id) {
-            let time_since_activity = session.session_data.read().await.last_activity.elapsed();
-            if time_since_activity > Duration::from_secs(60) {
+        let timeout_duration = if let Some(session) = GLOBAL_SESSIONS
+            .iter()
+            .find(|s| s.id == session_id)
+            .map(|s| s.value().clone())
+        {
+            let time_since_activity = now() - session.last_activity.load(Ordering::SeqCst);
+            if time_since_activity > 60 {
                 warn!("Session {} timed out due to inactivity", session.id);
                 send_message(send, WtMessageS2C::Disconnected { reconnect: None }).await?;
                 return Ok(());
             }
-            Duration::from_secs(60) - time_since_activity
+            Duration::from_secs(60 - time_since_activity)
         } else {
             if connected.elapsed() > Duration::from_secs(30) {
                 warn!("Session timed out waiting for authentication");
@@ -196,8 +209,8 @@ async fn handle_session_loop(
             dg_result = connection.receive_datagram() => {
                 match dg_result {
                     Ok(dg) => {
-                        if let Some(session) = GLOBAL_SESSIONS.get(session_id) {
-                            session.update_activity().await;
+                        if let Some(session) = GLOBAL_SESSIONS.iter().find(|s| s.id == session_id).map(|s| s.value().clone())  {
+                            session.update_activity();
                             handle_datagram(&dg.payload()[..], &session).await?;
                         }
                     }
@@ -210,8 +223,8 @@ async fn handle_session_loop(
             read_result = recv.read(&mut bytes) => {
                 match read_result {
                     Ok(Some(len)) => {
-                        if let Some(session) = GLOBAL_SESSIONS.get(session_id) {
-                            session.update_activity().await;
+                        if let Some(session) = GLOBAL_SESSIONS.iter().find(|s| s.id == session_id).map(|s| s.value().clone())  {
+                            session.update_activity();
                         }
                         buffer.extend_from_slice(&bytes[..len]);
 
@@ -263,11 +276,11 @@ async fn handle_datagram(payload: &[u8], session: &SessionState) -> anyhow::Resu
     let Some(call) = GLOBAL_CALLS.get(&session.call_id) else {
         warn!(
             "Call {} not found for session {}",
-            session.call_id, session.id
+            session.call_id, session.session_id
         );
         return Ok(());
     };
-    let Some(track_id) = call.get_mapped_track_id(&message.id, &session.id) else {
+    let Some(track_id) = call.get_mapped_track_id(&message.id, &session.session_id) else {
         warn!(
             "Received data for track {} not produced by this session",
             message.id
@@ -314,7 +327,11 @@ async fn handle_message(
     connection: &wtransport::Connection,
     message_tx: mpsc::UnboundedSender<WtMessageS2C>,
 ) -> anyhow::Result<()> {
-    let Some(state) = GLOBAL_SESSIONS.get(session_id) else {
+    let Some(state) = GLOBAL_SESSIONS
+        .iter()
+        .find(|s| s.id == session_id)
+        .map(|s| s.value().clone())
+    else {
         let WtMessageC2S::Connect {
             session_token,
             key_package,
@@ -334,36 +351,35 @@ async fn handle_message(
         .await?;
         return Ok(());
     };
-    let state = state.value();
     match message {
         WtMessageC2S::Disconnect {} => {
             handle_disconnect(send, connection).await?;
             return Err(anyhow::anyhow!("Client disconnected"));
         }
         WtMessageC2S::StartProduce { id, media_hint } => {
-            handle_start_produce(id, media_hint, send, state).await?;
+            handle_start_produce(id, media_hint, send, &state).await?;
         }
         WtMessageC2S::StopProduce { id } => {
-            handle_stop_produce(id, send, state).await?;
+            handle_stop_produce(id, send, &state).await?;
         }
         WtMessageC2S::StartConsume { id } => {
-            handle_start_consume(id, send, state).await?;
+            handle_start_consume(id, send, &state).await?;
         }
         WtMessageC2S::StopConsume { id } => {
-            handle_stop_consume(id, send, state).await?;
+            handle_stop_consume(id, send, &state).await?;
         }
         WtMessageC2S::Heartbeat {} => {
-            handle_heartbeat(send, state).await?;
+            handle_heartbeat(send, &state).await?;
         }
         WtMessageC2S::MlsCommit {
             commit_data,
             epoch,
             welcome_data,
         } => {
-            handle_mls_commit(commit_data, epoch, welcome_data, send, state).await?;
+            handle_mls_commit(commit_data, epoch, welcome_data, send, &state).await?;
         }
         WtMessageC2S::CommitAck { epoch } => {
-            handle_commit_ack(epoch, state).await?;
+            handle_commit_ack(epoch, &state).await?;
         }
         _ => {
             warn!("Unhandled message type");
@@ -383,7 +399,8 @@ async fn handle_connect(
 ) -> anyhow::Result<()> {
     let mut redis_conn = crate::redis::get_connection().await;
 
-    let session_data: Option<SessionData> = redis_conn.get(format!("session:{}", session_token)).await?;
+    let session_data: Option<SessionData> =
+        redis_conn.get(format!("session:{}", session_token)).await?;
 
     let session_data = match session_data {
         Some(data) => data,
@@ -404,10 +421,11 @@ async fn handle_connect(
         ));
     }
 
+    // IMPORTANT: we remove the session here
+    // so that we don't try to destroy the session later
     let old_session = GLOBAL_SESSIONS
-        .iter()
-        .find(|entry| entry.value().session_token == session_token)
-        .map(|entry| entry.value().clone());
+        .remove(&session_data.session_id)
+        .map(|(_, s)| s);
 
     if let Some(old_session) = old_session {
         let _ = old_session
@@ -416,9 +434,6 @@ async fn handle_connect(
         old_session
             .connection
             .close(0u32.into(), b"Session replaced by reconnection");
-        // IMPORTANT: we remove the session here
-        // so that we don't try to destroy the session later
-        GLOBAL_SESSIONS.remove(&old_session.id);
     }
 
     let state = SessionState {
@@ -432,12 +447,12 @@ async fn handle_connect(
             can_video: session_data.can_video,
             can_screen: session_data.can_screen,
             producers: HashMap::new(), // TODO: copy producers from previous session, if any
-            last_activity: Instant::now(),
         })),
         connection: Arc::new(connection.clone()),
         message_tx: message_tx.clone(),
+        last_activity: Arc::new(AtomicU64::new(now())),
     };
-    GLOBAL_SESSIONS.insert(state.id.clone(), state.clone());
+    GLOBAL_SESSIONS.insert(state.session_id.clone(), state.clone());
 
     let call = GLOBAL_CALLS
         .entry(session_data.call_id.clone())
@@ -459,15 +474,15 @@ async fn handle_connect(
 
     let is_first_member = call.members.is_empty();
 
-    call.add_member(state.id.clone(), key_package).await;
+    call.add_member(state.session_id.clone(), key_package).await;
     broadcast_proposals(&call).await;
 
-    let available_tracks: Vec<AvailableTrack> = call.get_available_tracks(&state.id);
+    let available_tracks: Vec<AvailableTrack> = call.get_available_tracks(&state.session_id);
 
     send_message(
         send,
         WtMessageS2C::Connected {
-            id: state.id.clone(),
+            id: state.session_id.clone(),
             available_tracks,
         },
     )
@@ -500,7 +515,7 @@ async fn handle_connect(
 
     let mut redis_conn = crate::redis::get_connection().await;
     let event = NodeEvent {
-        id: state.id.clone(),
+        id: INSTANCE_ID.to_string(),
         event: NodeEventKind::UserConnect {
             // Note: session_id here refers to the instance of the user,
             // as opposed to the specific connection
@@ -529,7 +544,7 @@ async fn handle_start_consume(
     send: &mut wtransport::stream::SendStream,
     state: &SessionState,
 ) -> anyhow::Result<()> {
-    if state.session_data.read().await.can_listen {
+    if !state.session_data.read().await.can_listen {
         warn!("Cannot consume track while deafened");
         return Ok(());
     }
@@ -537,7 +552,7 @@ async fn handle_start_consume(
         warn!("Call {} not found for session {}", state.call_id, state.id);
         return Ok(());
     };
-    call.start_consuming(&state.id, &track_id);
+    call.start_consuming(&state.session_id, &track_id);
     drop(call);
 
     send_message(send, WtMessageS2C::ConsumeStarted { id: track_id }).await?;
@@ -554,7 +569,7 @@ async fn handle_stop_consume(
         warn!("Call {} not found for session {}", state.call_id, state.id);
         return Ok(());
     };
-    call.stop_consuming(&state.id, &track_id);
+    call.stop_consuming(&state.session_id, &track_id);
     drop(call);
 
     send_message(send, WtMessageS2C::ConsumeStopped { id: track_id }).await?;
@@ -587,7 +602,7 @@ async fn handle_start_produce(
         }
     }
 
-    let current_session_id = state.id.clone();
+    let current_session_id = state.session_id.clone();
 
     let global_track_id = Ulid::new().to_string();
 
@@ -608,7 +623,7 @@ async fn handle_start_produce(
         warn!("Call {} not found for session {}", state.call_id, state.id);
         return Ok(());
     };
-    call.start_producing(&state.id, track_info).await;
+    call.start_producing(&state.session_id, track_info).await;
     drop(call);
 
     send_message(
@@ -634,12 +649,12 @@ async fn handle_stop_produce(
             return Ok(());
         }
     };
-    let global_track_id = call.get_mapped_track_id(&track_id, &state.id);
+    let global_track_id = call.get_mapped_track_id(&track_id, &state.session_id);
     let Some(global_track_id) = global_track_id else {
         warn!("Track {} not found for session {}", track_id, state.id);
         return Ok(());
     };
-    call.stop_producing(&state.id, &global_track_id);
+    call.stop_producing(&state.session_id, &global_track_id);
     drop(call);
     let mut session = state.session_data.write().await;
     session.producers.remove(&global_track_id);
@@ -797,8 +812,8 @@ async fn handle_commit_ack(epoch: u64, state: &SessionState) -> anyhow::Result<(
         warn!("Call {} not found for session {}", state.call_id, state.id);
         return Ok(());
     };
-
-    let all_acked = call.record_commit_ack(&state.id, epoch).await;
+    // TODO: look into this
+    let all_acked = call.record_commit_ack(&state.session_id, epoch).await;
 
     if all_acked {
         // broadcast epoch ready if this was the last ack needed
@@ -815,4 +830,11 @@ async fn handle_commit_ack(epoch: u64, state: &SessionState) -> anyhow::Result<(
     }
 
     Ok(())
+}
+
+fn now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards")
+        .as_secs()
 }

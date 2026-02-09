@@ -390,9 +390,7 @@ async fn start_client(
                 let serialized = serialize(&response).expect("Failed to serialize");
                 debug!("Sent: {:?}", response);
                 let mut client = clients.0.get_mut(&id.clone()).unwrap();
-                client
-                    .send(serialized)
-                    .await;
+                client.send(serialized).await;
             }
             Message::Close(_) => {
                 debug!("Received close");

@@ -110,6 +110,7 @@ impl MlsClient {
                 external_sender,
             ])))
             .context("Failed to set group context extensions")?
+            .use_ratchet_tree_extension(true)
             .build();
 
         let group = MlsGroup::new_with_group_id(

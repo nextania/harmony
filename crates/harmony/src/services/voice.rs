@@ -451,8 +451,11 @@ impl ActiveCall {
     pub async fn update(&self) -> Result<()> {
         let mut redis = get_connection().await;
         redis
-            .set::<String, ActiveCall, ActiveCall>(format!("call:{}", self.id), self.clone())
+            .set::<String, ActiveCall, ()>(format!("call:{}", self.id), self.clone())
             .await?;
+        if !self.members.is_empty() {
+            let _: () = redis.zrem("voice:empty-calls", &self.id).await?;
+        }
 
         let member_ids: Vec<String> = self
             .members

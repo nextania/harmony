@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 pulse-api = { path = "../pulse-api" }
 wtransport = "0.6.1"
-rkyv = "0.8.14"
+rkyv = { version = "0.8.14", features = ["unaligned"] }
 tokio = { version = "1.45.1", features = ["macros", "rt-multi-thread", "sync", "time"], default-features = false }
 openmls = "0.7.1"
 openmls_rust_crypto = "0.4.1"

@@ -158,6 +158,11 @@ pub enum ApiError {
     NoVoiceNodesAvailable,
 }
 
+#[derive(Debug, serde::Deserialize)]
+pub struct ApiErrorResponse {
+    pub error: ApiError,
+}
+
 impl From<ApiError> for HarmonyError {
     fn from(err: ApiError) -> Self {
         match err {

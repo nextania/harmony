@@ -11,6 +11,7 @@ use pulse_api::{NodeEvent, NodeEventKind};
 use redis::AsyncCommands;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateCallTokenMethod {
     id: String,
     initial_muted: bool,
@@ -18,6 +19,7 @@ pub struct CreateCallTokenMethod {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateCallTokenResponse {
     id: String,
     token: String,
@@ -49,6 +51,7 @@ pub async fn create_call_token(
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StartCallMethod {
     id: String,
     preferred_region: Option<pulse_api::Region>,
@@ -65,15 +68,17 @@ pub async fn start_call(state: RpcState, data: RpcValue<StartCallMethod>) -> imp
         return Err(Error::NotFound);
     }
     let call = ActiveCall::create(&data.id, &user.id, data.preferred_region).await?;
-    Ok(RpcValue(StartCallResponse { id: call.id }))
+    Ok::<_, Error>(RpcValue(StartCallResponse { id: call.id }))
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StartCallResponse {
     id: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EndCallMethod {
     id: String,
 }
@@ -91,19 +96,16 @@ pub async fn end_call(state: RpcState, data: RpcValue<EndCallMethod>) -> impl Rp
     if !channel.is_manager(&user.id) {
         return Err(Error::MissingPermission);
     }
-    let call = ActiveCall::get_in_channel(&data.id).await?;
-    if let Some(call) = call {
-        call.end().await?;
-        Ok(RpcValue(EndCallResponse {}))
-    } else {
-        Err(Error::NotFound)
-    }
+    call.end().await?;
+    Ok(RpcValue(EndCallResponse {}))
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EndCallResponse {}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateVoiceStateMethod {
     id: String,
     muted: Option<bool>,
@@ -111,6 +113,7 @@ pub struct UpdateVoiceStateMethod {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateVoiceStateResponse {
     muted: bool,
     deafened: bool,
@@ -191,11 +194,13 @@ pub async fn update_voice_state(
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GetCallMembersMethod {
     id: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CallMember {
     user_id: String,
     session_id: String,
@@ -204,6 +209,7 @@ pub struct CallMember {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GetCallMembersResponse {
     members: Vec<CallMember>,
 }

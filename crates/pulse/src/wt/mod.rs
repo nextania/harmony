@@ -383,14 +383,10 @@ async fn handle_connect(
 ) -> anyhow::Result<()> {
     let mut redis_conn = crate::redis::get_connection().await;
 
-    let session_data: Option<String> = redis_conn.get(format!("session:{}", session_token)).await?;
+    let session_data: Option<SessionData> = redis_conn.get(format!("session:{}", session_token)).await?;
 
     let session_data = match session_data {
-        Some(data) => {
-            let parsed: SessionData = pulse_api::deserialize(data.as_bytes())
-                .map_err(|e| anyhow::anyhow!("Failed to parse session data: {:?}", e))?;
-            parsed
-        }
+        Some(data) => data,
         None => {
             warn!("Invalid session token: {}", session_token);
             // disconnect
@@ -466,11 +462,7 @@ async fn handle_connect(
     call.add_member(state.id.clone(), key_package).await;
     broadcast_proposals(&call).await;
 
-    let available_tracks: Vec<AvailableTrack> = GLOBAL_CALLS
-        .get(&session_data.call_id)
-        .map_or(Vec::new(), |call| {
-            call.value().get_available_tracks(&state.id)
-        });
+    let available_tracks: Vec<AvailableTrack> = call.get_available_tracks(&state.id);
 
     send_message(
         send,
@@ -546,6 +538,7 @@ async fn handle_start_consume(
         return Ok(());
     };
     call.start_consuming(&state.id, &track_id);
+    drop(call);
 
     send_message(send, WtMessageS2C::ConsumeStarted { id: track_id }).await?;
 
@@ -562,6 +555,7 @@ async fn handle_stop_consume(
         return Ok(());
     };
     call.stop_consuming(&state.id, &track_id);
+    drop(call);
 
     send_message(send, WtMessageS2C::ConsumeStopped { id: track_id }).await?;
 
@@ -574,7 +568,7 @@ async fn handle_start_produce(
     send: &mut wtransport::stream::SendStream,
     state: &SessionState,
 ) -> anyhow::Result<()> {
-    let session_data = state.session_data.read().await;
+    let mut session_data = state.session_data.write().await;
     let allowed = match media_hint {
         MediaHint::Audio => session_data.can_speak,
         MediaHint::Video => session_data.can_video,
@@ -586,7 +580,7 @@ async fn handle_start_produce(
         return Ok(());
     }
 
-    for track in state.session_data.read().await.producers.values() {
+    for track in session_data.producers.values() {
         if std::mem::discriminant(&track.media_hint) == std::mem::discriminant(&media_hint) {
             warn!("Already producing track of type {:?}", media_hint);
             return Ok(());
@@ -605,18 +599,17 @@ async fn handle_start_produce(
         producer_session: state.clone(),
     };
 
-    state
-        .session_data
-        .write()
-        .await
+    session_data
         .producers
-        .insert(track_id.clone(), track_info.clone());
+        .insert(global_track_id.clone(), track_info.clone());
+    drop(session_data);
 
     let Some(call) = GLOBAL_CALLS.get(&state.call_id) else {
         warn!("Call {} not found for session {}", state.call_id, state.id);
         return Ok(());
     };
     call.start_producing(&state.id, track_info).await;
+    drop(call);
 
     send_message(
         send,
@@ -647,9 +640,10 @@ async fn handle_stop_produce(
         return Ok(());
     };
     call.stop_producing(&state.id, &global_track_id);
+    drop(call);
     let mut session = state.session_data.write().await;
     session.producers.remove(&track_id);
-
+    drop(session);
     send_message(
         send,
         WtMessageS2C::ProduceStopped {

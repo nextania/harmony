@@ -379,7 +379,6 @@ async fn start_client(
         };
         match data {
             Message::Binary(bin) => {
-                debug!("Received binary data");
                 let response = handle_packet(
                     bin.to_vec(),
                     &clients,
@@ -388,9 +387,11 @@ async fn start_client(
                     methods.clone(),
                 )
                 .await;
+                let serialized = serialize(&response).expect("Failed to serialize");
+                debug!("Sent: {:?}", response);
                 let mut client = clients.0.get_mut(&id.clone()).unwrap();
                 client
-                    .send(serialize(&response).expect("Failed to serialize"))
+                    .send(serialized)
                     .await;
             }
             Message::Close(_) => {

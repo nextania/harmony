@@ -29,7 +29,7 @@ dotenvy = "0.15.7"
 
 pulse-api = { path = "../pulse-api" }
 wtransport = "0.6.1"
-rkyv = "0.8.14"
+rkyv = { version = "0.8.14", features = ["unaligned"] }
 anyhow = "1.0.100"
 arc-swap = "1.8.0"
 

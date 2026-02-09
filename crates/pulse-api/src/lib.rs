@@ -30,7 +30,6 @@ pub struct NodeDescription {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct NodeEvent {
     pub id: String,
-    #[serde(flatten)]
     pub event: NodeEventKind,
 }
 

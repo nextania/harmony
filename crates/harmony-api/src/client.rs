@@ -12,7 +12,7 @@ use tokio::time::timeout;
 use url::Url;
 use uuid::Uuid;
 
-use crate::error::{HarmonyError, Result};
+use crate::error::{ApiErrorResponse, HarmonyError, Result};
 use crate::events::{Event, EventHandler, NoOpEventHandler, RpcMessageS2C};
 
 /// Configuration for the Harmony client
@@ -369,7 +369,14 @@ impl HarmonyClient {
             })?
             .ok_or_else(|| HarmonyError::Internal("Response channel closed".to_string()))?;
 
-        let result: R = rmpv::ext::from_value(response_value)?;
+        let result: R = rmpv::ext::from_value(response_value.clone()).map_err(|e| {
+            let err_result: std::result::Result<ApiErrorResponse, _> = rmpv::ext::from_value(response_value);
+            match err_result {
+                Ok(api_error) => HarmonyError::Api(api_error.error),
+                Err(_) => HarmonyError::MessagePackExt(e),
+            }
+        })?;
+
         Ok(result)
     }
 

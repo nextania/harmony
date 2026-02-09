@@ -36,7 +36,8 @@ impl fmt::Display for Error {
 }
 
 impl From<rmpv::ext::Error> for Error {
-    fn from(_: rmpv::ext::Error) -> Self {
+    fn from(e: rmpv::ext::Error) -> Self {
+        println!("MessagePack error: {:?}", e);
         Error::SerializeError
     }
 }

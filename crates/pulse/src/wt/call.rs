@@ -264,11 +264,18 @@ impl Call {
     }
 
     pub async fn flush_proposals(&self) -> Option<(Vec<Vec<u8>>, Vec<String>, u64)> {
-        // TODO: check if we're already waiting for a commit
-        // if so, then return; when that commit finishes or times out,
-        // the task associated with that commit should call this again
         let mut state = self.mls_state.lock().await;
+        if state.pending_commit.is_some() {
+            info!(
+                "Already waiting for commit on call {}, cannot flush new proposals yet",
+                self.id
+            );
+            return None;
+        }
         let pending_proposals = std::mem::take(&mut state.pending_proposals);
+        if pending_proposals.is_empty() {
+            return None;
+        }
         state.pending_commit = Some(PendingCommit {
             proposals: pending_proposals.clone(),
         });

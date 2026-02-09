@@ -20,6 +20,8 @@ pub struct PulseClientOptions {
     pub session_id: String,
     /// Session token obtained from the Harmony server.
     pub session_token: String,
+    /// Call ID obtained from the Harmony server.
+    pub call_id: String,
 }
 
 /// Handle to a connected Pulse session.
@@ -50,7 +52,7 @@ impl PulseClient {
     pub async fn connect(
         options: PulseClientOptions,
     ) -> Result<(Self, mpsc::UnboundedReceiver<PulseEvent>)> {
-        let mls = MlsClient::new(&options.session_id)?;
+        let mls = MlsClient::new(&options.session_id, &options.call_id)?;
         let key_package = mls.serialized_key_package()?;
 
         let client_config = wtransport::ClientConfig::default();

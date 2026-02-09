@@ -169,6 +169,7 @@ pub struct CreateCallTokenResponse {
     pub id: String,
     pub token: String,
     pub server_address: String,
+    pub call_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

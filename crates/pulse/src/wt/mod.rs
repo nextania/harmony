@@ -642,7 +642,7 @@ async fn handle_stop_produce(
     call.stop_producing(&state.id, &global_track_id);
     drop(call);
     let mut session = state.session_data.write().await;
-    session.producers.remove(&track_id);
+    session.producers.remove(&global_track_id);
     drop(session);
     send_message(
         send,

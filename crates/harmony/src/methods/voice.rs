@@ -24,6 +24,7 @@ pub struct CreateCallTokenResponse {
     id: String,
     token: String,
     server_address: String,
+    call_id: String,
 }
 
 pub async fn create_call_token(
@@ -47,6 +48,7 @@ pub async fn create_call_token(
         id,
         token,
         server_address,
+        call_id: call.id.clone(),
     }))
 }
 

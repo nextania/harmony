@@ -31,13 +31,14 @@ pub struct MlsClient {
     previous_media_keys: DashMap<String, [u8; MEDIA_KEY_LEN]>,
     previous_keys_expiry: Option<Instant>,
     media_epoch: Option<u64>,
+    call_id: String,
 }
 
 impl MlsClient {
     /// Create a new MLS client identity with a fresh key pair.
     ///
     /// `client_id` is an opaque identifier (e.g. the session ID) embedded in the credential.
-    pub fn new(client_id: &str) -> Result<Self> {
+    pub fn new(client_id: &str, call_id: &str) -> Result<Self> {
         let provider = OpenMlsRustCrypto::default();
         let credential = BasicCredential::new(client_id.as_bytes().to_vec());
         let signer = SignatureKeyPair::new(CIPHERSUITE.signature_algorithm())
@@ -61,6 +62,7 @@ impl MlsClient {
             previous_media_keys: DashMap::new(),
             previous_keys_expiry: None,
             media_epoch: None,
+            call_id: call_id.to_string(),
         })
     }
 
@@ -110,10 +112,11 @@ impl MlsClient {
             .context("Failed to set group context extensions")?
             .build();
 
-        let group = MlsGroup::new(
+        let group = MlsGroup::new_with_group_id(
             &self.provider,
             &self.signer,
             &group_config,
+            GroupId::from_slice(&self.call_id.as_bytes()),
             self.credential_with_key.clone(),
         )
         .context("Failed to create MLS group")?;

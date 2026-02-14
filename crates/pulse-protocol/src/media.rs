@@ -29,7 +29,8 @@ impl MediaRouter {
     /// arriving between the request and confirmation are missed.
     pub fn subscribe(&self, track: &AvailableTrack) -> mpsc::UnboundedReceiver<Vec<u8>> {
         let (tx, rx) = mpsc::unbounded_channel();
-        self.senders.insert(track.id.clone(), (track.session_id.to_string(), tx));
+        self.senders
+            .insert(track.id.clone(), (track.session_id.to_string(), tx));
         rx
     }
 
@@ -46,7 +47,7 @@ impl MediaRouter {
     /// If no subscriber exists for the track ID, the data is silently dropped.
     pub fn dispatch(&self, track_id: &str, data: Vec<u8>, mls: &MlsClient) {
         if let Some(sender) = self.senders.get(track_id) {
-            let decrypted =  mls.decrypt_media(&sender.0, &data);
+            let decrypted = mls.decrypt_media(&sender.0, &data);
             match decrypted {
                 Ok(plaintext) => {
                     if sender.1.send(plaintext).is_err() {

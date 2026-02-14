@@ -147,24 +147,27 @@ impl MlsClient {
     ) -> Result<(Vec<u8>, u64, Option<Vec<u8>>)> {
         let group = self.group.as_mut().context("MLS group not initialized")?;
 
-        let proposals = proposals.iter().map(|p| {
-            let mls_message_in = MlsMessageIn::tls_deserialize(&mut p.as_slice())
-                .context("Failed to deserialize proposal MlsMessageIn")?;
-            let protocol_message = mls_message_in
-                .try_into_protocol_message()
-                .map_err(|_| anyhow::anyhow!("Expected a protocol message for proposal"))?;
-            let processed = group
-                .process_message(&self.provider, protocol_message)
-                .context("Failed to process proposal message")?;
+        let proposals = proposals
+            .iter()
+            .map(|p| {
+                let mls_message_in = MlsMessageIn::tls_deserialize(&mut p.as_slice())
+                    .context("Failed to deserialize proposal MlsMessageIn")?;
+                let protocol_message = mls_message_in
+                    .try_into_protocol_message()
+                    .map_err(|_| anyhow::anyhow!("Expected a protocol message for proposal"))?;
+                let processed = group
+                    .process_message(&self.provider, protocol_message)
+                    .context("Failed to process proposal message")?;
 
-            let content = processed.into_content();
-            match content {
-                ProcessedMessageContent::ProposalMessage(p) => {
-                    return Ok(p.proposal().clone());
+                let content = processed.into_content();
+                match content {
+                    ProcessedMessageContent::ProposalMessage(p) => {
+                        return Ok(p.proposal().clone());
+                    }
+                    _ => bail!("Expected a proposal message, got something else"),
                 }
-                _ => bail!("Expected a proposal message, got something else"),
-            }
-        }).collect::<Result<Vec<_>>>()?;
+            })
+            .collect::<Result<Vec<_>>>()?;
 
         let bundle = group
             .commit_builder()
@@ -210,15 +213,17 @@ impl MlsClient {
         let group = self.group.as_mut().context("MLS group not initialized")?;
         if commit_data == self.pending_commit.as_deref().unwrap_or(&[]) {
             // our own commit
-            group.merge_pending_commit(&self.provider)
+            group
+                .merge_pending_commit(&self.provider)
                 .context("Failed to merge pending commit")?;
             self.pending_commit = None;
             tracing::debug!(epoch = group.epoch().as_u64(), "Applied own MLS commit");
             Ok(())
         } else {
             // foreign commit
-            let mls_message_in = MlsMessageIn::tls_deserialize(&mut commit_data.to_vec().as_slice())
-                .context("Failed to deserialize commit MlsMessageIn")?;
+            let mls_message_in =
+                MlsMessageIn::tls_deserialize(&mut commit_data.to_vec().as_slice())
+                    .context("Failed to deserialize commit MlsMessageIn")?;
             let protocol_message = mls_message_in
                 .try_into_protocol_message()
                 .map_err(|_| anyhow::anyhow!("Expected a protocol message for commit"))?;
@@ -307,7 +312,7 @@ impl MlsClient {
         let mut nonce_bytes = [0u8; MEDIA_NONCE_LEN];
         OsRng.fill_bytes(&mut nonce_bytes);
         let nonce = Nonce::from_slice(&nonce_bytes);
-
+        
         let ciphertext = cipher
             .encrypt(
                 nonce,

@@ -59,15 +59,19 @@ impl ClientOptions {
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
-enum RpcApiRequest {
+enum RpcMessageC2S {
     #[serde(rename_all = "camelCase")]
-    Identify { token: String, public_key: Vec<u8> },
+    Identify {
+        token: String,
+        public_key: Vec<u8>,
+    },
     #[serde(rename_all = "camelCase")]
     Message {
         id: String,
         method: String,
         data: Value,
     },
+    Heartbeat {},
 }
 
 struct ClientState {
@@ -88,25 +92,7 @@ pub struct HarmonyClient {
 
 impl HarmonyClient {
     pub async fn new(options: ClientOptions) -> Result<Self> {
-        let (reconnect_tx, reconnect_rx) = mpsc::unbounded_channel();
-
-        let client = Self {
-            options: options.clone(),
-            state: Arc::new(RwLock::new(ClientState {
-                pending_requests: HashMap::new(),
-                event_handler: Arc::new(NoOpEventHandler),
-                connected: false,
-                reconnecting: false,
-                reconnect_attempts: 0,
-            })),
-            websocket_tx: Arc::new(Mutex::new(None)),
-            reconnect_tx,
-        };
-
-        client.spawn_reconnection_handler(reconnect_rx).await;
-
-        client.connect().await?;
-        Ok(client)
+        Self::new_with_handler(options, Arc::new(NoOpEventHandler)).await
     }
 
     pub async fn new_with_handler(
@@ -128,7 +114,8 @@ impl HarmonyClient {
             reconnect_tx,
         };
 
-        client.spawn_reconnection_handler(reconnect_rx).await;
+        client.spawn_reconnection_handler(reconnect_rx);
+        client.spawn_heartbeat();
 
         client.connect().await?;
         Ok(client)
@@ -162,7 +149,43 @@ impl HarmonyClient {
         }
     }
 
-    async fn spawn_reconnection_handler(&self, mut reconnect_rx: mpsc::UnboundedReceiver<()>) {
+    fn spawn_heartbeat(&self) {
+        let state = self.state.clone();
+        let websocket_tx = self.websocket_tx.clone();
+
+        tokio::spawn(async move {
+            loop {
+                {
+                    let state_read = state.read().await;
+                    if !state_read.connected {
+                        break;
+                    }
+                    drop(state_read);
+                }
+
+                {
+                    let websocket_tx = websocket_tx.lock().await;
+                    if let Some(sender) = websocket_tx.as_ref() {
+                        let mut buf = Vec::new();
+                        let mut serializer = rmp_serde::Serializer::new(&mut buf).with_struct_map();
+                        RpcMessageC2S::Heartbeat {}
+                            .serialize(&mut serializer)
+                            .expect("Failed to serialize heartbeat");
+                        if let Err(e) = sender.send(Message::binary(buf)) {
+                            eprintln!("Failed to send heartbeat: {}", e);
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+
+                tokio::time::sleep(Duration::from_secs(10)).await;
+            }
+        });
+    }
+
+    fn spawn_reconnection_handler(&self, mut reconnect_rx: mpsc::UnboundedReceiver<()>) {
         let state = self.state.clone();
         let options = self.options.clone();
         let client = self.clone();
@@ -288,7 +311,7 @@ impl HarmonyClient {
                                 muted,
                                 deafened,
                             ),
-                            _ => unreachable!(), 
+                            _ => unreachable!(),
                         }
                     }
                 }
@@ -320,7 +343,7 @@ impl HarmonyClient {
         let params_value = rmpv::ext::to_value(params)
             .map_err(|e| HarmonyError::Internal(format!("Params serialization error: {}", e)))?;
 
-        let request = RpcApiRequest::Message {
+        let request = RpcMessageC2S::Message {
             id: request_id.clone(),
             method: method.to_string(),
             data: params_value,
@@ -370,7 +393,8 @@ impl HarmonyClient {
             .ok_or_else(|| HarmonyError::Internal("Response channel closed".to_string()))?;
 
         let result: R = rmpv::ext::from_value(response_value.clone()).map_err(|e| {
-            let err_result: std::result::Result<ApiError, _> = rmpv::ext::from_value(response_value);
+            let err_result: std::result::Result<ApiError, _> =
+                rmpv::ext::from_value(response_value);
             match err_result {
                 Ok(api_error) => HarmonyError::Api(api_error),
                 Err(_) => HarmonyError::MessagePackExt(e),
@@ -513,7 +537,7 @@ async fn connect(client: &HarmonyClient, is_reconnect: bool) -> Result<()> {
 }
 
 async fn authenticate(client: &HarmonyClient) -> Result<()> {
-    let identify_request = RpcApiRequest::Identify {
+    let identify_request = RpcMessageC2S::Identify {
         token: client.options.token.clone(),
         public_key: vec![], // TODO:
     };

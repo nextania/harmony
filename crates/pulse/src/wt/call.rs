@@ -1,4 +1,7 @@
-use std::{collections::HashSet, sync::{Arc, atomic::Ordering}};
+use std::{
+    collections::HashSet,
+    sync::{Arc, atomic::Ordering},
+};
 
 use arc_swap::ArcSwap;
 use dashmap::DashMap;

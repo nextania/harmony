@@ -8,7 +8,7 @@ use crate::MlsClient;
 /// Routes incoming media datagrams to per-track receivers.
 ///
 /// When the client subscribes to a track via `consume_track`, a per-track channel is
-/// created. Incoming `WtTrackData` datagrams are demultiplexed by track ID and forwarded
+/// created. Incoming media datagrams are demultiplexed by track ID and forwarded
 /// to the appropriate receiver. The consumer gets an `UnboundedReceiver<Vec<u8>>` for
 /// each track they subscribe to.
 #[derive(Clone)]

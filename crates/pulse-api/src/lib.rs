@@ -1,3 +1,5 @@
+pub mod fragment;
+
 use std::str::FromStr;
 
 use redis::FromRedisValue;
@@ -249,9 +251,11 @@ pub enum WtMessageS2C {
 }
 
 #[derive(Archive, Clone, Debug, rkyv::Deserialize, rkyv::Serialize)]
-pub struct WtTrackData {
-    // the track id
+pub struct WtFragmentedTrackData {
     pub id: String,
+    pub sequence_id: u32,
+    pub fragment_index: u16,
+    pub fragment_count: u16,
     pub data: Vec<u8>,
 }
 

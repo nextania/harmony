@@ -1,5 +1,8 @@
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use anyhow::{Context, Result};
-use pulse_api::{WtMessageC2S, WtMessageS2C, WtTrackData};
+use pulse_api::fragment::{FragmentAssembler, ReassembledDatagram};
+use pulse_api::{WtFragmentedTrackData, WtMessageC2S, WtMessageS2C};
 use wtransport::Connection;
 use wtransport::stream::{RecvStream, SendStream};
 
@@ -46,24 +49,59 @@ fn try_parse_message(buffer: &[u8]) -> Result<Option<(WtMessageS2C, usize)>> {
     Ok(Some((message, 4 + len)))
 }
 
-/// Send media track data as an unreliable datagram.
-pub fn send_datagram(connection: &Connection, track_id: &str, data: &[u8]) -> Result<()> {
-    let track_data = WtTrackData {
-        id: track_id.to_string(),
-        data: data.to_vec(),
-    };
-    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&track_data)
-        .context("Failed to serialize track data")?;
-    connection
-        .send_datagram(bytes)
-        .map_err(|e| anyhow::anyhow!("Failed to send datagram: {e}"))?;
+const FRAGMENT_ENVELOPE_OVERHEAD: usize = 128;
+
+const FALLBACK_MAX_DATAGRAM_SIZE: usize = 1200;
+
+pub fn send_datagram(
+    connection: &Connection,
+    track_id: &str,
+    data: &[u8],
+    sequence_counter: &AtomicU32,
+) -> Result<()> {
+    let max_datagram = connection
+        .max_datagram_size()
+        .unwrap_or(FALLBACK_MAX_DATAGRAM_SIZE);
+    let max_payload = max_datagram.saturating_sub(FRAGMENT_ENVELOPE_OVERHEAD);
+    if max_payload == 0 {
+        anyhow::bail!(
+            "Max datagram size ({max_datagram}) is too small for even an empty fragment"
+        );
+    }
+    let fragment_count = data.len().div_ceil(max_payload);
+    if fragment_count > u16::MAX as usize {
+        anyhow::bail!(
+            "Data too large: {fragment_count} fragments required (max {})",
+            u16::MAX
+        );
+    }
+    let sequence_id = sequence_counter.fetch_add(1, Ordering::Relaxed);
+    for (i, chunk) in data.chunks(max_payload.max(1)).enumerate() {
+        let fragment = WtFragmentedTrackData {
+            id: track_id.to_string(),
+            sequence_id,
+            fragment_index: i as u16,
+            fragment_count: fragment_count as u16,
+            data: chunk.to_vec(),
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&fragment)
+            .context("Failed to serialize fragment")?;
+        connection
+            .send_datagram(bytes)
+            .map_err(|e| anyhow::anyhow!("Failed to send datagram fragment {i}: {e}"))?;
+    }
+
     Ok(())
 }
 
-/// Receive media track data from an incoming datagram.
-pub async fn recv_datagram(connection: &Connection) -> Result<WtTrackData> {
+
+pub async fn recv_datagram(
+    connection: &Connection,
+    assembler: &mut FragmentAssembler,
+) -> Result<Option<ReassembledDatagram>> {
     let datagram = connection.receive_datagram().await?;
-    let track_data: WtTrackData = rkyv::api::high::from_bytes::<_, rkyv::rancor::Error>(&datagram)
-        .map_err(|e| anyhow::anyhow!("Failed to deserialize track data: {e}"))?;
-    Ok(track_data)
+    let fragment: WtFragmentedTrackData =
+        rkyv::api::high::from_bytes::<_, rkyv::rancor::Error>(&datagram)
+            .map_err(|e| anyhow::anyhow!("Failed to deserialize fragment: {e}"))?;
+    Ok(assembler.insert(fragment))
 }

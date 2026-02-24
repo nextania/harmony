@@ -2,14 +2,15 @@ pub mod call;
 
 use dashmap::DashMap;
 use lazy_static::lazy_static;
+use pulse_api::fragment::FragmentAssembler;
 use pulse_api::{
     AvailableTrack, MediaHint, NodeEvent, NodeEventKind, SessionData, WtMessageC2S, WtMessageS2C,
-    WtTrackData,
+    WtFragmentedTrackData,
 };
 use redis::AsyncCommands;
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::{Mutex, mpsc};
 use tokio::time::Instant;
@@ -44,6 +45,7 @@ pub struct SessionState {
     pub can_video: Arc<AtomicBool>,
     pub can_screen: Arc<AtomicBool>,
     pub producers: Arc<DashMap<String, TrackInfo>>, // track_id -> TrackInfo
+    pub seq_counter: Arc<AtomicU32>,
 }
 
 impl SessionState {
@@ -175,6 +177,7 @@ async fn handle_session_loop(
     let mut bytes = vec![0u8; 65536];
     let mut buffer = Vec::new();
     let connected = Instant::now();
+    let mut assembler = FragmentAssembler::new(Duration::from_secs(1));
 
     loop {
         let timeout_duration = if let Some(id) = GLOBAL_UNIQUE_SESSIONS
@@ -207,7 +210,16 @@ async fn handle_session_loop(
             .map(|s| s.value().clone()) &&
             let Some(session) = GLOBAL_SESSIONS.get(&id) {
                             session.update_activity();
-                            handle_datagram(&dg.payload()[..], &session).await?;
+                            let fragment: WtFragmentedTrackData = match rkyv::api::high::from_bytes::<_, rkyv::rancor::Error>(&dg.payload()[..]) {
+                                Ok(f) => f,
+                                Err(e) => {
+                                    warn!("Failed to deserialize fragment: {:?}", e);
+                                    continue;
+                                }
+                            };
+                            if let Some(reassembled) = assembler.insert(fragment) {
+                                handle_datagram(&reassembled.id, &reassembled.data, &session).await?;
+                            }
                         }
                     }
                     Err(e) => {
@@ -263,15 +275,7 @@ async fn handle_session_loop(
     }
 }
 
-async fn handle_datagram(payload: &[u8], session: &SessionState) -> anyhow::Result<()> {
-    let message: WtTrackData = match rkyv::api::high::from_bytes::<_, rkyv::rancor::Error>(payload)
-    {
-        Ok(msg) => msg,
-        Err(e) => {
-            warn!("Failed to deserialize track data: {:?}", e);
-            return Ok(());
-        }
-    };
+async fn handle_datagram(client_track_id: &str, data: &[u8], session: &SessionState) -> anyhow::Result<()> {
     let Some(call) = GLOBAL_CALLS.get(&session.call_id) else {
         warn!(
             "Call {} not found for session {}",
@@ -279,13 +283,17 @@ async fn handle_datagram(payload: &[u8], session: &SessionState) -> anyhow::Resu
         );
         return Ok(());
     };
-    let Some(track_id) = call.get_mapped_track_id(&message.id, &session.session_id) else {
+    let Some(track_id) = call.get_mapped_track_id(client_track_id, &session.session_id) else {
         warn!(
             "Received data for track {} not produced by this session",
-            message.id
+            client_track_id
         );
         return Ok(());
     };
+    if data.is_empty() {
+        warn!("Received empty datagram for track {}", track_id);
+        return Ok(());
+    }
 
     let track_info = session.producers.get(&track_id).unwrap();
     if matches!(track_info.media_hint, MediaHint::Audio)
@@ -295,7 +303,7 @@ async fn handle_datagram(payload: &[u8], session: &SessionState) -> anyhow::Resu
         return Ok(());
     }
 
-    call.dispatch(&track_id, &message.data).await;
+    call.dispatch(&track_id, data).await;
 
     Ok(())
 }
@@ -450,6 +458,7 @@ async fn handle_connect(
         connection: Arc::new(connection.clone()),
         message_tx: message_tx.clone(),
         last_activity: Arc::new(AtomicU64::new(now())),
+        seq_counter: Arc::new(AtomicU32::new(0)),
     };
     GLOBAL_SESSIONS.insert(state.session_id.clone(), state.clone());
     GLOBAL_UNIQUE_SESSIONS.insert(state.id.clone(), state.session_id.clone());

@@ -5,7 +5,7 @@ use std::{
 
 use arc_swap::ArcSwap;
 use dashmap::DashMap;
-use pulse_api::{AvailableTrack, WtMessageS2C, WtTrackData};
+use pulse_api::{AvailableTrack, WtFragmentedTrackData, WtMessageS2C};
 use tokio::sync::Mutex;
 
 use crate::wt::{GLOBAL_SESSIONS, TrackInfo};
@@ -53,6 +53,7 @@ pub enum PendingProposal {
         session_id: String,
     },
 }
+const FRAGMENT_ENVELOPE_OVERHEAD: usize = 128;
 
 impl Call {
     pub fn start_consuming(&self, session_id: &str, track_id: &str) {
@@ -167,7 +168,6 @@ impl Call {
             let sessions = consumer_set.value().load_full();
             for session_id in sessions.iter() {
                 let Some(session) = GLOBAL_SESSIONS.get(session_id) else {
-                    // shouldn't happen
                     warn!(
                         "Session {} not found while dispatching track {}",
                         session_id, track_id
@@ -180,25 +180,58 @@ impl Call {
                 }
 
                 let consumer_connection = session.connection.clone();
-                drop(session); // Release lock before sending
+                let seq_counter = session.seq_counter.clone();
+                drop(session); 
 
-                let Ok(payload) = rkyv::to_bytes::<rkyv::rancor::Error>(&WtTrackData {
-                    id: track_id.to_string(),
-                    data: data.to_vec(),
-                }) else {
-                    warn!("Failed to serialize track data for track {}", track_id);
-                    continue;
-                };
-
-                if let Err(e) = consumer_connection.send_datagram(payload) {
+                let max_datagram = consumer_connection
+                    .max_datagram_size()
+                    .expect("Failed to get max datagram size from connection");
+                let max_payload = max_datagram.saturating_sub(FRAGMENT_ENVELOPE_OVERHEAD);
+                if max_payload == 0 {
                     warn!(
-                        "Failed to forward track {} data to session {}: {:?}",
-                        track_id, session_id, e
+                        "Max datagram size ({}) too small for session {}",
+                        max_datagram, session_id
                     );
-                } else {
+                    continue;
+                }
+                let fragment_count = data.len().div_ceil(max_payload);
+                if fragment_count > u16::MAX as usize {
+                    warn!(
+                        "Data too large ({} bytes, {} fragments) for track {}",
+                        data.len(), fragment_count, track_id
+                    );
+                    continue;
+                }
+                let sequence_id = seq_counter.fetch_add(1, Ordering::Relaxed);
+
+                let mut failed = false;
+                for (i, chunk) in data.chunks(max_payload).enumerate() {
+                    let fragment = WtFragmentedTrackData {
+                        id: track_id.to_string(),
+                        sequence_id,
+                        fragment_index: i as u16,
+                        fragment_count: fragment_count as u16,
+                        data: chunk.to_vec(),
+                    };
+                    let Ok(bytes) = rkyv::to_bytes::<rkyv::rancor::Error>(&fragment) else {
+                        warn!("Failed to serialize fragment for track {}", track_id);
+                        failed = true;
+                        break;
+                    };
+                    if let Err(e) = consumer_connection.send_datagram(bytes) {
+                        warn!(
+                            "Failed to forward track {} fragment to session {}: {:?}",
+                            track_id, session_id, e
+                        );
+                        failed = true;
+                        break;
+                    }
+                }
+
+                if !failed {
                     debug!(
-                        "Forwarded track {} data to session {}",
-                        track_id, session_id
+                        "Forwarded track {} data ({} fragment(s)) to session {}",
+                        track_id, fragment_count, session_id
                     );
                 }
             }

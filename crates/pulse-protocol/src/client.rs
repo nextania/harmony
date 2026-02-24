@@ -1,8 +1,10 @@
 use std::sync::Arc;
+use std::sync::atomic::AtomicU32;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use dashmap::DashMap;
+use pulse_api::fragment::FragmentAssembler;
 use pulse_api::{AvailableTrack, MediaHint, WtMessageC2S, WtMessageS2C};
 use tokio::sync::{mpsc, oneshot};
 
@@ -56,6 +58,7 @@ impl PulseClient {
         let key_package = mls.serialized_key_package()?;
 
         let client_config = wtransport::ClientConfig::default();
+        // let client_config = wtransport::ClientConfig::builder().with_bind_default().with_no_cert_validation().build();
         let endpoint = wtransport::Endpoint::client(client_config)
             .context("Failed to create WebTransport client endpoint")?;
 
@@ -178,11 +181,19 @@ impl PulseClient {
     /// are missed. Returns a receiver that yields raw media data for this track.
     ///
     /// Waits for the server to confirm with `ConsumeStarted` before returning.
-    pub async fn consume_track(&self, track: &AvailableTrack) -> Result<mpsc::UnboundedReceiver<Vec<u8>>> {
+    pub async fn consume_track(
+        &self,
+        track: &AvailableTrack,
+    ) -> Result<mpsc::UnboundedReceiver<Vec<u8>>> {
         let rx = self.media_router.subscribe(&track);
 
         match self
-            .send_and_wait(&track.id, WtMessageC2S::StartConsume { id: track.id.clone() })
+            .send_and_wait(
+                &track.id,
+                WtMessageC2S::StartConsume {
+                    id: track.id.clone(),
+                },
+            )
             .await
         {
             Ok(()) => Ok(rx),
@@ -259,6 +270,9 @@ async fn event_loop(
     let mut heartbeat_interval = tokio::time::interval(HEARTBEAT_INTERVAL);
     heartbeat_interval.tick().await;
 
+    let mut assembler = FragmentAssembler::new(Duration::from_secs(1));
+    let sequence_counter = AtomicU32::new(0);
+
     loop {
         tokio::select! {
             msg_result = transport::recv_message(&mut recv_stream, &mut recv_buffer) => {
@@ -273,14 +287,17 @@ async fn event_loop(
                 ).await?;
             }
 
-            datagram_result = transport::recv_datagram(&connection) => {
+            datagram_result = transport::recv_datagram(&connection, &mut assembler) => {
                 match datagram_result {
-                    Ok(track_data) => {
+                    Ok(Some(reassembled)) => {
                         if mls.has_group() {
-                            media_router.dispatch(&track_data.id, track_data.data, &mls);
+                            media_router.dispatch(&reassembled.id, reassembled.data, &mls);
                         } else {
                             tracing::warn!("Received media before MLS group initialized; dropping");
                         }
+                    }
+                    Ok(None) => {
+                        // fragment received but frame not yet complete
                     }
                     Err(e) => {
                         tracing::warn!("Failed to receive datagram: {e:#}");
@@ -297,7 +314,7 @@ async fn event_loop(
                         if mls.has_group() {
                             match mls.encrypt_media(&data) {
                                 Ok(ciphertext) => {
-                                    if let Err(e) = transport::send_datagram(&connection, &track_id, &ciphertext) {
+                                    if let Err(e) = transport::send_datagram(&connection, &track_id, &ciphertext, &sequence_counter) {
                                         tracing::warn!("Failed to send encrypted media: {e:#}");
                                     }
                                 }

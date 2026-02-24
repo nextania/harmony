@@ -1,7 +1,6 @@
 pub mod authentication;
 pub mod errors;
 pub mod methods;
-// pub mod request;
 pub mod services;
 
 use authentication::authenticate;

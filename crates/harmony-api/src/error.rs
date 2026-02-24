@@ -1,6 +1,7 @@
 //! Error types for the Harmony API client
 
 use thiserror::Error;
+pub use harmony_types::errors::Error as ApiError;
 
 /// Result type alias for Harmony API operations
 pub type Result<T> = std::result::Result<T, HarmonyError>;
@@ -34,7 +35,7 @@ pub enum HarmonyError {
 
     /// API errors returned by the server
     #[error("API error: {0}")]
-    Api(ApiError),
+    Api(#[from] ApiError),
 
     /// Resource not found
     #[error("Resource not found")]
@@ -71,99 +72,4 @@ pub enum HarmonyError {
     /// Internal client error
     #[error("Internal error: {0}")]
     Internal(String),
-}
-
-/// API errors that match the server's error format
-#[derive(Error, Debug, Clone, serde::Deserialize)]
-#[serde(tag = "error", rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum ApiError {
-    /// Generic errors
-    #[error("Database error: {message}")]
-    DatabaseError { message: String },
-
-    #[error("Not found")]
-    NotFound,
-
-    #[error("Unimplemented")]
-    Unimplemented,
-
-    #[error("Invalid method")]
-    InvalidMethod,
-
-    #[error("Invalid request ID")]
-    InvalidRequestId,
-
-    #[error("Internal error")]
-    InternalError,
-
-    #[error("Missing permission")]
-    MissingPermission,
-
-    /// Authentication errors
-    #[error("Invalid token")]
-    InvalidToken,
-
-    #[error("Not authenticated")]
-    NotAuthenticated,
-
-    /// Message errors
-    #[error("Message too long")]
-    MessageTooLong,
-
-    #[error("Message empty")]
-    MessageEmpty,
-
-    /// Space errors
-    #[error("Name too long")]
-    NameTooLong,
-
-    #[error("Name empty")]
-    NameEmpty,
-
-    /// Invite errors
-    #[error("Invalid invite")]
-    InvalidInvite,
-
-    #[error("Invite expired")]
-    InviteExpired,
-
-    #[error("Invite already used")]
-    InviteAlreadyUsed,
-
-    /// Channel errors
-    #[error("Channel full")]
-    ChannelFull,
-
-    /// User errors
-    #[error("Blocked")]
-    Blocked,
-
-    #[error("Already established")]
-    AlreadyEstablished,
-
-    #[error("Already requested")]
-    AlreadyRequested,
-
-    /// Call errors
-    #[error("Already exists")]
-    AlreadyExists,
-
-    #[error("Call limit reached")]
-    CallLimitReached,
-
-    #[error("No voice nodes available")]
-    NoVoiceNodesAvailable,
-}
-
-impl From<ApiError> for HarmonyError {
-    fn from(err: ApiError) -> Self {
-        match err {
-            ApiError::NotFound => HarmonyError::NotFound,
-            ApiError::MissingPermission => HarmonyError::PermissionDenied,
-            ApiError::InvalidToken | ApiError::NotAuthenticated => {
-                HarmonyError::Authentication(err.to_string())
-            }
-            other => HarmonyError::Api(other),
-        }
-    }
 }

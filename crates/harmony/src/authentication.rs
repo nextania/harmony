@@ -1,8 +1,7 @@
 use std::{any::Any, sync::Arc};
 
 use once_cell::sync::Lazy;
-use rapid::socket::{RpcResponder, RpcState};
-use rmpv::{Value, ext::to_value};
+use rapid::socket::RpcState;
 use serde::Deserialize;
 use serde_json::json;
 
@@ -63,10 +62,4 @@ pub fn check_authenticated(state: &RpcState) -> Result<Arc<User>> {
         .cloned()
         .ok_or(Error::NotAuthenticated)
         .map(|user| user.into())
-}
-
-impl RpcResponder for Error {
-    fn into_value(self) -> Value {
-        to_value(self).unwrap()
-    }
 }

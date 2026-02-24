@@ -1,4 +1,3 @@
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -52,6 +51,22 @@ pub struct ContactExtended {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct UserProfile {
+    pub id: String,
+    pub public_key: Option<Vec<u8>>,
+}
+
+/// Current user profile returned by GET_CURRENT_USER.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CurrentUserResponse {
+    pub id: String,
+    pub public_key: Option<Vec<u8>>,
+    pub encrypted_keys: Option<Vec<u8>>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChannelMember {
     pub id: String,
     pub role: ChannelMemberRole,
@@ -65,6 +80,13 @@ pub enum ChannelMemberRole {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum EncryptionHint {
+    Mls,
+    Persistent,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE", tag = "type")]
 pub enum Channel {
     PrivateChannel {
@@ -74,10 +96,11 @@ pub enum Channel {
     },
     GroupChannel {
         id: String,
-        name: String,
-        description: String,
+        metadata: Vec<u8>,
         members: Vec<ChannelMember>,
+        pending_members: Vec<String>,
         blacklist: Vec<String>,
+        encryption_hint: EncryptionHint,
     },
 }
 
@@ -88,37 +111,16 @@ impl Channel {
             Channel::GroupChannel { id, .. } => id,
         }
     }
-
-    pub fn name(&self) -> String {
-        match self {
-            Channel::PrivateChannel { target_id, .. } => {
-                format!("Private chat with {}", target_id)
-            }
-            Channel::GroupChannel { name, .. } => name.clone(),
-        }
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Message {
     pub id: String,
-    pub content: String,
+    pub content: Vec<u8>,
     pub author_id: String,
-    pub created_at: i64,
-    pub edited: bool,
     pub edited_at: Option<i64>,
     pub channel_id: String,
-}
-
-impl Message {
-    pub fn created_at_datetime(&self) -> DateTime<Utc> {
-        DateTime::from_timestamp_millis(self.created_at).unwrap_or_default()
-    }
-
-    pub fn edited_at_datetime(&self) -> Option<DateTime<Utc>> {
-        self.edited_at.and_then(DateTime::from_timestamp_millis)
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -127,7 +129,7 @@ pub struct Invite {
     pub id: String,
     pub code: String,
     pub channel_id: String,
-    pub creator_id: String,
+    pub creator: String,
     pub created_at: u64,
     pub expires_at: Option<u64>,
     pub max_uses: Option<i32>,

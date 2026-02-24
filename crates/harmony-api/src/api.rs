@@ -2,8 +2,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 use crate::{
-    CallMember, Channel, CreateCallTokenResponse, GetCallMembersResponse, HarmonyClient, Invite,
-    Message, StartCallResponse, UpdateVoiceStateResponse,
+    CallMember, Channel, Contact, CreateCallTokenResponse, CurrentUserResponse,
+    EncryptionHint, GetCallMembersResponse, HarmonyClient, Invite, Message,
+    StartCallResponse, UpdateVoiceStateResponse, UserProfile,
 };
 
 impl HarmonyClient {
@@ -90,12 +91,12 @@ impl HarmonyClient {
     }
 
     /// Send a message to a channel
-    pub async fn send_message(&self, channel_id: &str, content: &str) -> Result<Message> {
+    pub async fn send_message(&self, channel_id: &str, content: Vec<u8>) -> Result<Message> {
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
         struct Params {
             channel_id: String,
-            content: String,
+            content: Vec<u8>,
         }
 
         #[derive(Deserialize)]
@@ -109,7 +110,7 @@ impl HarmonyClient {
                 "SEND_MESSAGE",
                 Params {
                     channel_id: channel_id.to_string(),
-                    content: content.to_string(),
+                    content,
                 },
             )
             .await?;
@@ -343,4 +344,402 @@ impl HarmonyClient {
 
         Ok(response.members)
     }
+
+    /// Create a new private channel with another user
+    pub async fn create_private_channel(&self, target_id: &str) -> Result<Channel> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct ChannelInfo {
+            #[serde(rename = "type")]
+            channel_type: String,
+            target_id: String,
+        }
+
+        #[derive(Serialize)]
+        struct Params {
+            channel: ChannelInfo,
+        }
+
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Response {
+            channel: Channel,
+        }
+
+        let response: Response = self
+            .send_request(
+                "CREATE_CHANNEL",
+                Params {
+                    channel: ChannelInfo {
+                        channel_type: "PRIVATE_CHANNEL".to_string(),
+                        target_id: target_id.to_string(),
+                    },
+                },
+            )
+            .await?;
+
+        Ok(response.channel)
+    }
+
+    /// Create a new group channel with encrypted metadata
+    pub async fn create_group_channel(
+        &self,
+        metadata: Vec<u8>,
+        encryption_hint: EncryptionHint,
+    ) -> Result<Channel> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct ChannelInfo {
+            #[serde(rename = "type")]
+            channel_type: String,
+            metadata: Vec<u8>,
+            encryption_hint: EncryptionHint,
+        }
+
+        #[derive(Serialize)]
+        struct Params {
+            channel: ChannelInfo,
+        }
+
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Response {
+            channel: Channel,
+        }
+
+        let response: Response = self
+            .send_request(
+                "CREATE_CHANNEL",
+                Params {
+                    channel: ChannelInfo {
+                        channel_type: "GROUP_CHANNEL".to_string(),
+                        metadata,
+                        encryption_hint,
+                    },
+                },
+            )
+            .await?;
+
+        Ok(response.channel)
+    }
+
+    /// Edit group channel metadata (manager only)
+    pub async fn edit_channel(&self, channel_id: &str, metadata: Vec<u8>) -> Result<Channel> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Params {
+            channel_id: String,
+            metadata: Vec<u8>,
+        }
+
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Response {
+            channel: Channel,
+        }
+
+        let response: Response = self
+            .send_request(
+                "EDIT_CHANNEL",
+                Params {
+                    channel_id: channel_id.to_string(),
+                    metadata,
+                },
+            )
+            .await?;
+
+        Ok(response.channel)
+    }
+
+    /// Delete a channel (manager only)
+    pub async fn delete_channel(&self, channel_id: &str) -> Result<()> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Params {
+            channel_id: String,
+        }
+
+        #[derive(Deserialize)]
+        struct Resp {}
+
+        let _: Resp = self
+            .send_request(
+                "DELETE_CHANNEL",
+                Params {
+                    channel_id: channel_id.to_string(),
+                },
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    /// Leave a group channel
+    pub async fn leave_channel(&self, channel_id: &str) -> Result<()> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Params {
+            channel_id: String,
+        }
+
+        #[derive(Deserialize)]
+        struct Resp {}
+
+        let _: Resp = self
+            .send_request(
+                "LEAVE_CHANNEL",
+                Params {
+                    channel_id: channel_id.to_string(),
+                },
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    /// Add a user to a group channel (manager only)
+    pub async fn add_user_to_channel(&self, channel_id: &str, user_id: &str) -> Result<()> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Params {
+            channel_id: String,
+            user_id: String,
+        }
+
+        #[derive(Deserialize)]
+        struct Resp {}
+
+        let _: Resp = self
+            .send_request(
+                "ADD_USER_TO_CHANNEL",
+                Params {
+                    channel_id: channel_id.to_string(),
+                    user_id: user_id.to_string(),
+                },
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    /// Edit a message (author only)
+    pub async fn edit_message(&self, message_id: &str, content: Vec<u8>) -> Result<Message> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Params {
+            message_id: String,
+            content: Vec<u8>,
+        }
+
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Response {
+            message: Message,
+        }
+
+        let response: Response = self
+            .send_request(
+                "EDIT_MESSAGE",
+                Params {
+                    message_id: message_id.to_string(),
+                    content,
+                },
+            )
+            .await?;
+
+        Ok(response.message)
+    }
+
+    /// Delete a message (author or channel manager)
+    pub async fn delete_message(&self, message_id: &str) -> Result<()> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Params {
+            message_id: String,
+        }
+
+        #[derive(Deserialize)]
+        struct Resp {}
+
+        let _: Resp = self
+            .send_request(
+                "DELETE_MESSAGE",
+                Params {
+                    message_id: message_id.to_string(),
+                },
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    /// Accept an invite by code
+    pub async fn accept_invite(&self, code: &str) -> Result<bool> {
+        #[derive(Serialize)]
+        struct Params {
+            code: String,
+        }
+
+        #[derive(Deserialize)]
+        struct Response {
+            pending: bool,
+        }
+
+        let response: Response = self
+            .send_request(
+                "ACCEPT_INVITE",
+                Params {
+                    code: code.to_string(),
+                },
+            )
+            .await?;
+
+        Ok(response.pending)
+    }
+
+    /// Upload key material (x25519 public key, encrypted private keys)
+    pub async fn set_key_package(
+        &self,
+        public_key: Vec<u8>,
+        encrypted_keys: Vec<u8>,
+    ) -> Result<()> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Params {
+            public_key: Vec<u8>,
+            encrypted_keys: Vec<u8>,
+        }
+
+        #[derive(Deserialize)]
+        struct Resp {}
+
+        let _: Resp = self
+            .send_request(
+                "SET_KEY_PACKAGE",
+                Params {
+                    public_key,
+                    encrypted_keys,
+                },
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    /// Get a user's public profile (x25519 public key)
+    pub async fn get_user(&self, user_id: &str) -> Result<UserProfile> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Params {
+            user_id: String,
+        }
+
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Response {
+            user: UserProfile,
+        }
+
+        let response: Response = self
+            .send_request(
+                "GET_USER",
+                Params {
+                    user_id: user_id.to_string(),
+                },
+            )
+            .await?;
+
+        Ok(response.user)
+    }
+
+    /// Get the current authenticated user's data and keys
+    pub async fn get_current_user(&self) -> Result<CurrentUserResponse> {
+        #[derive(Serialize)]
+        struct Params {}
+
+        let response: CurrentUserResponse = self
+            .send_request("GET_CURRENT_USER", Params {})
+            .await?;
+
+        Ok(response)
+    }
+
+    /// Add a friend by user ID
+    pub async fn add_friend(&self, user_id: &str) -> Result<()> {
+        #[derive(Serialize)]
+        struct Params {
+            id: String,
+        }
+
+        #[derive(Deserialize)]
+        struct Resp {}
+
+        let _: Resp = self
+            .send_request(
+                "ADD_FRIEND",
+                Params {
+                    id: user_id.to_string(),
+                },
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    /// Add a friend by username
+    pub async fn add_friend_username(&self, username: &str) -> Result<()> {
+        #[derive(Serialize)]
+        struct Params {
+            username: String,
+        }
+
+        #[derive(Deserialize)]
+        struct Resp {}
+
+        let _: Resp = self
+            .send_request(
+                "ADD_FRIEND_USERNAME",
+                Params {
+                    username: username.to_string(),
+                },
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    /// Remove a friend by user ID
+    pub async fn remove_friend(&self, user_id: &str) -> Result<()> {
+        #[derive(Serialize)]
+        struct Params {
+            id: String,
+        }
+
+        #[derive(Deserialize)]
+        struct Resp {}
+
+        let _: Resp = self
+            .send_request(
+                "REMOVE_FRIEND",
+                Params {
+                    id: user_id.to_string(),
+                },
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    /// Get the current user's contacts/friends list
+    pub async fn get_friends(&self) -> Result<Vec<Contact>> {
+        #[derive(Serialize)]
+        struct Params {}
+
+        let response: Vec<Contact> = self
+            .send_request("GET_FRIENDS", Params {})
+            .await?;
+
+        Ok(response)
+    }
+
 }

@@ -1,5 +1,5 @@
 use dashmap::DashMap;
-use pulse_api::AvailableTrack;
+use pulse_types::AvailableTrack;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 

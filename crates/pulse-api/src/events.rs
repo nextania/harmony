@@ -1,4 +1,4 @@
-use pulse_api::AvailableTrack;
+use pulse_types::AvailableTrack;
 
 /// Events emitted by `PulseClient` for the consumer to handle.
 ///

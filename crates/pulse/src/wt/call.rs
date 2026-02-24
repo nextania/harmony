@@ -5,7 +5,7 @@ use std::{
 
 use arc_swap::ArcSwap;
 use dashmap::DashMap;
-use pulse_api::{AvailableTrack, WtFragmentedTrackData, WtMessageS2C};
+use pulse_types::{AvailableTrack, WtFragmentedTrackData, WtMessageS2C};
 use tokio::sync::Mutex;
 
 use crate::wt::{GLOBAL_SESSIONS, TrackInfo};

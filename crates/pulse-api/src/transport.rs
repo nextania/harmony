@@ -1,8 +1,8 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use anyhow::{Context, Result};
-use pulse_api::fragment::{FragmentAssembler, ReassembledDatagram};
-use pulse_api::{WtFragmentedTrackData, WtMessageC2S, WtMessageS2C};
+use pulse_types::fragment::{FragmentAssembler, ReassembledDatagram};
+use pulse_types::{WtFragmentedTrackData, WtMessageC2S, WtMessageS2C};
 use wtransport::Connection;
 use wtransport::stream::{RecvStream, SendStream};
 

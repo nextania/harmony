@@ -1,7 +1,7 @@
 use std::env;
 
 use lazy_static::lazy_static;
-use pulse_api::Region;
+use pulse_types::Region;
 
 use crate::mls::ExternalSenderIdentity;
 

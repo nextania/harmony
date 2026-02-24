@@ -39,6 +39,7 @@ openmls_basic_credential = "0.4.1"
 
 rapid = { path = "../rapid" }
 rmpv = { git = "https://github.com/infiniwave/msgpack-rust.git" }
-pulse-api = { path = "../pulse-api" }
+common = { path = "../common" }
+pulse-types = { path = "../pulse-types" }
 reqwest = { version = "0.13.1", features = ["json"] }
 serde_json = "1.0.149"

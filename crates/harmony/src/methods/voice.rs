@@ -1,3 +1,4 @@
+use pulse_types::Region;
 use rapid::socket::{RpcResponder, RpcState, RpcValue};
 use serde::{Deserialize, Serialize};
 
@@ -7,7 +8,7 @@ use crate::methods::{Event, UserVoiceStateChangedEvent, emit_to_ids};
 use crate::services::database::channels::Channel;
 use crate::services::redis::{INSTANCE_ID, get_connection};
 use crate::services::voice::ActiveCall;
-use pulse_api::{NodeEvent, NodeEventKind};
+use common::{NodeEvent, NodeEventKind};
 use redis::AsyncCommands;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -56,7 +57,7 @@ pub async fn create_call_token(
 #[serde(rename_all = "camelCase")]
 pub struct StartCallMethod {
     id: String,
-    preferred_region: Option<pulse_api::Region>,
+    preferred_region: Option<Region>,
 }
 
 pub async fn start_call(state: RpcState, data: RpcValue<StartCallMethod>) -> impl RpcResponder {

@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use dashmap::DashMap;
-use pulse_api::fragment::FragmentAssembler;
-use pulse_api::{AvailableTrack, MediaHint, WtMessageC2S, WtMessageS2C};
+use pulse_types::fragment::FragmentAssembler;
+use pulse_types::{AvailableTrack, MediaHint, WtMessageC2S, WtMessageS2C};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::events::PulseEvent;

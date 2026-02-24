@@ -227,17 +227,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "async-notify"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b31189a260b12d7159e91b74d0b94bb0be3705237082709611b53342b2fb65d7"
-dependencies = [
- "event-listener",
- "futures-core",
- "pin-project-lite",
-]
-
-[[package]]
 name = "async-trait"
 version = "0.1.89"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -261,11 +250,25 @@ dependencies = [
  "futures-util",
  "log",
  "pin-project-lite",
- "rustls-pki-types",
  "tokio",
- "tokio-rustls",
  "tungstenite",
- "webpki-roots",
+]
+
+[[package]]
+name = "async-tungstenite"
+version = "0.33.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3b465d66478a9bb84abed46695c44a58e34f3e8d0abfb2e958218d420969049"
+dependencies = [
+ "atomic-waker",
+ "futures-core",
+ "futures-io",
+ "futures-task",
+ "futures-util",
+ "log",
+ "pin-project-lite",
+ "tokio",
+ "tungstenite",
 ]
 
 [[package]]
@@ -603,17 +606,10 @@ dependencies = [
 name = "common"
 version = "0.1.0"
 dependencies = [
- "mongodb",
+ "pulse-types",
+ "redis",
+ "rmp-serde",
  "serde",
-]
-
-[[package]]
-name = "concurrent-queue"
-version = "2.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ca0197aee26d1ae37445ee532fefce43251d24cc7c166799f4d46817f1d3973"
-dependencies = [
- "crossbeam-utils",
 ]
 
 [[package]]
@@ -1097,17 +1093,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
-name = "erased-serde"
-version = "0.4.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89e8918065695684b2b0702da20382d5ae6065cf3327bc2d6436bd49a71ce9f3"
-dependencies = [
- "serde",
- "serde_core",
- "typeid",
-]
-
-[[package]]
 name = "errno"
 version = "0.3.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1115,17 +1100,6 @@ checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "event-listener"
-version = "5.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e13b66accf52311f30a0db42147dadea9850cb48cd070028831ae5f5d4b856ab"
-dependencies = [
- "concurrent-queue",
- "parking",
- "pin-project-lite",
 ]
 
 [[package]]
@@ -1390,11 +1364,9 @@ dependencies = [
 name = "harmony"
 version = "0.1.0"
 dependencies = [
- "aes-gcm",
- "async-notify",
  "async-trait",
- "async-tungstenite",
  "chrono",
+ "common",
  "dashmap",
  "dotenvy",
  "flate2",
@@ -1403,7 +1375,11 @@ dependencies = [
  "mongodb",
  "num_cpus",
  "once_cell",
- "pulse-api",
+ "openmls",
+ "openmls_basic_credential",
+ "openmls_rust_crypto",
+ "openmls_traits",
+ "pulse-types",
  "rand 0.9.2",
  "rapid",
  "redis",
@@ -1412,19 +1388,18 @@ dependencies = [
  "rmpv",
  "serde",
  "serde_json",
+ "tls_codec",
  "tokio",
  "tracing",
  "tracing-subscriber",
- "typetag",
  "ulid",
- "x25519-dalek",
 ]
 
 [[package]]
 name = "harmony-api"
 version = "0.1.0"
 dependencies = [
- "async-tungstenite",
+ "async-tungstenite 0.32.1",
  "chrono",
  "env_logger",
  "futures-util",
@@ -1447,6 +1422,10 @@ dependencies = [
  "tokio",
  "uniffi",
 ]
+
+[[package]]
+name = "harmony-types"
+version = "0.1.0"
 
 [[package]]
 name = "hashbrown"
@@ -1898,15 +1877,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "879f10e63c20629ecabbb64a8010319738c66a5cd0c29b02d63d272b03751d01"
 dependencies = [
  "generic-array",
-]
-
-[[package]]
-name = "inventory"
-version = "0.3.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc61209c082fbeb19919bee74b176221b27223e27b65d781eb91af24eb1fb46e"
-dependencies = [
- "rustversion",
 ]
 
 [[package]]
@@ -2675,12 +2645,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "parking"
-version = "2.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f38d5652c16fde515bb1ecef450ab0f6a219d619a7274976324d5e377f7dceba"
-
-[[package]]
 name = "parking_lot"
 version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2905,6 +2869,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arc-swap",
+ "common",
  "dashmap",
  "dotenvy",
  "futures",
@@ -2914,7 +2879,7 @@ dependencies = [
  "openmls_basic_credential",
  "openmls_rust_crypto",
  "openmls_traits",
- "pulse-api",
+ "pulse-types",
  "rand 0.9.2",
  "redis",
  "rkyv",
@@ -2932,17 +2897,6 @@ dependencies = [
 name = "pulse-api"
 version = "0.1.0"
 dependencies = [
- "redis",
- "rkyv",
- "rmp-serde",
- "serde",
- "tls_codec",
-]
-
-[[package]]
-name = "pulse-protocol"
-version = "0.1.0"
-dependencies = [
  "anyhow",
  "chacha20poly1305",
  "dashmap",
@@ -2950,13 +2904,22 @@ dependencies = [
  "openmls_basic_credential",
  "openmls_rust_crypto",
  "openmls_traits",
- "pulse-api",
+ "pulse-types",
  "rkyv",
  "thiserror 2.0.18",
  "tls_codec",
  "tokio",
  "tracing",
  "wtransport",
+]
+
+[[package]]
+name = "pulse-types"
+version = "0.1.0"
+dependencies = [
+ "rkyv",
+ "serde",
+ "tls_codec",
 ]
 
 [[package]]
@@ -3109,23 +3072,16 @@ name = "rapid"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "async-tungstenite",
- "chrono",
+ "async-tungstenite 0.33.0",
  "dashmap",
- "env_logger",
  "futures",
- "lazy_static",
  "log",
- "once_cell",
  "rand 0.8.5",
  "rmp-serde",
  "rmpv",
  "serde",
  "tokio",
- "typetag",
- "ulid",
  "uuid",
- "x25519-dalek",
 ]
 
 [[package]]
@@ -4261,8 +4217,6 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.9.2",
- "rustls",
- "rustls-pki-types",
  "sha1",
  "thiserror 2.0.18",
  "utf-8",
@@ -4289,40 +4243,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "typeid"
-version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc7d623258602320d5c55d1bc22793b57daff0ec7efc270ea7d55ce1d5f5471c"
-
-[[package]]
 name = "typenum"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "562d481066bde0658276a35467c4af00bdc6ee726305698a55b86e61d7ad82bb"
-
-[[package]]
-name = "typetag"
-version = "0.2.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be2212c8a9b9bcfca32024de14998494cf9a5dfa59ea1b829de98bac374b86bf"
-dependencies = [
- "erased-serde",
- "inventory",
- "once_cell",
- "serde",
- "typetag-impl",
-]
-
-[[package]]
-name = "typetag-impl"
-version = "0.2.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27a7a9b72ba121f6f1f6c3632b85604cac41aedb5ddc70accbebb6cac83de846"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
 
 [[package]]
 name = "ulid"
@@ -5320,3 +5244,8 @@ name = "zmij"
 version = "1.0.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ff05f8caa9038894637571ae6b9e29466c1f4f829d26c9b28f869a29cbe3445"
+
+[[patch.unused]]
+name = "audiopus_sys"
+version = "0.2.2"
+source = "git+https://github.com/sevenc-nanashi/audiopus_sys.git?rev=00e9d16#00e9d168493710193ee133bc7fbb50715a1f6e61"

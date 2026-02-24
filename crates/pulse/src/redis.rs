@@ -2,7 +2,8 @@ use std::{sync::atomic::Ordering, time::Duration};
 
 use futures::StreamExt;
 use once_cell::sync::{Lazy, OnceCell};
-use pulse_api::{NodeDescription, NodeEvent, NodeEventKind};
+use common::{NodeDescription, NodeEvent, NodeEventKind};
+use pulse_types::{MediaHint, WtMessageS2C};
 use redis::{AsyncCommands, Client, aio::MultiplexedConnection};
 use tokio::{task, time};
 use ulid::Ulid;
@@ -104,7 +105,7 @@ pub fn listen() {
 
                         if muted && let Some(call) = crate::wt::GLOBAL_CALLS.get(&call_id) {
                             for track in session.producers.iter() {
-                                if matches!(track.media_hint, pulse_api::MediaHint::Audio) {
+                                if matches!(track.media_hint, MediaHint::Audio) {
                                     for member_id in call.members.iter() {
                                         let member_key: &String = member_id.key();
                                         if member_key == &session_id {
@@ -114,7 +115,7 @@ pub fn listen() {
                                             crate::wt::GLOBAL_SESSIONS.get(member_key)
                                         {
                                             let _ = member_session.message_tx.send(
-                                                pulse_api::WtMessageS2C::TrackUnavailable {
+                                                WtMessageS2C::TrackUnavailable {
                                                     id: track.id.clone(),
                                                 },
                                             );
@@ -133,7 +134,7 @@ pub fn listen() {
                     if let Some(session) = crate::wt::GLOBAL_SESSIONS.get(&id) {
                         let _ = session
                             .message_tx
-                            .send(pulse_api::WtMessageS2C::Disconnected { reconnect: None });
+                            .send(WtMessageS2C::Disconnected { reconnect: None });
 
                         session
                             .connection
@@ -153,7 +154,7 @@ pub fn listen() {
                     if let Some(session) = crate::wt::GLOBAL_SESSIONS.get(&id) {
                         let _ = session
                             .message_tx
-                            .send(pulse_api::WtMessageS2C::Disconnected {
+                            .send(WtMessageS2C::Disconnected {
                                 reconnect: Some((target_server, target_token)),
                             });
 
@@ -172,7 +173,7 @@ pub fn listen() {
                             let member_key: &String = member_id.key();
                             if let Some(session) = crate::wt::GLOBAL_SESSIONS.get(member_key) {
                                 let _ = session.message_tx.send(
-                                    pulse_api::WtMessageS2C::Disconnected { reconnect: None },
+                                    WtMessageS2C::Disconnected { reconnect: None },
                                 );
 
                                 session.connection.close(0u32.into(), b"Call ended");

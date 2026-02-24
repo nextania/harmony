@@ -38,7 +38,6 @@ pub struct HelloEvent {
     pub(crate) request_ids: Vec<String>,
 }
 
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NewMessageEvent {
@@ -59,7 +58,6 @@ pub struct MessageDeletedEvent {
     pub message_id: String,
     pub channel_id: String,
 }
-
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

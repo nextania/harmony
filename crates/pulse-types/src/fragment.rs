@@ -1,4 +1,8 @@
-use std::{cmp::Reverse, collections::{BinaryHeap, HashMap}, time::{Duration, Instant}};
+use std::{
+    cmp::Reverse,
+    collections::{BinaryHeap, HashMap},
+    time::{Duration, Instant},
+};
 
 use crate::WtFragmentedTrackData;
 
@@ -43,13 +47,17 @@ impl FragmentAssembler {
 
         let key: FragmentKey = (fragment.id.clone(), fragment.sequence_id);
 
-        let buf = self.map.entry(key.clone()).or_insert_with(|| FragmentBuffer {
-            fragments: vec![None; fragment.fragment_count as usize],
-            received: 0,
-            total: fragment.fragment_count,
-            created_at: Instant::now(),
-        });
-        self.exp.push(Reverse((buf.created_at + self.ttl, key.clone())));
+        let buf = self
+            .map
+            .entry(key.clone())
+            .or_insert_with(|| FragmentBuffer {
+                fragments: vec![None; fragment.fragment_count as usize],
+                received: 0,
+                total: fragment.fragment_count,
+                created_at: Instant::now(),
+            });
+        self.exp
+            .push(Reverse((buf.created_at + self.ttl, key.clone())));
 
         if fragment.fragment_index >= buf.total {
             return None;
@@ -65,7 +73,11 @@ impl FragmentAssembler {
             // all fragments received
             if let Some(buf) = self.map.remove(&key) {
                 self.exp.retain(|e| e.0.1 != key);
-                let total_len: usize = buf.fragments.iter().map(|f| f.as_ref().map_or(0, |v| v.len())).sum();
+                let total_len: usize = buf
+                    .fragments
+                    .iter()
+                    .map(|f| f.as_ref().map_or(0, |v| v.len()))
+                    .sum();
                 let mut assembled = Vec::with_capacity(total_len);
                 for frag in buf.fragments {
                     if let Some(data) = frag {
@@ -85,7 +97,9 @@ impl FragmentAssembler {
     pub fn evict_stale(&mut self) {
         let now = Instant::now();
         loop {
-            let remove = if let Some(entry) = self.exp.peek_mut() && entry.0.0 > now {
+            let remove = if let Some(entry) = self.exp.peek_mut()
+                && entry.0.0 > now
+            {
                 true
             } else {
                 false

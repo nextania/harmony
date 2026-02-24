@@ -181,7 +181,7 @@ impl Call {
 
                 let consumer_connection = session.connection.clone();
                 let seq_counter = session.seq_counter.clone();
-                drop(session); 
+                drop(session);
 
                 let max_datagram = consumer_connection
                     .max_datagram_size()
@@ -198,7 +198,9 @@ impl Call {
                 if fragment_count > u16::MAX as usize {
                     warn!(
                         "Data too large ({} bytes, {} fragments) for track {}",
-                        data.len(), fragment_count, track_id
+                        data.len(),
+                        fragment_count,
+                        track_id
                     );
                     continue;
                 }

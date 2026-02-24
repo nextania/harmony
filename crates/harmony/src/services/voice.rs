@@ -1,9 +1,9 @@
 use std::time::Duration;
 
+use common::{NodeDescription, NodeEvent, NodeEventKind, SessionData};
 use dashmap::DashMap;
 use futures_util::StreamExt;
 use lazy_static::lazy_static;
-use common::{NodeDescription, NodeEvent, NodeEventKind, SessionData};
 use pulse_types::Region;
 use redis::{AsyncCommands, FromRedisValue, ToRedisArgs, ToSingleRedisArg};
 use serde::{Deserialize, Serialize};
@@ -19,8 +19,8 @@ use crate::{
 
 use super::{
     database::calls::Call,
-    utilities::{deserialize, serialize},
     redis::{INSTANCE_ID, get_connection, get_pubsub},
+    utilities::{deserialize, serialize},
 };
 
 lazy_static! {

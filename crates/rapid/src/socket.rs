@@ -412,9 +412,7 @@ pub async fn handle_packet(
     if let Ok(r) = result {
         debug!("Received: {:?}", r);
         match r {
-            RpcMessageC2S::Identify {
-                token,
-            } => authenticate(token.clone())
+            RpcMessageC2S::Identify { token } => authenticate(token.clone())
                 .await
                 .map(|user| {
                     let mut client = clients.0.get_mut(user_id).unwrap();

@@ -312,7 +312,7 @@ impl MlsClient {
         let mut nonce_bytes = [0u8; MEDIA_NONCE_LEN];
         OsRng.fill_bytes(&mut nonce_bytes);
         let nonce = Nonce::from_slice(&nonce_bytes);
-        
+
         let ciphertext = cipher
             .encrypt(
                 nonce,

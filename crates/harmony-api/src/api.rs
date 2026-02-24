@@ -1,18 +1,23 @@
 use harmony_types::channels::{
-    ChannelInformation, CreateChannelMethod,
-    CreateChannelResponse, DeleteChannelMethod, DeleteChannelResponse, EditChannelMethod,
-    EditChannelResponse, GetChannelMethod, GetChannelResponse, GetChannelsMethod,
-    GetChannelsResponse, LeaveChannelMethod, LeaveChannelResponse,
+    ChannelInformation, CreateChannelMethod, CreateChannelResponse, DeleteChannelMethod,
+    DeleteChannelResponse, EditChannelMethod, EditChannelResponse, GetChannelMethod,
+    GetChannelResponse, GetChannelsMethod, GetChannelsResponse, LeaveChannelMethod,
+    LeaveChannelResponse,
 };
 use harmony_types::invites::{
-    AcceptInviteMethod, AcceptInviteResponse, CreateInviteMethod, CreateInviteResponse, DeleteInviteMethod, DeleteInviteResponse, GetInviteMethod, GetInviteResponse, GetInvitesMethod, GetInvitesResponse
+    AcceptInviteMethod, AcceptInviteResponse, CreateInviteMethod, CreateInviteResponse,
+    DeleteInviteMethod, DeleteInviteResponse, GetInviteMethod, GetInviteResponse, GetInvitesMethod,
+    GetInvitesResponse,
 };
 use harmony_types::messages::{
     DeleteMessageMethod, DeleteMessageResponse, EditMessageMethod, EditMessageResponse,
     GetMessagesMethod, GetMessagesResponse, SendMessageMethod, SendMessageResponse,
 };
 use harmony_types::users::{
-    AddContactMethod, AddContactResponse, AddContactUsernameMethod, AddContactUsernameResponse, ContactExtended, CurrentUserResponse, GetContactsMethod, GetContactsResponse, GetCurrentUserMethod, GetUserMethod, GetUserResponse, RemoveContactMethod, RemoveContactResponse, SetKeyPackageMethod, SetKeyPackageResponse
+    AddContactMethod, AddContactResponse, AddContactUsernameMethod, AddContactUsernameResponse,
+    ContactExtended, CurrentUserResponse, GetContactsMethod, GetContactsResponse,
+    GetCurrentUserMethod, GetUserMethod, GetUserResponse, RemoveContactMethod,
+    RemoveContactResponse, SetKeyPackageMethod, SetKeyPackageResponse,
 };
 use harmony_types::voice::{
     CreateCallTokenMethod, CreateCallTokenResponse, EndCallMethod, EndCallResponse,

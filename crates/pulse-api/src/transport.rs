@@ -64,9 +64,7 @@ pub fn send_datagram(
         .unwrap_or(FALLBACK_MAX_DATAGRAM_SIZE);
     let max_payload = max_datagram.saturating_sub(FRAGMENT_ENVELOPE_OVERHEAD);
     if max_payload == 0 {
-        anyhow::bail!(
-            "Max datagram size ({max_datagram}) is too small for even an empty fragment"
-        );
+        anyhow::bail!("Max datagram size ({max_datagram}) is too small for even an empty fragment");
     }
     let fragment_count = data.len().div_ceil(max_payload);
     if fragment_count > u16::MAX as usize {
@@ -93,7 +91,6 @@ pub fn send_datagram(
 
     Ok(())
 }
-
 
 pub async fn recv_datagram(
     connection: &Connection,

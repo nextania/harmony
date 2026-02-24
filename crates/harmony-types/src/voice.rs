@@ -10,7 +10,6 @@ pub struct CallMember {
     pub deafened: bool,
 }
 
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateCallTokenMethod {

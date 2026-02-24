@@ -7,7 +7,7 @@ use rapid::socket::{RpcResponder, RpcState, RpcValue};
 use crate::{
     authentication::check_authenticated,
     errors::Error,
-    methods::{emit_to_ids, Event, MessageDeletedEvent, MessageEditedEvent, NewMessageEvent},
+    methods::{Event, MessageDeletedEvent, MessageEditedEvent, NewMessageEvent, emit_to_ids},
     services::database::{
         channels::{Channel, EncryptionHint},
         messages::Message,
@@ -78,7 +78,9 @@ pub async fn send_message(state: RpcState, data: RpcValue<SendMessageMethod>) ->
         }),
     );
 
-    Ok(RpcValue(SendMessageResponse { message: message.into() }))
+    Ok(RpcValue(SendMessageResponse {
+        message: message.into(),
+    }))
 }
 
 pub async fn edit_message(state: RpcState, data: RpcValue<EditMessageMethod>) -> impl RpcResponder {
@@ -105,7 +107,9 @@ pub async fn edit_message(state: RpcState, data: RpcValue<EditMessageMethod>) ->
             channel_id: updated.channel_id.clone(),
         }),
     );
-    Ok(RpcValue(EditMessageResponse { message: updated.into() }))
+    Ok(RpcValue(EditMessageResponse {
+        message: updated.into(),
+    }))
 }
 
 pub async fn delete_message(

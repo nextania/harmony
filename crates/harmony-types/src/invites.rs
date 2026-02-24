@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Invite {
@@ -58,7 +57,6 @@ pub enum InviteInformation {
     },
 }
 
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateInviteMethod {
@@ -106,7 +104,6 @@ pub struct GetInvitesMethod {
 pub struct GetInvitesResponse {
     pub invites: Vec<Invite>,
 }
-
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

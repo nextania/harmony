@@ -1,5 +1,8 @@
 use futures_util::StreamExt;
-use mongodb::{bson::{doc, Binary, spec::BinarySubtype}, options::FindOptions};
+use mongodb::{
+    bson::{Binary, doc, spec::BinarySubtype},
+    options::FindOptions,
+};
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
@@ -161,9 +164,7 @@ impl Channel {
                 target_id,
                 ..
             } => initiator_id == user_id || target_id == user_id,
-            Channel::GroupChannel { members, .. } => {
-                members.iter().any(|m| m.id == user_id)
-            }
+            Channel::GroupChannel { members, .. } => members.iter().any(|m| m.id == user_id),
         }
     }
 
@@ -174,9 +175,7 @@ impl Channel {
                 target_id,
                 ..
             } => vec![initiator_id.clone(), target_id.clone()],
-            Channel::GroupChannel { members, .. } => {
-                members.iter().map(|m| m.id.clone()).collect()
-            }
+            Channel::GroupChannel { members, .. } => members.iter().map(|m| m.id.clone()).collect(),
         }
     }
 
@@ -313,19 +312,32 @@ impl Channel {
 impl From<Channel> for harmony_types::channels::Channel {
     fn from(c: Channel) -> Self {
         match c {
-            Channel::PrivateChannel { id, initiator_id, target_id } =>
-                harmony_types::channels::Channel::PrivateChannel { id, initiator_id, target_id },
-            Channel::GroupChannel { id, metadata, members, pending_members, blacklist, encryption_hint } =>
-                harmony_types::channels::Channel::GroupChannel {
-                    id,
-                    metadata,
-                    // ChannelMember and EncryptionHint are re-exported from harmony-types
-                    // so they are the same type – no per-field conversion needed.
-                    members,
-                    pending_members,
-                    blacklist,
-                    encryption_hint,
-                },
+            Channel::PrivateChannel {
+                id,
+                initiator_id,
+                target_id,
+            } => harmony_types::channels::Channel::PrivateChannel {
+                id,
+                initiator_id,
+                target_id,
+            },
+            Channel::GroupChannel {
+                id,
+                metadata,
+                members,
+                pending_members,
+                blacklist,
+                encryption_hint,
+            } => harmony_types::channels::Channel::GroupChannel {
+                id,
+                metadata,
+                // ChannelMember and EncryptionHint are re-exported from harmony-types
+                // so they are the same type – no per-field conversion needed.
+                members,
+                pending_members,
+                blacklist,
+                encryption_hint,
+            },
         }
     }
 }

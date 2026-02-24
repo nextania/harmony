@@ -4,7 +4,10 @@ use mongodb::bson::{self, doc};
 use serde::{Deserialize, Serialize};
 
 use super::channels::Channel;
-use crate::{errors::{Error, Result}, services::redis::is_user_online};
+use crate::{
+    errors::{Error, Result},
+    services::redis::is_user_online,
+};
 
 pub use harmony_types::users::{Contact, ContactExtended, Presence, Relationship, Status};
 
@@ -18,14 +21,16 @@ pub struct KeyPackage {
 
 pub async fn get_presentable_presence(user: &User) -> Result<Presence> {
     let user_online = is_user_online(&user.id).await?;
-    Ok(if user_online && !matches!(user.presence.status, Status::Offline) {
-        user.presence.clone()
-    } else {
-        Presence {
-            status: Status::Offline,
-            message: String::new(),
-        }
-    })
+    Ok(
+        if user_online && !matches!(user.presence.status, Status::Offline) {
+            user.presence.clone()
+        } else {
+            Presence {
+                status: Status::Offline,
+                message: String::new(),
+            }
+        },
+    )
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

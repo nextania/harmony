@@ -1,4 +1,4 @@
-use mongodb::bson::{doc, Binary, spec::BinarySubtype};
+use mongodb::bson::{Binary, doc, spec::BinarySubtype};
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
@@ -8,7 +8,7 @@ use crate::errors::{Error, Result};
 #[serde(rename_all = "camelCase")]
 pub struct Reaction {
     pub user_id: String,
-    pub data: Vec<u8>, 
+    pub data: Vec<u8>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -35,7 +35,11 @@ impl Message {
         }
     }
 
-    pub async fn ephemeral(_channel_id: &str, _author_id: &str, _content: &[u8]) -> Result<Message> {
+    pub async fn ephemeral(
+        _channel_id: &str,
+        _author_id: &str,
+        _content: &[u8],
+    ) -> Result<Message> {
         //  TODO: MLS messages are ephemeral, but they should still be stored
         // for any offline users for a short period of time
         todo!()

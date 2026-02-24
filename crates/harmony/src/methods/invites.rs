@@ -1,10 +1,18 @@
 use harmony_types::invites::{
-    AcceptInviteMethod, AcceptInviteResponse, CreateInviteMethod, CreateInviteResponse, DeleteInviteMethod, DeleteInviteResponse, GetInviteMethod, GetInviteResponse, GetInvitesMethod, GetInvitesResponse, InviteInformation
+    AcceptInviteMethod, AcceptInviteResponse, CreateInviteMethod, CreateInviteResponse,
+    DeleteInviteMethod, DeleteInviteResponse, GetInviteMethod, GetInviteResponse, GetInvitesMethod,
+    GetInvitesResponse, InviteInformation,
 };
 use rapid::socket::{RpcResponder, RpcState, RpcValue};
 
 use crate::{
-    authentication::check_authenticated, errors::Error, methods::{Event, MemberJoinedEvent, emit_to_ids}, services::database::{channels::{Channel, EncryptionHint}, invites::Invite}
+    authentication::check_authenticated,
+    errors::Error,
+    methods::{Event, MemberJoinedEvent, emit_to_ids},
+    services::database::{
+        channels::{Channel, EncryptionHint},
+        invites::Invite,
+    },
 };
 
 pub async fn create_invite(
@@ -21,7 +29,9 @@ pub async fn create_invite(
         data.authorized_users.clone(),
     )
     .await?;
-    Ok::<_, Error>(RpcValue(CreateInviteResponse { invite: invite.into() }))
+    Ok::<_, Error>(RpcValue(CreateInviteResponse {
+        invite: invite.into(),
+    }))
 }
 
 pub async fn delete_invite(
@@ -47,9 +57,7 @@ pub async fn get_invite(state: RpcState, data: RpcValue<GetInviteMethod>) -> imp
     let channel = Channel::get(&invite.channel_id).await?;
     //ban?
     let Channel::GroupChannel {
-        metadata,
-        members,
-        ..
+        metadata, members, ..
     } = channel
     else {
         return Err(Error::InvalidInvite);
@@ -80,7 +88,10 @@ pub async fn get_invites(state: RpcState, data: RpcValue<GetInvitesMethod>) -> i
     }))
 }
 
-pub async fn accept_invite(state: RpcState, data: RpcValue<AcceptInviteMethod>) -> impl RpcResponder {
+pub async fn accept_invite(
+    state: RpcState,
+    data: RpcValue<AcceptInviteMethod>,
+) -> impl RpcResponder {
     let data = data.into_inner();
     let user = check_authenticated(&state)?;
     let invite = Invite::get(&data.code).await?;
@@ -91,7 +102,11 @@ pub async fn accept_invite(state: RpcState, data: RpcValue<AcceptInviteMethod>) 
         .contains(&user.id)
     {
         let channel = Channel::get(&invite.channel_id).await?;
-        let pending = if let Channel::GroupChannel { encryption_hint: EncryptionHint::Mls, .. } = channel {
+        let pending = if let Channel::GroupChannel {
+            encryption_hint: EncryptionHint::Mls,
+            ..
+        } = channel
+        {
             // in this case, we want to add a pending external proposal for this user
             // it should now show as pending for this user, until a manager in the group
             // makes a commit, at which point the user will be added as a regular member
@@ -111,9 +126,8 @@ pub async fn accept_invite(state: RpcState, data: RpcValue<AcceptInviteMethod>) 
                 user_id: user.id.clone(),
             }),
         );
-        Ok(RpcValue(AcceptInviteResponse {
-            pending,
-        }))    } else {
+        Ok(RpcValue(AcceptInviteResponse { pending }))
+    } else {
         Err(Error::InvalidInvite)
     }
 }

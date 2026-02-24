@@ -1,8 +1,8 @@
 use std::{sync::atomic::Ordering, time::Duration};
 
+use common::{NodeDescription, NodeEvent, NodeEventKind};
 use futures::StreamExt;
 use once_cell::sync::{Lazy, OnceCell};
-use common::{NodeDescription, NodeEvent, NodeEventKind};
 use pulse_types::{MediaHint, WtMessageS2C};
 use redis::{AsyncCommands, Client, aio::MultiplexedConnection};
 use tokio::{task, time};
@@ -152,11 +152,9 @@ pub fn listen() {
                     ..
                 } => {
                     if let Some(session) = crate::wt::GLOBAL_SESSIONS.get(&id) {
-                        let _ = session
-                            .message_tx
-                            .send(WtMessageS2C::Disconnected {
-                                reconnect: Some((target_server, target_token)),
-                            });
+                        let _ = session.message_tx.send(WtMessageS2C::Disconnected {
+                            reconnect: Some((target_server, target_token)),
+                        });
 
                         session
                             .connection
@@ -172,9 +170,9 @@ pub fn listen() {
                         for member_id in call.members.iter() {
                             let member_key: &String = member_id.key();
                             if let Some(session) = crate::wt::GLOBAL_SESSIONS.get(member_key) {
-                                let _ = session.message_tx.send(
-                                    WtMessageS2C::Disconnected { reconnect: None },
-                                );
+                                let _ = session
+                                    .message_tx
+                                    .send(WtMessageS2C::Disconnected { reconnect: None });
 
                                 session.connection.close(0u32.into(), b"Call ended");
                             }

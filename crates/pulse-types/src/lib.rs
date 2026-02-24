@@ -6,7 +6,6 @@ use rkyv::Archive;
 use serde::Deserialize;
 use serde::Serialize;
 
-
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
 pub enum Region {
     Canada,

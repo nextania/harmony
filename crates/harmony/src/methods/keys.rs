@@ -1,14 +1,10 @@
 use harmony_types::users::{
-    GetUserMethod, GetUserResponse, Relationship, SetKeyPackageMethod, SetKeyPackageResponse, UserProfile
+    GetUserMethod, GetUserResponse, Relationship, SetKeyPackageMethod, SetKeyPackageResponse,
+    UserProfile,
 };
 use rapid::socket::{RpcResponder, RpcState, RpcValue};
 
-use crate::{
-    authentication::check_authenticated,
-    errors::Error,
-    services::database::users::User,
-};
-
+use crate::{authentication::check_authenticated, errors::Error, services::database::users::User};
 
 pub async fn set_key_package(
     state: RpcState,
@@ -20,7 +16,6 @@ pub async fn set_key_package(
         .await?;
     Ok::<_, Error>(RpcValue(SetKeyPackageResponse {}))
 }
-
 
 pub async fn get_user(state: RpcState, data: RpcValue<GetUserMethod>) -> impl RpcResponder {
     let user = check_authenticated(&state)?;

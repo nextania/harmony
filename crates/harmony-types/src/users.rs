@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum Status {
     Online = 0,
@@ -48,7 +47,6 @@ pub struct UserProfile {
     // or if this user data was sent in a context where presence is not relevant (e.g. message)
     pub presence: Option<Presence>,
 }
-
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -115,7 +113,6 @@ pub struct RemoveContactMethod {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoveContactResponse {}
-
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

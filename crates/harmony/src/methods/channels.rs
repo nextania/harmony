@@ -1,18 +1,19 @@
 use harmony_types::channels::{
     ChannelInformation, CreateChannelMethod, CreateChannelResponse, DeleteChannelMethod,
-    DeleteChannelResponse, EditChannelMethod, EditChannelResponse, EncryptionHint, GetChannelMethod,
-    GetChannelResponse, GetChannelsMethod, GetChannelsResponse, LeaveChannelMethod,
-    LeaveChannelResponse,
+    DeleteChannelResponse, EditChannelMethod, EditChannelResponse, EncryptionHint,
+    GetChannelMethod, GetChannelResponse, GetChannelsMethod, GetChannelsResponse,
+    LeaveChannelMethod, LeaveChannelResponse,
 };
 use rapid::socket::{RpcResponder, RpcState, RpcValue};
 
 use crate::{
     authentication::check_authenticated,
     errors::Error,
-    methods::{
-        ChannelDeletedEvent, ChannelUpdatedEvent, Event, MemberLeftEvent, emit_to_ids
+    methods::{ChannelDeletedEvent, ChannelUpdatedEvent, Event, MemberLeftEvent, emit_to_ids},
+    services::database::{
+        channels::{Channel, ChannelMemberRole},
+        messages::Message,
     },
-    services::database::{channels::{Channel, ChannelMemberRole}, messages::Message},
 };
 
 pub async fn get_channel(state: RpcState, data: RpcValue<GetChannelMethod>) -> impl RpcResponder {
@@ -22,7 +23,9 @@ pub async fn get_channel(state: RpcState, data: RpcValue<GetChannelMethod>) -> i
     if !channel.is_member(&user.id) {
         return Err(Error::NotInChannel);
     }
-    Ok(RpcValue(GetChannelResponse { channel: channel.into() }))
+    Ok(RpcValue(GetChannelResponse {
+        channel: channel.into(),
+    }))
 }
 
 pub async fn get_channels(state: RpcState, _: RpcValue<GetChannelsMethod>) -> impl RpcResponder {
@@ -59,20 +62,19 @@ pub async fn create_channel(
             if let EncryptionHint::Mls = encryption_hint {
                 // FIXME: MLS implementation is quite a bit of work
                 // particularly, we need to track a key package for every device the user is logged in on
-                // each time a user logs in, a key package needs to be uploaded 
+                // each time a user logs in, a key package needs to be uploaded
                 // and then verified and approved by another device by generating commits
                 return Err(Error::Unimplemented);
             }
             Channel::create_group(user.id.clone(), metadata, encryption_hint).await?
-        },
+        }
     };
-    Ok::<_, Error>(RpcValue(CreateChannelResponse { channel: channel.into() }))
+    Ok::<_, Error>(RpcValue(CreateChannelResponse {
+        channel: channel.into(),
+    }))
 }
 
-pub async fn edit_channel(
-    state: RpcState,
-    data: RpcValue<EditChannelMethod>,
-) -> impl RpcResponder {
+pub async fn edit_channel(state: RpcState, data: RpcValue<EditChannelMethod>) -> impl RpcResponder {
     let user = check_authenticated(&state)?;
     let data = data.into_inner();
     let channel = Channel::get(&data.channel_id).await?;
@@ -89,7 +91,9 @@ pub async fn edit_channel(
             channel: updated.clone(),
         }),
     );
-    Ok(RpcValue(EditChannelResponse { channel: updated.into() }))
+    Ok(RpcValue(EditChannelResponse {
+        channel: updated.into(),
+    }))
 }
 
 pub async fn delete_channel(

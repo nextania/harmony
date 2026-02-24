@@ -62,7 +62,7 @@ async fn main() {
         .register("SEND_MESSAGE", methods::messages::send_message)
         .register("EDIT_MESSAGE", methods::messages::edit_message)
         .register("DELETE_MESSAGE", methods::messages::delete_message)
-        // Users 
+        // Users
         .register("GET_CURRENT_USER", methods::users::get_current_user)
         .register("ADD_CONTACT", methods::users::add_contact)
         .register("ADD_CONTACT_USERNAME", methods::users::add_contact_username)

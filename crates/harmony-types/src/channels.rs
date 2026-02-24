@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum EncryptionHint {
@@ -51,7 +50,6 @@ impl Channel {
     }
 }
 
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetChannelMethod {
@@ -78,9 +76,7 @@ pub struct GetChannelsResponse {
 #[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ChannelInformation {
     #[serde(rename_all = "camelCase")]
-    PrivateChannel {
-        target_id: String,
-    },
+    PrivateChannel { target_id: String },
     #[serde(rename_all = "camelCase")]
     GroupChannel {
         metadata: Vec<u8>,

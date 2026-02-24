@@ -4,10 +4,7 @@ use common::{NodeEvent, NodeEventKind, SessionData};
 use dashmap::DashMap;
 use lazy_static::lazy_static;
 use pulse_types::fragment::FragmentAssembler;
-use pulse_types::{
-    AvailableTrack, MediaHint, WtMessageC2S, WtMessageS2C,
-    WtFragmentedTrackData,
-};
+use pulse_types::{AvailableTrack, MediaHint, WtFragmentedTrackData, WtMessageC2S, WtMessageS2C};
 use redis::AsyncCommands;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -25,7 +22,7 @@ use crate::wt::call::{Call, MlsState, PendingProposal};
 
 #[derive(Clone, Debug)]
 pub struct TrackInfo {
-    pub id: String, // global unique track ID
+    pub id: String,              // global unique track ID
     pub client_track_id: String, // client-provided track ID
     pub media_hint: MediaHint,
     pub session_id: String,
@@ -276,7 +273,11 @@ async fn handle_session_loop(
     }
 }
 
-async fn handle_datagram(client_track_id: &str, data: &[u8], session: &SessionState) -> anyhow::Result<()> {
+async fn handle_datagram(
+    client_track_id: &str,
+    data: &[u8],
+    session: &SessionState,
+) -> anyhow::Result<()> {
     let Some(call) = GLOBAL_CALLS.get(&session.call_id) else {
         warn!(
             "Call {} not found for session {}",

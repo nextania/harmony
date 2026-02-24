@@ -1,0 +1,20 @@
+[package]
+name = "rapid"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio = { version = "1.45.1", default-features = false }
+async-trait = "0.1.73"
+futures = "0.3.28"
+
+async-tungstenite = { version = "0.33.0", features = ["tokio-runtime"] }
+
+serde = { version = "1.0.183", features = ["derive"] }
+rmp-serde = "1.1.2"
+rmpv = { git = "https://github.com/infiniwave/msgpack-rust.git", features = ["with-serde"] }
+
+dashmap = "6.0.0"
+rand = "0.10.0"
+uuid = "1.17.0"
+log = "0.4.20"

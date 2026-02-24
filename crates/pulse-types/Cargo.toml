@@ -1,0 +1,9 @@
+[package]
+name = "pulse-types"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+serde = { version = "1.0.144", features = ["derive"] }
+rkyv = "0.8.14"
+tls_codec = "0.4"

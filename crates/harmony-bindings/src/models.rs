@@ -1,0 +1,459 @@
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct UserProfile {
+    pub id: String,
+    pub public_key: Option<Vec<u8>>,
+    pub presence: Option<Presence>,
+}
+
+impl From<harmony_api::UserProfile> for UserProfile {
+    fn from(user: harmony_api::UserProfile) -> Self {
+        Self {
+            id: user.id,
+            public_key: user.public_key,
+            presence: user.presence.map(Into::into),
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct CurrentUserResponse {
+    pub id: String,
+    pub public_key: Option<Vec<u8>>,
+    pub encrypted_keys: Option<Vec<u8>>,
+    pub presence: Presence,
+}
+
+impl From<harmony_api::CurrentUserResponse> for CurrentUserResponse {
+    fn from(user: harmony_api::CurrentUserResponse) -> Self {
+        Self {
+            id: user.id,
+            public_key: user.public_key,
+            encrypted_keys: user.encrypted_keys,
+            presence: user.presence.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Enum)]
+pub enum Status {
+    Online,
+    Idle,
+    Busy,
+    BusyNotify,
+    Invisible,
+}
+
+impl From<harmony_api::Status> for Status {
+    fn from(status: harmony_api::Status) -> Self {
+        match status {
+            harmony_api::Status::Online => Status::Online,
+            harmony_api::Status::Idle => Status::Idle,
+            harmony_api::Status::Busy => Status::Busy,
+            harmony_api::Status::BusyNotify => Status::BusyNotify,
+            harmony_api::Status::Offline => Status::Invisible,
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct Presence {
+    pub status: Status,
+    pub message: String,
+}
+
+impl From<harmony_api::Presence> for Presence {
+    fn from(presence: harmony_api::Presence) -> Self {
+        Self {
+            status: presence.status.into(),
+            message: presence.message,
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Enum)]
+pub enum Relationship {
+    Established,
+    Blocked,
+    Requested,
+    Pending,
+}
+
+impl From<harmony_api::Relationship> for Relationship {
+    fn from(relationship: harmony_api::Relationship) -> Self {
+        match relationship {
+            harmony_api::Relationship::Established => Relationship::Established,
+            harmony_api::Relationship::Blocked => Relationship::Blocked,
+            harmony_api::Relationship::Requested => Relationship::Requested,
+            harmony_api::Relationship::Pending => Relationship::Pending,
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct Contact {
+    pub id: String,
+    pub relationship: Relationship,
+}
+
+impl From<harmony_api::Contact> for Contact {
+    fn from(contact: harmony_api::Contact) -> Self {
+        Self {
+            id: contact.id,
+            relationship: contact.relationship.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct ContactExtended {
+    pub id: String,
+    pub relationship: Relationship,
+    pub user: UserProfile,
+}
+
+impl From<harmony_api::ContactExtended> for ContactExtended {
+    fn from(contact: harmony_api::ContactExtended) -> Self {
+        Self {
+            id: contact.id,
+            relationship: contact.relationship.into(),
+            user: contact.user.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct ChannelMember {
+    pub id: String,
+    pub role: ChannelMemberRole,
+}
+
+impl From<harmony_api::ChannelMember> for ChannelMember {
+    fn from(member: harmony_api::ChannelMember) -> Self {
+        Self {
+            id: member.id,
+            role: member.role.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Enum)]
+pub enum ChannelMemberRole {
+    Member,
+    Manager,
+}
+
+impl From<harmony_api::ChannelMemberRole> for ChannelMemberRole {
+    fn from(role: harmony_api::ChannelMemberRole) -> Self {
+        match role {
+            harmony_api::ChannelMemberRole::Member => ChannelMemberRole::Member,
+            harmony_api::ChannelMemberRole::Manager => ChannelMemberRole::Manager,
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Enum)]
+pub enum EncryptionHint {
+    Mls,
+    Persistent,
+}
+
+impl From<harmony_api::EncryptionHint> for EncryptionHint {
+    fn from(hint: harmony_api::EncryptionHint) -> Self {
+        match hint {
+            harmony_api::EncryptionHint::Mls => EncryptionHint::Mls,
+            harmony_api::EncryptionHint::Persistent => EncryptionHint::Persistent,
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Enum)]
+pub enum Channel {
+    PrivateChannel {
+        id: String,
+        initiator_id: String,
+        target_id: String,
+    },
+    GroupChannel {
+        id: String,
+        metadata: Vec<u8>,
+        members: Vec<ChannelMember>,
+        pending_members: Vec<String>,
+        blacklist: Vec<String>,
+        encryption_hint: EncryptionHint,
+    },
+}
+
+impl From<harmony_api::Channel> for Channel {
+    fn from(channel: harmony_api::Channel) -> Self {
+        match channel {
+            harmony_api::Channel::PrivateChannel {
+                id,
+                initiator_id,
+                target_id,
+            } => Channel::PrivateChannel {
+                id,
+                initiator_id,
+                target_id,
+            },
+            harmony_api::Channel::GroupChannel {
+                id,
+                metadata,
+                members,
+                pending_members,
+                blacklist,
+                encryption_hint,
+            } => Channel::GroupChannel {
+                id,
+                metadata,
+                members: members.into_iter().map(Into::into).collect(),
+                pending_members,
+                blacklist,
+                encryption_hint: encryption_hint.into(),
+            },
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct Message {
+    pub id: String,
+    pub content: Vec<u8>,
+    pub author_id: String,
+    pub edited_at: Option<i64>,
+    pub channel_id: String,
+}
+
+impl From<harmony_api::Message> for Message {
+    fn from(message: harmony_api::Message) -> Self {
+        Self {
+            id: message.id,
+            content: message.content,
+            author_id: message.author_id,
+            edited_at: message.edited_at,
+            channel_id: message.channel_id,
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct Invite {
+    pub id: String,
+    pub code: String,
+    pub channel_id: String,
+    pub creator: String,
+    pub expires_at: Option<i64>,
+    pub max_uses: Option<i32>,
+    pub uses: Vec<String>,
+    pub authorized_users: Option<Vec<String>>,
+}
+
+impl From<harmony_api::Invite> for Invite {
+    fn from(invite: harmony_api::Invite) -> Self {
+        Self {
+            id: invite.id,
+            code: invite.code,
+            channel_id: invite.channel_id,
+            creator: invite.creator,
+            expires_at: invite.expires_at,
+            max_uses: invite.max_uses,
+            uses: invite.uses,
+            authorized_users: invite.authorized_users,
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Enum)]
+pub enum InviteInformation {
+    Group {
+        metadata: Vec<u8>,
+        inviter_id: String,
+        authorized: bool,
+        member_count: i32,
+    },
+    Space {
+        name: String,
+        description: String,
+        inviter_id: String,
+        banned: bool,
+        authorized: bool,
+        member_count: i32,
+    },
+}
+
+impl From<harmony_api::InviteInformation> for InviteInformation {
+    fn from(info: harmony_api::InviteInformation) -> Self {
+        match info {
+            harmony_api::InviteInformation::Group {
+                metadata,
+                inviter_id,
+                authorized,
+                member_count,
+            } => InviteInformation::Group {
+                metadata,
+                inviter_id,
+                authorized,
+                member_count,
+            },
+            harmony_api::InviteInformation::Space {
+                name,
+                description,
+                inviter_id,
+                banned,
+                authorized,
+                member_count,
+            } => InviteInformation::Space {
+                name,
+                description,
+                inviter_id,
+                banned,
+                authorized,
+                member_count,
+            },
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct StartCallResponse {
+    pub id: String,
+}
+
+impl From<harmony_api::StartCallResponse> for StartCallResponse {
+    fn from(response: harmony_api::StartCallResponse) -> Self {
+        Self { id: response.id }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct CreateCallTokenResponse {
+    pub id: String,
+    pub token: String,
+    pub server_address: String,
+    pub call_id: String,
+}
+
+impl From<harmony_api::CreateCallTokenResponse> for CreateCallTokenResponse {
+    fn from(response: harmony_api::CreateCallTokenResponse) -> Self {
+        Self {
+            id: response.id,
+            token: response.token,
+            server_address: response.server_address,
+            call_id: response.call_id,
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct UpdateVoiceStateResponse {
+    pub muted: bool,
+    pub deafened: bool,
+}
+
+impl From<harmony_api::UpdateVoiceStateResponse> for UpdateVoiceStateResponse {
+    fn from(response: harmony_api::UpdateVoiceStateResponse) -> Self {
+        Self {
+            muted: response.muted,
+            deafened: response.deafened,
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Enum)]
+pub enum Region {
+    Canada,
+    UsCentral,
+    UsEast,
+    UsWest,
+    Europe,
+    Asia,
+    SouthAmerica,
+    Australia,
+    Africa,
+}
+
+impl From<Region> for harmony_api::Region {
+    fn from(region: Region) -> Self {
+        match region {
+            Region::Canada => harmony_api::Region::Canada,
+            Region::UsCentral => harmony_api::Region::UsCentral,
+            Region::UsEast => harmony_api::Region::UsEast,
+            Region::UsWest => harmony_api::Region::UsWest,
+            Region::Europe => harmony_api::Region::Europe,
+            Region::Asia => harmony_api::Region::Asia,
+            Region::SouthAmerica => harmony_api::Region::SouthAmerica,
+            Region::Australia => harmony_api::Region::Australia,
+            Region::Africa => harmony_api::Region::Africa,
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct CallMember {
+    pub user_id: String,
+    pub session_id: String,
+    pub muted: bool,
+    pub deafened: bool,
+}
+
+impl From<harmony_api::CallMember> for CallMember {
+    fn from(member: harmony_api::CallMember) -> Self {
+        Self {
+            user_id: member.user_id,
+            session_id: member.session_id,
+            muted: member.muted,
+            deafened: member.deafened,
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct ClientOptions {
+    pub server_url: String,
+    pub token: String,
+    pub timeout_seconds: u64,
+    pub auto_reconnect: bool,
+    pub max_reconnect_attempts: u32,
+}
+
+impl ClientOptions {
+    #[uniffi::constructor]
+    pub fn new(server_url: String, token: String) -> Self {
+        Self {
+            server_url,
+            token,
+            timeout_seconds: 30,
+            auto_reconnect: true,
+            max_reconnect_attempts: 5,
+        }
+    }
+
+    #[uniffi::method]
+    pub fn with_timeout(&self, timeout_seconds: u64) -> Self {
+        let mut options = self.clone();
+        options.timeout_seconds = timeout_seconds;
+        options
+    }
+
+    #[uniffi::method]
+    pub fn with_auto_reconnect(&self, enabled: bool) -> Self {
+        let mut options = self.clone();
+        options.auto_reconnect = enabled;
+        options
+    }
+
+    #[uniffi::method]
+    pub fn with_max_reconnect_attempts(&self, attempts: u32) -> Self {
+        let mut options = self.clone();
+        options.max_reconnect_attempts = attempts;
+        options
+    }
+}
+
+impl From<ClientOptions> for harmony_api::ClientOptions {
+    fn from(options: ClientOptions) -> Self {
+        harmony_api::ClientOptions::new(options.server_url, options.token)
+            .with_timeout(std::time::Duration::from_secs(options.timeout_seconds))
+            .with_auto_reconnect(options.auto_reconnect)
+            .with_max_reconnect_attempts(options.max_reconnect_attempts)
+    }
+}

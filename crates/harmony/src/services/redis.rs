@@ -51,3 +51,18 @@ pub async fn create_streams() -> redis::RedisResult<()> {
 
     Ok(())
 }
+
+pub async fn set_user_online(user_id: &str) -> redis::RedisResult<()> {
+    let mut conn = get_connection().await;
+    conn.set_ex(format!("user:{}:online", user_id), true, 60).await
+}
+
+pub async fn set_user_offline(user_id: &str) -> redis::RedisResult<()> {
+    let mut conn = get_connection().await;
+    conn.del(format!("user:{}:online", user_id)).await
+}
+
+pub async fn is_user_online(user_id: &str) -> redis::RedisResult<bool> {
+    let mut conn = get_connection().await;
+    conn.exists(format!("user:{}:online", user_id)).await
+}

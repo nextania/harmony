@@ -96,3 +96,15 @@ impl Message {
         Ok(())
     }
 }
+
+impl From<Message> for harmony_types::messages::Message {
+    fn from(m: Message) -> Self {
+        harmony_types::messages::Message {
+            id: m.id,
+            content: m.content,
+            author_id: m.author_id,
+            edited_at: m.edited_at,
+            channel_id: m.channel_id,
+        }
+    }
+}

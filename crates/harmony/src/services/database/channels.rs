@@ -7,18 +7,7 @@ use crate::errors::{Error, Result};
 
 use super::{invites::Invite, messages::Message};
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ChannelMember {
-    pub id: String,
-    pub role: ChannelMemberRole,
-}
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum ChannelMemberRole {
-    Member,
-    Manager,
-}
+pub use harmony_types::channels::{ChannelMember, ChannelMemberRole, EncryptionHint};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE", tag = "type")]
@@ -36,14 +25,6 @@ pub enum Channel {
         blacklist: Vec<String>,
         encryption_hint: EncryptionHint,
     },
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum EncryptionHint {
-    Mls, // Strongest, implements forward secrecy, but messages are not persistent
-    Persistent, // Less secure (no forward secrecy) but allows for messages to be stored on the server
-    // for convenience (messages still encrypted end-to-end)
 }
 
 impl Channel {
@@ -325,6 +306,26 @@ impl Channel {
                 .filter(|m| m.role == ChannelMemberRole::Manager)
                 .count(),
             _ => 0,
+        }
+    }
+}
+
+impl From<Channel> for harmony_types::channels::Channel {
+    fn from(c: Channel) -> Self {
+        match c {
+            Channel::PrivateChannel { id, initiator_id, target_id } =>
+                harmony_types::channels::Channel::PrivateChannel { id, initiator_id, target_id },
+            Channel::GroupChannel { id, metadata, members, pending_members, blacklist, encryption_hint } =>
+                harmony_types::channels::Channel::GroupChannel {
+                    id,
+                    metadata,
+                    // ChannelMember and EncryptionHint are re-exported from harmony-types
+                    // so they are the same type – no per-field conversion needed.
+                    members,
+                    pending_members,
+                    blacklist,
+                    encryption_hint,
+                },
         }
     }
 }

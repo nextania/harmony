@@ -144,9 +144,6 @@ pub enum ApiError {
     #[error("Already requested")]
     AlreadyRequested,
 
-    #[error("Not friends")]
-    NotFriends,
-
     /// Call errors
     #[error("Already exists")]
     AlreadyExists,

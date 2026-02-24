@@ -62,12 +62,12 @@ async fn main() {
         .register("SEND_MESSAGE", methods::messages::send_message)
         .register("EDIT_MESSAGE", methods::messages::edit_message)
         .register("DELETE_MESSAGE", methods::messages::delete_message)
-        // Users & Friends
+        // Users 
         .register("GET_CURRENT_USER", methods::users::get_current_user)
-        .register("ADD_FRIEND", methods::users::add_friend)
-        .register("ADD_FRIEND_USERNAME", methods::users::add_friend_username)
-        .register("REMOVE_FRIEND", methods::users::remove_friend)
-        .register("GET_FRIENDS", methods::users::get_friends)
+        .register("ADD_CONTACT", methods::users::add_contact)
+        .register("ADD_CONTACT_USERNAME", methods::users::add_contact_username)
+        .register("REMOVE_CONTACT", methods::users::remove_contact)
+        .register("GET_CONTACTS", methods::users::get_contacts)
         // Keys
         .register("SET_KEY_PACKAGE", methods::keys::set_key_package)
         .register("GET_USER", methods::keys::get_user)

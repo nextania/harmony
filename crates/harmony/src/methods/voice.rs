@@ -1,6 +1,9 @@
-use pulse_types::Region;
+use harmony_types::voice::{
+    CallMember, CreateCallTokenMethod, CreateCallTokenResponse, EndCallMethod, EndCallResponse,
+    GetCallMembersMethod, GetCallMembersResponse, StartCallMethod, StartCallResponse,
+    UpdateVoiceStateMethod, UpdateVoiceStateResponse,
+};
 use rapid::socket::{RpcResponder, RpcState, RpcValue};
-use serde::{Deserialize, Serialize};
 
 use crate::authentication::check_authenticated;
 use crate::errors::Error;
@@ -10,23 +13,6 @@ use crate::services::redis::{INSTANCE_ID, get_connection};
 use crate::services::voice::ActiveCall;
 use common::{NodeEvent, NodeEventKind};
 use redis::AsyncCommands;
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CreateCallTokenMethod {
-    id: String,
-    initial_muted: bool,
-    initial_deafened: bool,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CreateCallTokenResponse {
-    id: String,
-    token: String,
-    server_address: String,
-    call_id: String,
-}
 
 pub async fn create_call_token(
     state: RpcState,
@@ -53,13 +39,6 @@ pub async fn create_call_token(
     }))
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StartCallMethod {
-    id: String,
-    preferred_region: Option<Region>,
-}
-
 pub async fn start_call(state: RpcState, data: RpcValue<StartCallMethod>) -> impl RpcResponder {
     let user = check_authenticated(&state)?;
     let data = data.into_inner();
@@ -72,18 +51,6 @@ pub async fn start_call(state: RpcState, data: RpcValue<StartCallMethod>) -> imp
     }
     let call = ActiveCall::create(&data.id, &user.id, data.preferred_region).await?;
     Ok::<_, Error>(RpcValue(StartCallResponse { id: call.id }))
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StartCallResponse {
-    id: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EndCallMethod {
-    id: String,
 }
 
 pub async fn end_call(state: RpcState, data: RpcValue<EndCallMethod>) -> impl RpcResponder {
@@ -101,25 +68,6 @@ pub async fn end_call(state: RpcState, data: RpcValue<EndCallMethod>) -> impl Rp
     }
     call.end().await?;
     Ok(RpcValue(EndCallResponse {}))
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EndCallResponse {}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateVoiceStateMethod {
-    id: String,
-    muted: Option<bool>,
-    deafened: Option<bool>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateVoiceStateResponse {
-    muted: bool,
-    deafened: bool,
 }
 
 pub async fn update_voice_state(
@@ -194,27 +142,6 @@ pub async fn update_voice_state(
         muted: session.muted,
         deafened: session.deafened,
     }))
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GetCallMembersMethod {
-    id: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CallMember {
-    user_id: String,
-    session_id: String,
-    muted: bool,
-    deafened: bool,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GetCallMembersResponse {
-    members: Vec<CallMember>,
 }
 
 pub async fn get_call_members(

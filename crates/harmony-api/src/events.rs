@@ -35,10 +35,10 @@ pub enum Event {
     MessageDeleted(MessageDeletedEvent),
 
     // --- Contacts ---
-    /// Friend removed
-    RemoveFriend(String),
-    /// Friend added
-    AddFriend(String),
+    /// Contact removed
+    RemoveContact(String),
+    /// Contact added
+    AddContact(String),
 
     // --- Channels ---
     /// Channel metadata was updated
@@ -168,11 +168,11 @@ pub trait EventHandler: Send + Sync {
     /// Handle message deleted event
     fn on_message_deleted(&self, _event: &MessageDeletedEvent) {}
 
-    /// Handle friend removed event
-    fn on_remove_friend(&self, _user_id: &str) {}
+    /// Handle contact removed event
+    fn on_remove_contact(&self, _user_id: &str) {}
 
-    /// Handle friend added event
-    fn on_add_friend(&self, _user_id: &str) {}
+    /// Handle contact added event
+    fn on_add_contact(&self, _user_id: &str) {}
 
     /// Handle channel updated event
     fn on_channel_updated(&self, _event: &ChannelUpdatedEvent) {}

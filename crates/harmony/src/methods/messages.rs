@@ -1,5 +1,8 @@
+use harmony_types::messages::{
+    DeleteMessageMethod, DeleteMessageResponse, EditMessageMethod, EditMessageResponse,
+    GetMessagesMethod, GetMessagesResponse, SendMessageMethod, SendMessageResponse,
+};
 use rapid::socket::{RpcResponder, RpcState, RpcValue};
-use serde::{Deserialize, Serialize};
 
 use crate::{
     authentication::check_authenticated,
@@ -10,16 +13,6 @@ use crate::{
         messages::Message,
     },
 };
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GetMessagesMethod {
-    channel_id: String,
-    limit: Option<i64>,
-    latest: Option<bool>,
-    before: Option<String>,
-    after: Option<String>,
-}
 
 pub async fn get_messages(state: RpcState, data: RpcValue<GetMessagesMethod>) -> impl RpcResponder {
     let user = check_authenticated(&state)?;
@@ -43,20 +36,9 @@ pub async fn get_messages(state: RpcState, data: RpcValue<GetMessagesMethod>) ->
             data.after.clone(),
         )
         .await?;
-    Ok::<_, Error>(RpcValue(GetMessagesResponse { messages }))
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GetMessagesResponse {
-    messages: Vec<Message>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SendMessageMethod {
-    channel_id: String,
-    content: Vec<u8>,
+    Ok::<_, Error>(RpcValue(GetMessagesResponse {
+        messages: messages.into_iter().map(|m| m.into()).collect(),
+    }))
 }
 
 pub async fn send_message(state: RpcState, data: RpcValue<SendMessageMethod>) -> impl RpcResponder {
@@ -96,21 +78,7 @@ pub async fn send_message(state: RpcState, data: RpcValue<SendMessageMethod>) ->
         }),
     );
 
-    Ok(RpcValue(SendMessageResponse { message }))
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SendMessageResponse {
-    message: Message,
-}
-
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EditMessageMethod {
-    message_id: String,
-    content: Vec<u8>,
+    Ok(RpcValue(SendMessageResponse { message: message.into() }))
 }
 
 pub async fn edit_message(state: RpcState, data: RpcValue<EditMessageMethod>) -> impl RpcResponder {
@@ -137,20 +105,7 @@ pub async fn edit_message(state: RpcState, data: RpcValue<EditMessageMethod>) ->
             channel_id: updated.channel_id.clone(),
         }),
     );
-    Ok(RpcValue(EditMessageResponse { message: updated }))
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EditMessageResponse {
-    message: Message,
-}
-
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DeleteMessageMethod {
-    message_id: String,
+    Ok(RpcValue(EditMessageResponse { message: updated.into() }))
 }
 
 pub async fn delete_message(
@@ -178,7 +133,3 @@ pub async fn delete_message(
     );
     Ok(RpcValue(DeleteMessageResponse {}))
 }
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DeleteMessageResponse {}

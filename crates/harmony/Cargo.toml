@@ -41,5 +41,6 @@ rapid = { path = "../rapid" }
 rmpv = { git = "https://github.com/infiniwave/msgpack-rust.git" }
 common = { path = "../common" }
 pulse-types = { path = "../pulse-types" }
+harmony-types = { path = "../harmony-types" }
 reqwest = { version = "0.13.1", features = ["json"] }
 serde_json = "1.0.149"

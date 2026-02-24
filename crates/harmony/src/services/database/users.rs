@@ -1,47 +1,12 @@
 use futures_util::StreamExt;
+use harmony_types::users::UserProfile;
 use mongodb::bson::{self, doc};
 use serde::{Deserialize, Serialize};
 
 use super::channels::Channel;
-use crate::errors::{Error, Result};
+use crate::{errors::{Error, Result}, services::redis::is_user_online};
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub enum Status {
-    Online = 0,
-    Idle = 1,
-    Busy = 2,
-    BusyNotify = 3,
-    Invisible = 4,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Presence {
-    status: Status,
-    message: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub enum Relationship {
-    Established = 0,
-    Blocked = 1,
-    Requested = 2,
-    Pending = 3,
-}
-
-// TODO: allow disabling of friend requests
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Contact {
-    id: String,
-    relationship: Relationship,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct ContactExtended {
-    id: String,
-    relationship: Relationship,
-    user: User,
-}
+pub use harmony_types::users::{Contact, ContactExtended, Presence, Relationship, Status};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct KeyPackage {
@@ -51,6 +16,18 @@ pub struct KeyPackage {
     pub encrypted_keys: Vec<u8>,
 }
 
+pub async fn get_presentable_presence(user: &User) -> Result<Presence> {
+    let user_online = is_user_online(&user.id).await?;
+    Ok(if user_online && !matches!(user.presence.status, Status::Offline) {
+        user.presence.clone()
+    } else {
+        Presence {
+            status: Status::Offline,
+            message: String::new(),
+        }
+    })
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct User {
     pub id: String,
@@ -58,11 +35,6 @@ pub struct User {
     pub contacts: Vec<Contact>,
     pub key_package: Option<KeyPackage>,
     pub presence: Presence,
-
-    // this is only indicated in memory by the server
-    // and not saved to the db
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub online: Option<bool>,
 }
 
 impl User {
@@ -120,7 +92,6 @@ impl User {
                 status: Status::Online,
                 message: String::new(),
             },
-            online: None,
         };
         users.insert_one(user.clone()).await?;
         Ok(user)
@@ -347,11 +318,20 @@ impl User {
                     "id": &contact.id
                 })
                 .await
-                .ok()?;
-            user.map(|user| ContactExtended {
+                .ok()??;
+            let presence = get_presentable_presence(&user).await.ok()?;
+            Some(ContactExtended {
                 id: contact.id.clone(),
                 relationship: contact.relationship.clone(),
-                user,
+                user: UserProfile {
+                    id: user.id.clone(),
+                    public_key: user.key_package.as_ref().map(|kp| kp.public_key.clone()),
+                    presence: if contact.relationship == Relationship::Established {
+                        Some(presence)
+                    } else {
+                        None
+                    },
+                },
             })
         });
         let contacts: Vec<ContactExtended> = futures_util::future::join_all(contacts)
@@ -360,6 +340,11 @@ impl User {
             .filter_map(|contact| contact.clone())
             .collect();
         Ok(contacts)
+    }
+
+    pub async fn relationship_with(&self, other_id: &String) -> Result<Option<Relationship>> {
+        let contact = self.contacts.iter().find(|c| &c.id == other_id);
+        Ok(contact.map(|c| c.relationship.clone()))
     }
 
     // pub async fn accept_invite(&self, invite_code: &String) -> Result<Space> {

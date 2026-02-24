@@ -1,5 +1,10 @@
+use harmony_types::channels::{
+    ChannelInformation, CreateChannelMethod, CreateChannelResponse, DeleteChannelMethod,
+    DeleteChannelResponse, EditChannelMethod, EditChannelResponse, EncryptionHint, GetChannelMethod,
+    GetChannelResponse, GetChannelsMethod, GetChannelsResponse, LeaveChannelMethod,
+    LeaveChannelResponse,
+};
 use rapid::socket::{RpcResponder, RpcState, RpcValue};
-use serde::{Deserialize, Serialize};
 
 use crate::{
     authentication::check_authenticated,
@@ -7,14 +12,8 @@ use crate::{
     methods::{
         ChannelDeletedEvent, ChannelUpdatedEvent, Event, MemberLeftEvent, emit_to_ids
     },
-    services::database::{channels::{Channel, ChannelMemberRole, EncryptionHint}, messages::Message},
+    services::database::{channels::{Channel, ChannelMemberRole}, messages::Message},
 };
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GetChannelMethod {
-    id: String,
-}
 
 pub async fn get_channel(state: RpcState, data: RpcValue<GetChannelMethod>) -> impl RpcResponder {
     let data = data.into_inner();
@@ -23,48 +22,15 @@ pub async fn get_channel(state: RpcState, data: RpcValue<GetChannelMethod>) -> i
     if !channel.is_member(&user.id) {
         return Err(Error::NotInChannel);
     }
-    Ok(RpcValue(GetChannelResponse { channel }))
+    Ok(RpcValue(GetChannelResponse { channel: channel.into() }))
 }
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GetChannelResponse {
-    channel: Channel,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GetChannelsMethod {}
 
 pub async fn get_channels(state: RpcState, _: RpcValue<GetChannelsMethod>) -> impl RpcResponder {
     let user = check_authenticated(&state)?;
     let channels = user.get_channels().await?;
-    Ok::<_, Error>(RpcValue(GetChannelsResponse { channels }))
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GetChannelsResponse {
-    channels: Vec<Channel>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct CreateChannelMethod {
-    channel: ChannelInformation,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum ChannelInformation {
-    #[serde(rename_all = "camelCase")]
-    PrivateChannel {
-        target_id: String,
-    },
-    #[serde(rename_all = "camelCase")]
-    GroupChannel {
-        metadata: Vec<u8>,
-        encryption_hint: EncryptionHint,
-    },
+    Ok::<_, Error>(RpcValue(GetChannelsResponse {
+        channels: channels.into_iter().map(|c| c.into()).collect(),
+    }))
 }
 
 pub async fn create_channel(
@@ -100,20 +66,7 @@ pub async fn create_channel(
             Channel::create_group(user.id.clone(), metadata, encryption_hint).await?
         },
     };
-    Ok::<_, Error>(RpcValue(CreateChannelResponse { channel }))
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CreateChannelResponse {
-    channel: Channel,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EditChannelMethod {
-    channel_id: String,
-    metadata: Vec<u8>,
+    Ok::<_, Error>(RpcValue(CreateChannelResponse { channel: channel.into() }))
 }
 
 pub async fn edit_channel(
@@ -136,19 +89,7 @@ pub async fn edit_channel(
             channel: updated.clone(),
         }),
     );
-    Ok(RpcValue(EditChannelResponse { channel: updated }))
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EditChannelResponse {
-    channel: Channel,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DeleteChannelMethod {
-    channel_id: String,
+    Ok(RpcValue(EditChannelResponse { channel: updated.into() }))
 }
 
 pub async fn delete_channel(
@@ -173,18 +114,6 @@ pub async fn delete_channel(
         }),
     );
     Ok(RpcValue(DeleteChannelResponse {}))
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DeleteChannelResponse {}
-
-// --- LEAVE_CHANNEL ---
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LeaveChannelMethod {
-    channel_id: String,
 }
 
 pub async fn leave_channel(
@@ -232,7 +161,3 @@ pub async fn leave_channel(
     }
     Ok(RpcValue(LeaveChannelResponse {}))
 }
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LeaveChannelResponse {}

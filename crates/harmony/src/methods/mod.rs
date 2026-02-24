@@ -18,8 +18,8 @@ pub enum Event {
     MessageEdited(MessageEditedEvent),
     MessageDeleted(MessageDeletedEvent),
     // Contacts
-    RemoveFriend(String),
-    AddFriend(String),
+    RemoveContact(String),
+    AddContact(String),
     // Channels
     ChannelUpdated(ChannelUpdatedEvent),
     ChannelDeleted(ChannelDeletedEvent),

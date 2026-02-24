@@ -12,8 +12,7 @@ pub struct Invite {
     pub code: String,
     pub channel_id: String,
     pub creator: String,
-    pub created_at: u64,
-    pub expires_at: Option<u64>,
+    pub expires_at: Option<i64>,
     pub max_uses: Option<i32>,
     pub uses: Vec<String>,
     pub authorized_users: Option<Vec<String>>,
@@ -23,7 +22,7 @@ impl Invite {
     pub async fn create(
         channel_id: String,
         creator: String,
-        expires_at: Option<u64>,
+        expires_at: Option<i64>,
         max_uses: Option<i32>,
         authorized_users: Option<Vec<String>>,
     ) -> Result<Invite> {
@@ -32,7 +31,6 @@ impl Invite {
             code: generate_code(),
             channel_id,
             creator,
-            created_at: chrono::Utc::now().timestamp_millis() as u64,
             expires_at,
             max_uses,
             uses: Vec::new(),
@@ -94,4 +92,19 @@ impl Invite {
 
 pub fn generate_code() -> String {
     Alphanumeric.sample_string(&mut rand::rng(), 7)
+}
+
+impl From<Invite> for harmony_types::invites::Invite {
+    fn from(i: Invite) -> Self {
+        harmony_types::invites::Invite {
+            id: i.id,
+            code: i.code,
+            channel_id: i.channel_id,
+            creator: i.creator,
+            expires_at: i.expires_at,
+            max_uses: i.max_uses,
+            uses: i.uses,
+            authorized_users: i.authorized_users,
+        }
+    }
 }

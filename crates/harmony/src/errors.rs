@@ -43,7 +43,6 @@ pub enum Error {
     Blocked,
     AlreadyEstablished,
     AlreadyRequested,
-    NotFriends,
 
     // Call errors
     AlreadyExists,
@@ -75,9 +74,8 @@ impl fmt::Display for Error {
             Error::NotInChannel => write!(f, "Not in channel"),
             Error::InvalidTarget => write!(f, "Invalid target"),
             Error::Blocked => write!(f, "Blocked"),
-            Error::AlreadyEstablished => write!(f, "Already friends"),
+            Error::AlreadyEstablished => write!(f, "Already contacts"),
             Error::AlreadyRequested => write!(f, "Already requested"),
-            Error::NotFriends => write!(f, "Not friends"),
             Error::AlreadyExists => write!(f, "Already exists"),
             Error::CallLimitReached => write!(f, "Call limit reached"),
             Error::NoVoiceNodesAvailable => write!(f, "No voice nodes available"),

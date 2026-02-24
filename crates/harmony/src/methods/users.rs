@@ -1,10 +1,3 @@
-// 1. add friend
-// 2. remove friend
-// 3. get friends
-// 4. get friend requests
-// 5. create direct channel
-// 6. get direct channels
-
 use rapid::socket::{RpcResponder, RpcState, RpcValue};
 use serde::{Deserialize, Serialize};
 
@@ -43,7 +36,13 @@ pub async fn add_friend_username(
     Ok::<_, Error>(RpcValue(AddFriendResponse {}))
 }
 
-pub async fn remove_friend(state: RpcState, data: RpcValue<AddFriendMethod>) -> impl RpcResponder {
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveFriendMethod {
+    id: String,
+}
+
+pub async fn remove_friend(state: RpcState, data: RpcValue<RemoveFriendMethod>) -> impl RpcResponder {
     let user = check_authenticated(&state)?;
     let data = data.into_inner();
     let friend = User::get(&data.id).await?;
@@ -51,15 +50,23 @@ pub async fn remove_friend(state: RpcState, data: RpcValue<AddFriendMethod>) -> 
     Ok::<_, Error>(RpcValue(AddFriendResponse {}))
 }
 
-pub async fn get_friends(state: RpcState, _data: RpcValue<()>) -> impl RpcResponder {
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetFriendsMethod {}
+
+pub async fn get_friends(state: RpcState, _data: RpcValue<GetFriendsMethod>) -> impl RpcResponder {
     let user = check_authenticated(&state)?;
     let contacts = user.get_contacts().await?;
     Ok::<_, Error>(RpcValue(contacts))
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetCurrentUserMethod {}
+
 /// Get the current authenticated user data and keys
 /// This method should be used immediately after authentication
-pub async fn get_current_user(state: RpcState, _data: RpcValue<()>) -> impl RpcResponder {
+pub async fn get_current_user(state: RpcState, _data: RpcValue<GetCurrentUserMethod>) -> impl RpcResponder {
     let user = check_authenticated(&state)?;
     Ok::<_, Error>(RpcValue(CurrentUserResponse {
         id: user.id.clone(),

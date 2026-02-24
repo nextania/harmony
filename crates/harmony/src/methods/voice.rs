@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::authentication::check_authenticated;
 use crate::errors::Error;
 use crate::methods::{Event, UserVoiceStateChangedEvent, emit_to_ids};
+use crate::services::database::channels::Channel;
 use crate::services::redis::{INSTANCE_ID, get_connection};
 use crate::services::voice::ActiveCall;
 use pulse_api::{NodeEvent, NodeEventKind};
@@ -35,10 +36,10 @@ pub async fn create_call_token(
     let Some(mut call) = ActiveCall::get_in_channel(&data.id).await? else {
         return Err(Error::NotFound);
     };
-    // let channel = Channel::get(&call.channel_id).await?;
-    // if !user.in_channel(&channel).await? {
-    //     return Err(Error::NotFound);
-    // }
+    let channel = Channel::get(&call.channel_id).await?;
+    if !user.in_channel(&channel).await? {
+        return Err(Error::NotFound);
+    }
     let server_address = call.server_address.clone();
     let (id, token) = call
         .create_token(&user.id, data.initial_muted, data.initial_deafened)
@@ -64,10 +65,10 @@ pub async fn start_call(state: RpcState, data: RpcValue<StartCallMethod>) -> imp
     if ActiveCall::get_in_channel(&data.id).await?.is_some() {
         return Err(Error::AlreadyExists);
     };
-    // let channel = Channel::get(&data.id).await?;
-    // if !user.in_channel(&channel).await? {
-    //     return Err(Error::NotFound);
-    // }
+    let channel = Channel::get(&data.id).await?;
+    if !user.in_channel(&channel).await? {
+        return Err(Error::NotFound);
+    }
     let call = ActiveCall::create(&data.id, &user.id, data.preferred_region).await?;
     Ok::<_, Error>(RpcValue(StartCallResponse { id: call.id }))
 }
@@ -90,13 +91,13 @@ pub async fn end_call(state: RpcState, data: RpcValue<EndCallMethod>) -> impl Rp
     let Some(call) = ActiveCall::get_in_channel(&data.id).await? else {
         return Err(Error::NotFound);
     };
-    // let channel = Channel::get(&call.channel_id).await?;
-    // if !user.in_channel(&channel).await? {
-    //     return Err(Error::NotFound);
-    // }
-    // if !channel.is_manager(&user.id) {
-    //     return Err(Error::MissingPermission);
-    // }
+    let channel = Channel::get(&call.channel_id).await?;
+    if !user.in_channel(&channel).await? {
+        return Err(Error::NotFound);
+    }
+    if !channel.is_manager(&user.id) {
+        return Err(Error::MissingPermission);
+    }
     call.end().await?;
     Ok(RpcValue(EndCallResponse {}))
 }
@@ -129,10 +130,10 @@ pub async fn update_voice_state(
     let Some(mut call) = ActiveCall::get_in_channel(&data.id).await? else {
         return Err(Error::NotFound);
     };
-    // let channel = Channel::get(&call.channel_id).await?;
-    // if !user.in_channel(&channel).await? {
-    //     return Err(Error::NotFound);
-    // }
+    let channel = Channel::get(&call.channel_id).await?;
+    if !user.in_channel(&channel).await? {
+        return Err(Error::NotFound);
+    }
 
     let member_index = call
         .members
@@ -226,10 +227,10 @@ pub async fn get_call_members(
         return Err(Error::NotFound);
     };
 
-    // let channel = Channel::get(&call.channel_id).await?;
-    // if !user.in_channel(&channel).await? {
-    //     return Err(Error::NotFound);
-    // }
+    let channel = Channel::get(&call.channel_id).await?;
+    if !user.in_channel(&channel).await? {
+        return Err(Error::NotFound);
+    }
 
     let members: Vec<CallMember> = call
         .members

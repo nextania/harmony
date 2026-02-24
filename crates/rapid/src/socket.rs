@@ -8,7 +8,6 @@ use futures::{
     future::BoxFuture,
 };
 use log::{debug, info};
-use rand::rngs::OsRng;
 use rmp_serde::{Deserializer, Serializer};
 use rmpv::{
     Value,
@@ -21,7 +20,6 @@ use tokio::{
     time::timeout,
 };
 use uuid::Uuid;
-use x25519_dalek::{EphemeralSecret, PublicKey};
 
 use crate::{
     errors::Error,
@@ -69,8 +67,6 @@ impl RpcClient {
     }
 }
 
-// pub type RpcMethod<T: RpcRequest> = dyn Fn(RpcClients, String, T) -> impl RpcResponder;
-
 pub trait RpcResponder {
     fn into_value(self) -> Value;
 }
@@ -90,6 +86,13 @@ impl<T: RpcResponder, U: RpcResponder> RpcResponder for Result<T, U> {
         }
     }
 }
+
+impl RpcResponder for () {
+    fn into_value(self) -> Value {
+        unreachable!()
+    }
+}
+
 pub trait RpcRequest {
     fn from_value(value: Value) -> Result<Self, Error>
     where
@@ -289,7 +292,6 @@ pub enum RpcMessageC2S {
     #[serde(rename_all = "camelCase")]
     Identify {
         token: String,
-        public_key: Vec<u8>,
     },
     Heartbeat {},
     Message {
@@ -303,9 +305,7 @@ pub enum RpcMessageC2S {
 #[serde(rename_all = "SCREAMING_SNAKE_CASE", tag = "type")]
 pub enum RpcMessageS2C {
     #[serde(rename_all = "camelCase")]
-    Hello {
-        public_key: Vec<u8>,
-    },
+    Hello {},
     Identify {},
     Heartbeat {},
     Error {
@@ -340,11 +340,7 @@ async fn start_client(
         write.close(None).await.expect("Failed to close");
     });
     let id = generate_id();
-    let secret = EphemeralSecret::random_from_rng(OsRng);
-    let public_key = PublicKey::from(&secret);
-    let val = RpcMessageS2C::Hello {
-        public_key: public_key.to_bytes().to_vec(),
-    };
+    let val = RpcMessageS2C::Hello {};
     s.send(Message::Binary(
         serialize(&val).expect("Failed to serialize").into(),
     ))
@@ -356,7 +352,7 @@ async fn start_client(
     let id_moved = id.clone();
     task::spawn(async move {
         while timeout(
-            std::time::Duration::from_millis(*HEARTBEAT_TIMEOUT),
+            std::time::Duration::from_millis(HEARTBEAT_TIMEOUT),
             rx.next(),
         )
         .await
@@ -418,7 +414,6 @@ pub async fn handle_packet(
         match r {
             RpcMessageC2S::Identify {
                 token,
-                public_key: _,
             } => authenticate(token.clone())
                 .await
                 .map(|user| {

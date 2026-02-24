@@ -3,8 +3,6 @@ use rand::distr::Alphanumeric;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
-use aes_gcm::aead::Aead;
-use aes_gcm::{Aes256Gcm, Nonce};
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
 use rmp_serde::{Deserializer, Serializer};
@@ -58,55 +56,16 @@ pub fn generate_id() -> String {
     generate(ALPHABET, LENGTH)
 }
 
-pub fn encode(buffer: Vec<u8>, compress: bool, encrypt: Option<Aes256Gcm>) -> Vec<u8> {
-    if compress {
-        let zlib = ZlibEncoder::new(buffer, Compression::best());
-        let compressed = zlib.finish().unwrap();
-        if let Some(e) = encrypt {
-            let mut nonce_bytes = random_number(96);
-            let nonce = Nonce::from_slice(&nonce_bytes);
-            let mut encrypted = e.encrypt(nonce, compressed.as_slice()).unwrap();
-            let mut result = Vec::new();
-            result.append(&mut nonce_bytes);
-            result.append(&mut encrypted);
-            result
-        } else {
-            compressed
-        }
-    } else if let Some(e) = encrypt {
-        let mut nonce_bytes = random_number(96);
-        let nonce = Nonce::from_slice(&nonce_bytes);
-        let mut encrypted = e.encrypt(nonce, buffer.as_slice()).unwrap();
-        let mut result = Vec::new();
-        result.append(&mut nonce_bytes);
-        result.append(&mut encrypted);
-        result
-    } else {
-        buffer
-    }
+pub fn compress(buffer: Vec<u8>) -> Vec<u8> {
+    let zlib = ZlibEncoder::new(buffer, Compression::best());
+    zlib.finish().unwrap()
 }
 
-pub fn decode(mut buffer: Vec<u8>, compress: bool, encrypt: Option<Aes256Gcm>) -> Vec<u8> {
-    if let Some(e) = encrypt {
-        let data = buffer.split_off(96);
-        let nonce = Nonce::from_slice(&buffer);
-        let decrypted = e.decrypt(nonce, data.as_slice()).unwrap();
-        if compress {
-            let mut zlib = ZlibDecoder::new(Cursor::new(decrypted));
-            let mut buf = Vec::new();
-            zlib.read_to_end(&mut buf).unwrap();
-            buf
-        } else {
-            decrypted
-        }
-    } else if compress {
-        let mut zlib = ZlibDecoder::new(Cursor::new(buffer));
-        let mut buf = Vec::new();
-        zlib.read_to_end(&mut buf).unwrap();
-        buf
-    } else {
-        buffer
-    }
+pub fn decompress(buffer: Vec<u8>) -> Vec<u8> {
+    let mut zlib = ZlibDecoder::new(Cursor::new(buffer));
+    let mut buf = Vec::new();
+    zlib.read_to_end(&mut buf).unwrap();
+    buf
 }
 pub fn serialize<T: Serialize>(value: &T) -> Result<Vec<u8>, rmp_serde::encode::Error> {
     let mut buf = Vec::new();

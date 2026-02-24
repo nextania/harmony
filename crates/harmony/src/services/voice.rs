@@ -13,19 +13,17 @@ use crate::{
     RPC_CLIENTS,
     errors::{Error, Result},
     methods::{Event, UserJoinedCallEvent, UserLeftCallEvent, emit_to_ids},
-    request::Request,
-    services::encryption::generate_token,
+    services::utilities::generate_token,
 };
 
 use super::{
     database::calls::Call,
-    encryption::{deserialize, serialize},
+    utilities::{deserialize, serialize},
     redis::{INSTANCE_ID, get_connection, get_pubsub},
 };
 
 lazy_static! {
     pub static ref AVAILABLE_NODES: DashMap<String, Node> = DashMap::new();
-    pub static ref REQUESTS: DashMap<String, Request<String>> = DashMap::new();
 }
 
 #[derive(Clone, Debug)]

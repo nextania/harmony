@@ -35,6 +35,9 @@ pub enum Error {
 
     // Channel errors
     ChannelFull,
+    LastManager,
+    NotInChannel,
+    InvalidTarget, // For private channels
 
     // User errors
     Blocked,
@@ -68,6 +71,9 @@ impl fmt::Display for Error {
             Error::InviteExpired => write!(f, "Invite expired"),
             Error::InviteAlreadyUsed => write!(f, "Invite already used"),
             Error::ChannelFull => write!(f, "Channel full"),
+            Error::LastManager => write!(f, "Cannot leave as the last manager"),
+            Error::NotInChannel => write!(f, "Not in channel"),
+            Error::InvalidTarget => write!(f, "Invalid target"),
             Error::Blocked => write!(f, "Blocked"),
             Error::AlreadyEstablished => write!(f, "Already friends"),
             Error::AlreadyRequested => write!(f, "Already requested"),

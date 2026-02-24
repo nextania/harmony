@@ -1,6 +1,7 @@
 use futures_util::StreamExt;
-use mongodb::{bson::doc, options::FindOptions};
+use mongodb::{bson::{doc, Binary, spec::BinarySubtype}, options::FindOptions};
 use serde::{Deserialize, Serialize};
+use ulid::Ulid;
 
 use crate::errors::{Error, Result};
 
@@ -29,11 +30,20 @@ pub enum Channel {
     },
     GroupChannel {
         id: String,
-        name: String,
-        description: String,
+        metadata: Vec<u8>, // encrypted with group key, contains name, description, etc.
         members: Vec<ChannelMember>,
+        pending_members: Vec<String>,
         blacklist: Vec<String>,
+        encryption_hint: EncryptionHint,
     },
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum EncryptionHint {
+    Mls, // Strongest, implements forward secrecy, but messages are not persistent
+    Persistent, // Less secure (no forward secrecy) but allows for messages to be stored on the server
+    // for convenience (messages still encrypted end-to-end)
 }
 
 impl Channel {
@@ -119,5 +129,202 @@ impl Channel {
             _ => false,
         }
     }
-    // TODO: pub async fn create
+    pub async fn create_private(initiator_id: String, target_id: String) -> Result<Channel> {
+        let database = super::get_database();
+        let channel = Channel::PrivateChannel {
+            id: Ulid::new().to_string(),
+            initiator_id,
+            target_id,
+        };
+        database
+            .collection::<Channel>("channels")
+            .insert_one(&channel)
+            .await?;
+        Ok(channel)
+    }
+
+    pub async fn create_group(
+        initiator_id: String,
+        metadata: Vec<u8>,
+        encryption_hint: EncryptionHint,
+    ) -> Result<Channel> {
+        let database = super::get_database();
+        let channel = Channel::GroupChannel {
+            id: Ulid::new().to_string(),
+            metadata,
+            members: vec![ChannelMember {
+                id: initiator_id,
+                role: ChannelMemberRole::Manager,
+            }],
+            pending_members: vec![],
+            blacklist: vec![],
+            encryption_hint,
+        };
+        database
+            .collection::<Channel>("channels")
+            .insert_one(&channel)
+            .await?;
+        Ok(channel)
+    }
+
+    pub fn id(&self) -> &str {
+        match self {
+            Channel::PrivateChannel { id, .. } | Channel::GroupChannel { id, .. } => id,
+        }
+    }
+
+    pub fn is_member(&self, user_id: &str) -> bool {
+        match self {
+            Channel::PrivateChannel {
+                initiator_id,
+                target_id,
+                ..
+            } => initiator_id == user_id || target_id == user_id,
+            Channel::GroupChannel { members, .. } => {
+                members.iter().any(|m| m.id == user_id)
+            }
+        }
+    }
+
+    pub fn member_ids(&self) -> Vec<String> {
+        match self {
+            Channel::PrivateChannel {
+                initiator_id,
+                target_id,
+                ..
+            } => vec![initiator_id.clone(), target_id.clone()],
+            Channel::GroupChannel { members, .. } => {
+                members.iter().map(|m| m.id.clone()).collect()
+            }
+        }
+    }
+
+    pub async fn add_member(&self, user_id: &str) -> Result<()> {
+        let Channel::GroupChannel { id, .. } = self else {
+            return Err(Error::MissingPermission);
+        };
+        let database = super::get_database();
+        database
+            .collection::<Channel>("channels")
+            .update_one(
+                doc! { "id": id },
+                doc! {
+                    "$push": {
+                        "members": {
+                            "id": user_id,
+                            "role": "MEMBER"
+                        }
+                    }
+                },
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn add_pending_member(&self, user_id: &str) -> Result<()> {
+        let Channel::GroupChannel { id, .. } = self else {
+            return Err(Error::MissingPermission);
+        };
+        let database = super::get_database();
+        database
+            .collection::<Channel>("channels")
+            .update_one(
+                doc! { "id": id },
+                doc! {
+                    "$addToSet": {
+                        "pendingMembers": user_id
+                    }
+                },
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn promote_pending_member(&self, user_id: &str) -> Result<()> {
+        let Channel::GroupChannel { id, .. } = self else {
+            return Err(Error::MissingPermission);
+        };
+        let database = super::get_database();
+        database
+            .collection::<Channel>("channels")
+            .update_one(
+                doc! { "id": id },
+                doc! {
+                    "$pull": { "pendingMembers": user_id },
+                    "$push": {
+                        "members": {
+                            "id": user_id,
+                            "role": "MEMBER"
+                        }
+                    }
+                },
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn remove_member(&self, user_id: &str) -> Result<()> {
+        let Channel::GroupChannel { id, .. } = self else {
+            return Err(Error::MissingPermission);
+        };
+        let database = super::get_database();
+        database
+            .collection::<Channel>("channels")
+            .update_one(
+                doc! { "id": id },
+                doc! {
+                    "$pull": {
+                        "members": { "id": user_id }
+                    }
+                },
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn update_metadata(&self, metadata: Vec<u8>) -> Result<()> {
+        let Channel::GroupChannel { id, .. } = self else {
+            return Err(Error::MissingPermission);
+        };
+        let database = super::get_database();
+        database
+            .collection::<Channel>("channels")
+            .update_one(
+                doc! { "id": id },
+                doc! {
+                    "$set": { "metadata": Binary { subtype: BinarySubtype::Generic, bytes: metadata } }
+                },
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn delete(&self) -> Result<()> {
+        let id = self.id();
+        let database = super::get_database();
+        database
+            .collection::<Channel>("channels")
+            .delete_one(doc! { "id": id })
+            .await?;
+        database
+            .collection::<Message>("messages")
+            .delete_many(doc! { "channelId": id })
+            .await?;
+        database
+            .collection::<Invite>("invites")
+            .delete_many(doc! { "channelId": id })
+            .await?;
+        Ok(())
+    }
+
+    /// Count how many managers remain in a group channel.
+    pub fn manager_count(&self) -> usize {
+        match self {
+            Channel::GroupChannel { members, .. } => members
+                .iter()
+                .filter(|m| m.role == ChannelMemberRole::Manager)
+                .count(),
+            _ => 0,
+        }
+    }
 }

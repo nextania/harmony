@@ -44,15 +44,25 @@ pub struct ContactExtended {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct KeyPackage {
+    // x25519 public key for persistent encryption (DMs / persistent group channels)
+    pub public_key: Vec<u8>,
+    // encrypted private key and other key material, encrypted by a key derived from the user's password
+    pub encrypted_keys: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct User {
     pub id: String,
     // pub profile_banner: Option<String>, // TODO: move to AS
     pub contacts: Vec<Contact>,
+    pub key_package: Option<KeyPackage>,
+    pub presence: Presence,
 
+    // this is only indicated in memory by the server
+    // and not saved to the db
     #[serde(skip_serializing_if = "Option::is_none")]
     pub online: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub presence: Option<Presence>,
 }
 
 impl User {
@@ -105,8 +115,12 @@ impl User {
         let user = User {
             id,
             contacts: Vec::new(),
+            key_package: None,
+            presence: Presence {
+                status: Status::Online,
+                message: String::new(),
+            },
             online: None,
-            presence: None,
         };
         users.insert_one(user.clone()).await?;
         Ok(user)
@@ -403,5 +417,36 @@ impl User {
             .collect()
             .await;
         Ok(channels)
+    }
+
+    pub async fn set_key_package(
+        &self,
+        public_key: Vec<u8>,
+        encrypted_keys: Vec<u8>,
+    ) -> Result<()> {
+        let users = super::get_database().collection::<User>("users");
+        users
+            .update_one(
+                doc! { "id": &self.id },
+                doc! {
+                    "$set": {
+                        "keyPackage": bson::to_bson(&KeyPackage {
+                            public_key,
+                            encrypted_keys,
+                        })?
+                    }
+                },
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn can_dm(&self, other: &User) -> Result<bool> {
+        let contact = self.contacts.iter().find(|c| c.id == other.id);
+        if let Some(contact) = contact {
+            Ok(contact.relationship == Relationship::Established)
+        } else {
+            Ok(false)
+        }
     }
 }

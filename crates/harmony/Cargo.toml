@@ -34,15 +34,16 @@ redis = { version = "1.0.3", features = ["tokio-comp", "streams"] }
 
 serde = { version = "1.0.183", features = ["derive"] }
 rmp-serde = "1.1.2"
-
-aes-gcm = "0.10.2"
 flate2 = "1.0.27"
-x25519-dalek = "2.0.0"
+
+openmls = "0.7.1"
+openmls_rust_crypto = "0.4.1"
+openmls_traits = "0.4.1"
+tls_codec = "0.4"
+openmls_basic_credential = "0.4.1"
 
 rapid = { path = "../rapid" }
-typetag = "0.2.18"
 rmpv = { git = "https://github.com/infiniwave/msgpack-rust.git" }
 pulse-api = { path = "../pulse-api" }
-async-notify = "0.3.0"
 reqwest = { version = "0.13.1", features = ["json"] }
 serde_json = "1.0.149"

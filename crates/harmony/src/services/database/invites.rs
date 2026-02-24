@@ -71,6 +71,25 @@ impl Invite {
             > 0;
         Ok(result)
     }
+
+    pub async fn increment_uses(&self, user_id: &str) -> Result<()> {
+        let database = super::get_database();
+        database
+            .collection::<Invite>("invites")
+            .update_one(
+                doc! { "id": &self.id },
+                doc! {
+                    "$push": { "uses": user_id }
+                },
+            )
+            .await?;
+        if let Some(max_uses) = self.max_uses {
+            if (self.uses.len() as i32 + 1) >= max_uses {
+                self.delete().await?;
+            }
+        }
+        Ok(())
+    }
 }
 
 pub fn generate_code() -> String {

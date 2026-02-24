@@ -1,7 +1,7 @@
 pub mod authentication;
 pub mod errors;
 pub mod methods;
-pub mod request;
+// pub mod request;
 pub mod services;
 
 use authentication::authenticate;
@@ -44,14 +44,34 @@ async fn main() {
     let listen_address = LISTEN_ADDRESS.to_owned();
     info!("Starting server at {listen_address}");
     let server = RpcServer::new(Box::new(|token| Box::pin(authenticate(token))))
+        // Channels
         .register("GET_CHANNEL", methods::channels::get_channel)
         .register("GET_CHANNELS", methods::channels::get_channels)
+        .register("CREATE_CHANNEL", methods::channels::create_channel)
+        .register("EDIT_CHANNEL", methods::channels::edit_channel)
+        .register("DELETE_CHANNEL", methods::channels::delete_channel)
+        .register("LEAVE_CHANNEL", methods::channels::leave_channel)
+        // Invites
         .register("CREATE_INVITE", methods::invites::create_invite)
         .register("DELETE_INVITE", methods::invites::delete_invite)
         .register("GET_INVITE", methods::invites::get_invite)
         .register("GET_INVITES", methods::invites::get_invites)
+        .register("ACCEPT_INVITE", methods::invites::accept_invite)
+        // Messages
         .register("GET_MESSAGES", methods::messages::get_messages)
         .register("SEND_MESSAGE", methods::messages::send_message)
+        .register("EDIT_MESSAGE", methods::messages::edit_message)
+        .register("DELETE_MESSAGE", methods::messages::delete_message)
+        // Users & Friends
+        .register("GET_CURRENT_USER", methods::users::get_current_user)
+        .register("ADD_FRIEND", methods::users::add_friend)
+        .register("ADD_FRIEND_USERNAME", methods::users::add_friend_username)
+        .register("REMOVE_FRIEND", methods::users::remove_friend)
+        .register("GET_FRIENDS", methods::users::get_friends)
+        // Keys
+        .register("SET_KEY_PACKAGE", methods::keys::set_key_package)
+        .register("GET_USER", methods::keys::get_user)
+        // Voice
         .register("CREATE_CALL_TOKEN", methods::voice::create_call_token)
         .register("START_CALL", methods::voice::start_call)
         .register("END_CALL", methods::voice::end_call)

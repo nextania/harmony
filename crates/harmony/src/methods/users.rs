@@ -8,7 +8,7 @@
 use rapid::socket::{RpcResponder, RpcState, RpcValue};
 use serde::{Deserialize, Serialize};
 
-use crate::{authentication::check_authenticated, errors::Error, services::database::users::User};
+use crate::{authentication::check_authenticated, errors::Error, services::database::users::{Presence, User}};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -55,4 +55,25 @@ pub async fn get_friends(state: RpcState, _data: RpcValue<()>) -> impl RpcRespon
     let user = check_authenticated(&state)?;
     let contacts = user.get_contacts().await?;
     Ok::<_, Error>(RpcValue(contacts))
+}
+
+/// Get the current authenticated user data and keys
+/// This method should be used immediately after authentication
+pub async fn get_current_user(state: RpcState, _data: RpcValue<()>) -> impl RpcResponder {
+    let user = check_authenticated(&state)?;
+    Ok::<_, Error>(RpcValue(CurrentUserResponse {
+        id: user.id.clone(),
+        public_key: user.key_package.as_ref().map(|kp| kp.public_key.clone()),
+        encrypted_keys: user.key_package.as_ref().map(|kp| kp.encrypted_keys.clone()),
+        presence: user.presence.clone(),
+    }))
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CurrentUserResponse {
+    pub id: String,
+    pub public_key: Option<Vec<u8>>,
+    pub encrypted_keys: Option<Vec<u8>>,
+    pub presence: Presence,
 }

@@ -1,7 +1,11 @@
-use rand::{Rng, SeedableRng, rngs::StdRng};
+use rand::{
+    RngExt, SeedableRng,
+    rngs::{StdRng, SysRng},
+};
 
 pub fn random_number(size: usize) -> Vec<u8> {
-    let mut rng = StdRng::from_entropy();
+    let mut rng =
+        StdRng::try_from_rng(&mut SysRng).expect("Failed to create random number generator");
     let mut result: Vec<u8> = vec![0; size];
     rng.fill(&mut result[..]);
     result

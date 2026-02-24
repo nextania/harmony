@@ -1,7 +1,7 @@
 use flate2::Compression;
 use rand::distr::Alphanumeric;
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::rngs::{StdRng, SysRng};
+use rand::{RngExt, SeedableRng};
 
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 use std::io::{Cursor, Read};
 
 pub fn random_number(size: usize) -> Vec<u8> {
-    let mut rng = StdRng::from_os_rng();
+    let mut rng =
+        StdRng::try_from_rng(&mut SysRng).expect("Failed to create random number generator");
     let mut result: Vec<u8> = vec![0; size];
     rng.fill(&mut result[..]);
     result

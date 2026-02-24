@@ -15,6 +15,6 @@ rmp-serde = "1.1.2"
 rmpv = { git = "https://github.com/infiniwave/msgpack-rust.git", features = ["with-serde"] }
 
 dashmap = "6.0.0"
-rand = "0.8.5"
+rand = "0.10.0"
 uuid = "1.17.0"
 log = "0.4.20"

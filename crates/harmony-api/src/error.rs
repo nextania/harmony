@@ -1,7 +1,7 @@
 //! Error types for the Harmony API client
 
-use thiserror::Error;
 pub use harmony_types::errors::Error as ApiError;
+use thiserror::Error;
 
 /// Result type alias for Harmony API operations
 pub type Result<T> = std::result::Result<T, HarmonyError>;

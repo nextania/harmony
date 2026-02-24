@@ -108,10 +108,10 @@ impl MlsClient {
 
         let group_config = MlsGroupCreateConfig::builder()
             .ciphersuite(CIPHERSUITE)
-            .with_group_context_extensions(Extensions::single(Extension::ExternalSenders(vec![
-                external_sender,
-            ])))
-            .context("Failed to set group context extensions")?
+            .with_group_context_extensions(
+                Extensions::single(Extension::ExternalSenders(vec![external_sender]))
+                    .context("Failed to set group context extensions")?,
+            )
             .use_ratchet_tree_extension(true)
             .build();
 

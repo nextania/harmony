@@ -74,7 +74,9 @@ impl HarmonyClient {
         let inner = self.inner.clone();
         self.runtime
             .block_on(async move {
-                let message = inner.send_message(&channel_id, &content).await?;
+                let message = inner
+                    .send_message(&channel_id, content.into_bytes())
+                    .await?;
                 Ok::<Message, harmony_api::HarmonyError>(message.into())
             })
             .map_err(Into::into)
@@ -84,7 +86,7 @@ impl HarmonyClient {
         &self,
         channel_id: String,
         max_uses: Option<i32>,
-        expires_at: Option<u64>,
+        expires_at: Option<i64>,
         authorized_users: Option<Vec<String>>,
     ) -> HarmonyResult<Invite> {
         let inner = self.inner.clone();
@@ -98,12 +100,12 @@ impl HarmonyClient {
             .map_err(Into::into)
     }
 
-    pub fn get_invite(&self, invite_id: String) -> HarmonyResult<Invite> {
+    pub fn get_invite(&self, invite_id: String) -> HarmonyResult<InviteInformation> {
         let inner = self.inner.clone();
         self.runtime
             .block_on(async move {
                 let invite = inner.get_invite(&invite_id).await?;
-                Ok::<Invite, harmony_api::HarmonyError>(invite.into())
+                Ok::<InviteInformation, harmony_api::HarmonyError>(invite.invite.into())
             })
             .map_err(Into::into)
     }
@@ -133,13 +135,13 @@ impl HarmonyClient {
     pub fn start_call(
         &self,
         channel_id: String,
-        preferred_region: Option<String>,
+        preferred_region: Option<Region>,
     ) -> HarmonyResult<StartCallResponse> {
         let inner = self.inner.clone();
         self.runtime
             .block_on(async move {
                 let response = inner
-                    .start_call(&channel_id, preferred_region.as_deref())
+                    .start_call(&channel_id, preferred_region.map(Into::into))
                     .await?;
                 Ok::<StartCallResponse, harmony_api::HarmonyError>(response.into())
             })

@@ -1,26 +1,35 @@
 #[derive(Clone, Debug, uniffi::Record)]
-pub struct User {
+pub struct UserProfile {
     pub id: String,
-    pub profile_banner: Option<String>,
-    pub profile_description: String,
-    pub username: String,
-    pub discriminator: String,
-    pub profile_picture: Option<String>,
+    pub public_key: Option<Vec<u8>>,
     pub presence: Option<Presence>,
-    pub contacts: Vec<Contact>,
 }
 
-impl From<harmony_api::User> for User {
-    fn from(user: harmony_api::User) -> Self {
+impl From<harmony_api::UserProfile> for UserProfile {
+    fn from(user: harmony_api::UserProfile) -> Self {
         Self {
             id: user.id,
-            profile_banner: user.profile_banner,
-            profile_description: user.profile_description,
-            username: user.username,
-            discriminator: user.discriminator,
-            profile_picture: user.profile_picture,
+            public_key: user.public_key,
             presence: user.presence.map(Into::into),
-            contacts: user.contacts.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct CurrentUserResponse {
+    pub id: String,
+    pub public_key: Option<Vec<u8>>,
+    pub encrypted_keys: Option<Vec<u8>>,
+    pub presence: Presence,
+}
+
+impl From<harmony_api::CurrentUserResponse> for CurrentUserResponse {
+    fn from(user: harmony_api::CurrentUserResponse) -> Self {
+        Self {
+            id: user.id,
+            public_key: user.public_key,
+            encrypted_keys: user.encrypted_keys,
+            presence: user.presence.into(),
         }
     }
 }
@@ -41,7 +50,7 @@ impl From<harmony_api::Status> for Status {
             harmony_api::Status::Idle => Status::Idle,
             harmony_api::Status::Busy => Status::Busy,
             harmony_api::Status::BusyNotify => Status::BusyNotify,
-            harmony_api::Status::Invisible => Status::Invisible,
+            harmony_api::Status::Offline => Status::Invisible,
         }
     }
 }
@@ -99,7 +108,7 @@ impl From<harmony_api::Contact> for Contact {
 pub struct ContactExtended {
     pub id: String,
     pub relationship: Relationship,
-    pub user: User,
+    pub user: UserProfile,
 }
 
 impl From<harmony_api::ContactExtended> for ContactExtended {
@@ -143,6 +152,21 @@ impl From<harmony_api::ChannelMemberRole> for ChannelMemberRole {
 }
 
 #[derive(Clone, Debug, uniffi::Enum)]
+pub enum EncryptionHint {
+    Mls,
+    Persistent,
+}
+
+impl From<harmony_api::EncryptionHint> for EncryptionHint {
+    fn from(hint: harmony_api::EncryptionHint) -> Self {
+        match hint {
+            harmony_api::EncryptionHint::Mls => EncryptionHint::Mls,
+            harmony_api::EncryptionHint::Persistent => EncryptionHint::Persistent,
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Enum)]
 pub enum Channel {
     PrivateChannel {
         id: String,
@@ -151,10 +175,11 @@ pub enum Channel {
     },
     GroupChannel {
         id: String,
-        name: String,
-        description: String,
+        metadata: Vec<u8>,
         members: Vec<ChannelMember>,
+        pending_members: Vec<String>,
         blacklist: Vec<String>,
+        encryption_hint: EncryptionHint,
     },
 }
 
@@ -172,16 +197,18 @@ impl From<harmony_api::Channel> for Channel {
             },
             harmony_api::Channel::GroupChannel {
                 id,
-                name,
-                description,
+                metadata,
                 members,
+                pending_members,
                 blacklist,
+                encryption_hint,
             } => Channel::GroupChannel {
                 id,
-                name,
-                description,
+                metadata,
                 members: members.into_iter().map(Into::into).collect(),
+                pending_members,
                 blacklist,
+                encryption_hint: encryption_hint.into(),
             },
         }
     }
@@ -190,10 +217,8 @@ impl From<harmony_api::Channel> for Channel {
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct Message {
     pub id: String,
-    pub content: String,
+    pub content: Vec<u8>,
     pub author_id: String,
-    pub created_at: i64,
-    pub edited: bool,
     pub edited_at: Option<i64>,
     pub channel_id: String,
 }
@@ -204,8 +229,6 @@ impl From<harmony_api::Message> for Message {
             id: message.id,
             content: message.content,
             author_id: message.author_id,
-            created_at: message.created_at,
-            edited: message.edited,
             edited_at: message.edited_at,
             channel_id: message.channel_id,
         }
@@ -217,9 +240,8 @@ pub struct Invite {
     pub id: String,
     pub code: String,
     pub channel_id: String,
-    pub creator_id: String,
-    pub created_at: u64,
-    pub expires_at: Option<u64>,
+    pub creator: String,
+    pub expires_at: Option<i64>,
     pub max_uses: Option<i32>,
     pub uses: Vec<String>,
     pub authorized_users: Option<Vec<String>>,
@@ -231,12 +253,62 @@ impl From<harmony_api::Invite> for Invite {
             id: invite.id,
             code: invite.code,
             channel_id: invite.channel_id,
-            creator_id: invite.creator_id,
-            created_at: invite.created_at,
+            creator: invite.creator,
             expires_at: invite.expires_at,
             max_uses: invite.max_uses,
             uses: invite.uses,
             authorized_users: invite.authorized_users,
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Enum)]
+pub enum InviteInformation {
+    Group {
+        metadata: Vec<u8>,
+        inviter_id: String,
+        authorized: bool,
+        member_count: i32,
+    },
+    Space {
+        name: String,
+        description: String,
+        inviter_id: String,
+        banned: bool,
+        authorized: bool,
+        member_count: i32,
+    },
+}
+
+impl From<harmony_api::InviteInformation> for InviteInformation {
+    fn from(info: harmony_api::InviteInformation) -> Self {
+        match info {
+            harmony_api::InviteInformation::Group {
+                metadata,
+                inviter_id,
+                authorized,
+                member_count,
+            } => InviteInformation::Group {
+                metadata,
+                inviter_id,
+                authorized,
+                member_count,
+            },
+            harmony_api::InviteInformation::Space {
+                name,
+                description,
+                inviter_id,
+                banned,
+                authorized,
+                member_count,
+            } => InviteInformation::Space {
+                name,
+                description,
+                inviter_id,
+                banned,
+                authorized,
+                member_count,
+            },
         }
     }
 }
@@ -257,6 +329,7 @@ pub struct CreateCallTokenResponse {
     pub id: String,
     pub token: String,
     pub server_address: String,
+    pub call_id: String,
 }
 
 impl From<harmony_api::CreateCallTokenResponse> for CreateCallTokenResponse {
@@ -265,6 +338,7 @@ impl From<harmony_api::CreateCallTokenResponse> for CreateCallTokenResponse {
             id: response.id,
             token: response.token,
             server_address: response.server_address,
+            call_id: response.call_id,
         }
     }
 }
@@ -280,6 +354,35 @@ impl From<harmony_api::UpdateVoiceStateResponse> for UpdateVoiceStateResponse {
         Self {
             muted: response.muted,
             deafened: response.deafened,
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Enum)]
+pub enum Region {
+    Canada,
+    UsCentral,
+    UsEast,
+    UsWest,
+    Europe,
+    Asia,
+    SouthAmerica,
+    Australia,
+    Africa,
+}
+
+impl From<Region> for harmony_api::Region {
+    fn from(region: Region) -> Self {
+        match region {
+            Region::Canada => harmony_api::Region::Canada,
+            Region::UsCentral => harmony_api::Region::UsCentral,
+            Region::UsEast => harmony_api::Region::UsEast,
+            Region::UsWest => harmony_api::Region::UsWest,
+            Region::Europe => harmony_api::Region::Europe,
+            Region::Asia => harmony_api::Region::Asia,
+            Region::SouthAmerica => harmony_api::Region::SouthAmerica,
+            Region::Australia => harmony_api::Region::Australia,
+            Region::Africa => harmony_api::Region::Africa,
         }
     }
 }

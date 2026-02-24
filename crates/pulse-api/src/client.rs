@@ -185,7 +185,7 @@ impl PulseClient {
         &self,
         track: &AvailableTrack,
     ) -> Result<mpsc::UnboundedReceiver<Vec<u8>>> {
-        let rx = self.media_router.subscribe(&track);
+        let rx = self.media_router.subscribe(track);
 
         match self
             .send_and_wait(

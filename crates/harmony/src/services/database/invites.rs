@@ -81,10 +81,10 @@ impl Invite {
                 },
             )
             .await?;
-        if let Some(max_uses) = self.max_uses {
-            if (self.uses.len() as i32 + 1) >= max_uses {
-                self.delete().await?;
-            }
+        if let Some(max_uses) = self.max_uses
+            && (self.uses.len() as i32 + 1) >= max_uses
+        {
+            self.delete().await?;
         }
         Ok(())
     }

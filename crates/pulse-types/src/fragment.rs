@@ -79,10 +79,8 @@ impl FragmentAssembler {
                     .map(|f| f.as_ref().map_or(0, |v| v.len()))
                     .sum();
                 let mut assembled = Vec::with_capacity(total_len);
-                for frag in buf.fragments {
-                    if let Some(data) = frag {
-                        assembled.extend_from_slice(&data);
-                    }
+                for frag in buf.fragments.iter().flatten() {
+                    assembled.extend_from_slice(frag);
                 }
                 return Some(ReassembledDatagram {
                     id: key.0,

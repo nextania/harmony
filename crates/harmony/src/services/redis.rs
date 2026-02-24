@@ -43,10 +43,10 @@ pub async fn create_streams() -> redis::RedisResult<()> {
             "0",
         )
         .await;
-    if let Err(e) = e {
-        if !e.to_string().contains("BUSYGROUP") {
-            return Err(e);
-        }
+    if let Err(e) = e
+        && !e.to_string().contains("BUSYGROUP")
+    {
+        return Err(e);
     }
 
     Ok(())

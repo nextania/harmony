@@ -119,7 +119,7 @@ impl MlsClient {
             &self.provider,
             &self.signer,
             &group_config,
-            GroupId::from_slice(&self.call_id.as_bytes()),
+            GroupId::from_slice(self.call_id.as_bytes()),
             self.credential_with_key.clone(),
         )
         .context("Failed to create MLS group")?;
@@ -161,9 +161,7 @@ impl MlsClient {
 
                 let content = processed.into_content();
                 match content {
-                    ProcessedMessageContent::ProposalMessage(p) => {
-                        return Ok(p.proposal().clone());
-                    }
+                    ProcessedMessageContent::ProposalMessage(p) => Ok(p.proposal().clone()),
                     _ => bail!("Expected a proposal message, got something else"),
                 }
             })

@@ -89,8 +89,7 @@ pub struct HarmonyClient {
 }
 
 impl HarmonyClient {
-    pub async fn new(options: ClientOptions) -> Result<(Self, mpsc::UnboundedReceiver<Event>)> {
-        let (evt_tx, evt_rx) = mpsc::unbounded_channel();
+    pub async fn new_with_recv(options: ClientOptions, evt_tx: mpsc::UnboundedSender<Event>) -> Result<Self> {
         let (ws_tx, ws_rx) = mpsc::unbounded_channel();
         let (auth_tx, auth_rx) = oneshot::channel();
 
@@ -107,7 +106,12 @@ impl HarmonyClient {
         };
 
         client.connect(ws_rx, auth_rx).await?;
-        Ok((client, evt_rx))
+        Ok(client)
+    }
+
+    pub async fn new(options: ClientOptions) -> Result<(Self, mpsc::UnboundedReceiver<Event>)> {
+        let (evt_tx, evt_rx) = mpsc::unbounded_channel();
+        Ok((Self::new_with_recv(options, evt_tx).await?, evt_rx))
     }
 
     pub(crate) async fn send_request<T, R>(&self, method: &str, params: T) -> Result<R>
@@ -229,7 +233,7 @@ impl HarmonyClient {
                             });
                         }
                         let (mut ws_tx, mut ws_rx) = stream.split();
-                        let next_heartbeat = tokio::time::Instant::now() + Duration::from_secs(10);
+                        let mut next_heartbeat = tokio::time::Instant::now() + Duration::from_secs(10);
                         loop {
                             tokio::select! {
                                 Some(msg) = receiver.recv() => {
@@ -299,6 +303,7 @@ impl HarmonyClient {
                                         eprintln!("Failed to send heartbeat: {}", e);
                                         break;
                                     }
+                                    next_heartbeat = tokio::time::Instant::now() + Duration::from_secs(10);
                                 }
                             }
                         }

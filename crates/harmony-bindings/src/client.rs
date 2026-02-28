@@ -1,55 +1,54 @@
 use std::sync::Arc;
-use tokio::runtime::Runtime;
+use tokio::sync::Mutex;
+use tokio::sync::mpsc::UnboundedReceiver;
 
-use crate::error::{HarmonyBindingError, HarmonyResult};
+use crate::error::HarmonyResult;
 use crate::models::*;
 
 #[derive(uniffi::Object)]
 pub struct HarmonyClient {
     inner: Arc<harmony_api::HarmonyClient>,
-    runtime: Arc<Runtime>,
+    recv: Arc<Mutex<UnboundedReceiver<harmony_api::Event>>>,
 }
 
 #[uniffi::export]
 impl HarmonyClient {
     #[uniffi::constructor]
-    pub fn new(config: ClientOptions) -> HarmonyResult<Arc<Self>> {
-        let runtime = Arc::new(Runtime::new().map_err(|e| HarmonyBindingError::Internal {
-            reason: e.to_string(),
-        })?);
-
-        let inner =
-            runtime.block_on(async { harmony_api::HarmonyClient::new(config.into()).await })?;
+    pub async fn new(config: ClientOptions) -> HarmonyResult<Arc<Self>> {
+        let (inner, receiver) = harmony_api::HarmonyClient::new(config.into()).await?;
 
         Ok(Arc::new(Self {
             inner: Arc::new(inner),
-            runtime,
+            recv: Arc::new(Mutex::new(receiver)),
         }))
     }
 
-    pub fn get_channels(&self) -> HarmonyResult<Vec<Channel>> {
-        let inner = self.inner.clone();
-        self.runtime
-            .block_on(async move {
-                let channels = inner.get_channels().await?;
-                Ok::<Vec<Channel>, harmony_api::HarmonyError>(
-                    channels.into_iter().map(Into::into).collect(),
-                )
-            })
-            .map_err(Into::into)
+    pub async fn next_event(&self) -> HarmonyResult<Event> {
+        let event = self.recv.lock()
+            .await
+            .recv()
+            .await
+            .ok_or(crate::HarmonyBindingError::NotConnected)?;
+        Ok(event.into())
     }
 
-    pub fn get_channel(&self, channel_id: String) -> HarmonyResult<Channel> {
-        let inner = self.inner.clone();
-        self.runtime
-            .block_on(async move {
-                let channel = inner.get_channel(&channel_id).await?;
-                Ok::<Channel, harmony_api::HarmonyError>(channel.into())
-            })
-            .map_err(Into::into)
+    pub async fn get_channels(&self) -> HarmonyResult<Vec<Channel>> {
+        let channels = self
+            .inner
+            .get_channels()
+            .await?
+            .into_iter()
+            .map(Into::into)
+            .collect();
+        Ok(channels)
     }
 
-    pub fn get_messages(
+    pub async fn get_channel(&self, channel_id: String) -> HarmonyResult<Channel> {
+        let channel = self.inner.get_channel(&channel_id).await?.into();
+        Ok(channel)
+    }
+
+    pub async fn get_messages(
         &self,
         channel_id: String,
         limit: Option<i64>,
@@ -57,188 +56,134 @@ impl HarmonyClient {
         before: Option<String>,
         after: Option<String>,
     ) -> HarmonyResult<Vec<Message>> {
-        let inner = self.inner.clone();
-        self.runtime
-            .block_on(async move {
-                let messages = inner
-                    .get_messages(&channel_id, limit, latest, before, after)
-                    .await?;
-                Ok::<Vec<Message>, harmony_api::HarmonyError>(
-                    messages.into_iter().map(Into::into).collect(),
-                )
-            })
-            .map_err(Into::into)
+        let messages = self
+            .inner
+            .get_messages(&channel_id, limit, latest, before, after)
+            .await?
+            .into_iter()
+            .map(Into::into)
+            .collect();
+        Ok(messages)
     }
 
-    pub fn send_message(&self, channel_id: String, content: String) -> HarmonyResult<Message> {
-        let inner = self.inner.clone();
-        self.runtime
-            .block_on(async move {
-                let message = inner
-                    .send_message(&channel_id, content.into_bytes())
-                    .await?;
-                Ok::<Message, harmony_api::HarmonyError>(message.into())
-            })
-            .map_err(Into::into)
+    pub async fn send_message(
+        &self,
+        channel_id: String,
+        content: String,
+    ) -> HarmonyResult<Message> {
+        let message: Message = self
+            .inner
+            .send_message(&channel_id, content.into_bytes())
+            .await?
+            .into();
+        Ok(message)
     }
 
-    pub fn create_invite(
+    pub async fn create_invite(
         &self,
         channel_id: String,
         max_uses: Option<i32>,
         expires_at: Option<i64>,
         authorized_users: Option<Vec<String>>,
     ) -> HarmonyResult<Invite> {
-        let inner = self.inner.clone();
-        self.runtime
-            .block_on(async move {
-                let invite = inner
-                    .create_invite(&channel_id, max_uses, expires_at, authorized_users)
-                    .await?;
-                Ok::<Invite, harmony_api::HarmonyError>(invite.into())
-            })
-            .map_err(Into::into)
+        let invite = self
+            .inner
+            .create_invite(&channel_id, max_uses, expires_at, authorized_users)
+            .await?
+            .into();
+        Ok(invite)
     }
 
-    pub fn get_invite(&self, invite_id: String) -> HarmonyResult<InviteInformation> {
-        let inner = self.inner.clone();
-        self.runtime
-            .block_on(async move {
-                let invite = inner.get_invite(&invite_id).await?;
-                Ok::<InviteInformation, harmony_api::HarmonyError>(invite.invite.into())
-            })
-            .map_err(Into::into)
+    pub async fn get_invite(&self, invite_id: String) -> HarmonyResult<InviteInformation> {
+        let invite = self.inner.get_invite(&invite_id).await?.invite.into();
+        Ok(invite)
     }
 
-    pub fn get_invites(&self, channel_id: String) -> HarmonyResult<Vec<Invite>> {
-        let inner = self.inner.clone();
-        self.runtime
-            .block_on(async move {
-                let invites = inner.get_invites(channel_id).await?;
-                Ok::<Vec<Invite>, harmony_api::HarmonyError>(
-                    invites.into_iter().map(Into::into).collect(),
-                )
-            })
-            .map_err(Into::into)
+    pub async fn get_invites(&self, channel_id: String) -> HarmonyResult<Vec<Invite>> {
+        let invites: Vec<Invite> = self
+            .inner
+            .get_invites(channel_id)
+            .await?
+            .into_iter()
+            .map(Into::into)
+            .collect();
+        Ok(invites)
     }
 
-    pub fn delete_invite(&self, invite_id: String) -> HarmonyResult<()> {
-        let inner = self.inner.clone();
-        self.runtime
-            .block_on(async move {
-                inner.delete_invite(&invite_id).await?;
-                Ok::<(), harmony_api::HarmonyError>(())
-            })
-            .map_err(Into::into)
+    pub async fn delete_invite(&self, invite_id: String) -> HarmonyResult<()> {
+        Ok(self.inner.delete_invite(&invite_id).await?)
     }
 
-    pub fn start_call(
+    pub async fn start_call(
         &self,
         channel_id: String,
         preferred_region: Option<Region>,
     ) -> HarmonyResult<StartCallResponse> {
-        let inner = self.inner.clone();
-        self.runtime
-            .block_on(async move {
-                let response = inner
-                    .start_call(&channel_id, preferred_region.map(Into::into))
-                    .await?;
-                Ok::<StartCallResponse, harmony_api::HarmonyError>(response.into())
-            })
-            .map_err(Into::into)
+        let response: StartCallResponse = self
+            .inner
+            .start_call(&channel_id, preferred_region.map(Into::into))
+            .await?
+            .into();
+        Ok(response)
     }
 
-    pub fn create_call_token(
+    pub async fn create_call_token(
         &self,
         channel_id: String,
         initial_muted: bool,
         initial_deafened: bool,
     ) -> HarmonyResult<CreateCallTokenResponse> {
-        let inner = self.inner.clone();
-        self.runtime
-            .block_on(async move {
-                let response = inner
-                    .create_call_token(&channel_id, initial_muted, initial_deafened)
-                    .await?;
-                Ok::<CreateCallTokenResponse, harmony_api::HarmonyError>(response.into())
-            })
-            .map_err(Into::into)
+        let response = self
+            .inner
+            .create_call_token(&channel_id, initial_muted, initial_deafened)
+            .await?
+            .into();
+        Ok(response)
     }
 
-    pub fn end_call(&self, channel_id: String) -> HarmonyResult<()> {
-        let inner = self.inner.clone();
-        self.runtime
-            .block_on(async move {
-                inner.end_call(&channel_id).await?;
-                Ok::<(), harmony_api::HarmonyError>(())
-            })
-            .map_err(Into::into)
+    pub async fn end_call(&self, channel_id: String) -> HarmonyResult<()> {
+        self.inner.end_call(&channel_id).await?;
+        Ok(())
     }
 
-    pub fn update_voice_state(
+    pub async fn update_voice_state(
         &self,
         channel_id: String,
         muted: Option<bool>,
         deafened: Option<bool>,
     ) -> HarmonyResult<UpdateVoiceStateResponse> {
-        let inner = self.inner.clone();
-        self.runtime
-            .block_on(async move {
-                let response = inner
-                    .update_voice_state(&channel_id, muted, deafened)
-                    .await?;
-                Ok::<UpdateVoiceStateResponse, harmony_api::HarmonyError>(response.into())
-            })
-            .map_err(Into::into)
+        let response = self
+            .inner
+            .update_voice_state(&channel_id, muted, deafened)
+            .await?
+            .into();
+        Ok(response)
     }
 
-    pub fn get_call_members(&self, channel_id: String) -> HarmonyResult<Vec<CallMember>> {
-        let inner = self.inner.clone();
-        self.runtime
-            .block_on(async move {
-                let members = inner.get_call_members(&channel_id).await?;
-                Ok::<Vec<CallMember>, harmony_api::HarmonyError>(
-                    members.into_iter().map(Into::into).collect(),
-                )
-            })
-            .map_err(Into::into)
+    pub async fn get_call_members(&self, channel_id: String) -> HarmonyResult<Vec<CallMember>> {
+        let members: Vec<CallMember> = self
+            .inner
+            .get_call_members(&channel_id)
+            .await?
+            .into_iter()
+            .map(Into::into)
+            .collect();
+        Ok(members)
     }
 
     pub fn is_connected(&self) -> bool {
-        let inner = self.inner.clone();
-        self.runtime
-            .block_on(async move { inner.is_connected().await })
+        self.inner.is_connected()
     }
 
     pub fn is_reconnecting(&self) -> bool {
-        let inner = self.inner.clone();
-        self.runtime
-            .block_on(async move { inner.is_reconnecting().await })
+        self.inner.is_reconnecting()
     }
 
     pub fn reconnect_attempts(&self) -> u32 {
-        let inner = self.inner.clone();
-        self.runtime
-            .block_on(async move { inner.reconnect_attempts().await })
-    }
-
-    pub fn reconnect(&self) -> HarmonyResult<()> {
-        let inner = self.inner.clone();
-        self.runtime
-            .block_on(async move {
-                inner.reconnect().await?;
-                Ok::<(), harmony_api::HarmonyError>(())
-            })
-            .map_err(Into::into)
+        self.inner.reconnect_attempts()
     }
 
     pub fn disconnect(&self) -> HarmonyResult<()> {
-        let inner = self.inner.clone();
-        self.runtime
-            .block_on(async move {
-                inner.disconnect().await?;
-                Ok::<(), harmony_api::HarmonyError>(())
-            })
-            .map_err(Into::into)
+        Ok(self.inner.disconnect()?)
     }
 }

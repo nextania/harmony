@@ -406,6 +406,145 @@ impl From<harmony_api::CallMember> for CallMember {
     }
 }
 
+#[derive(Clone, Debug, uniffi::Enum)]
+pub enum Event {
+    NewMessage {
+        message: Message,
+        channel_id: String,
+    },
+    MessageEdited {
+        message: Message,
+        channel_id: String,
+    },
+    MessageDeleted {
+        message_id: String,
+        channel_id: String,
+    },
+    RemoveContact {
+        user_id: String,
+    },
+    AddContact {
+        user_id: String,
+    },
+    ChannelUpdated {
+        channel: Channel,
+    },
+    ChannelDeleted {
+        channel_id: String,
+    },
+    MemberJoined {
+        channel_id: String,
+        user_id: String,
+    },
+    MemberLeft {
+        channel_id: String,
+        user_id: String,
+    },
+    Connected,
+    Disconnected,
+    Reconnecting {
+        attempt: u32,
+        max_attempts: u32,
+    },
+    Reconnected,
+    ReconnectionFailed {
+        attempts: u32,
+    },
+    UserJoinedCall {
+        call_id: String,
+        user_id: String,
+        session_id: String,
+        muted: bool,
+        deafened: bool,
+    },
+    UserLeftCall {
+        call_id: String,
+        session_id: String,
+    },
+    UserVoiceStateChanged {
+        call_id: String,
+        session_id: String,
+        muted: bool,
+        deafened: bool,
+    },
+}
+
+impl From<harmony_api::Event> for Event {
+    fn from(event: harmony_api::Event) -> Self {
+        match event {
+            harmony_api::Event::NewMessage(e) => Event::NewMessage {
+                message: e.message.into(),
+                channel_id: e.channel_id,
+            },
+            harmony_api::Event::MessageEdited(e) => Event::MessageEdited {
+                message: e.message.into(),
+                channel_id: e.channel_id,
+            },
+            harmony_api::Event::MessageDeleted(e) => Event::MessageDeleted {
+                message_id: e.message_id,
+                channel_id: e.channel_id,
+            },
+            harmony_api::Event::RemoveContact(id) => Event::RemoveContact { user_id: id },
+            harmony_api::Event::AddContact(id) => Event::AddContact { user_id: id },
+            harmony_api::Event::ChannelUpdated(e) => Event::ChannelUpdated {
+                channel: e.channel.into(),
+            },
+            harmony_api::Event::ChannelDeleted(e) => Event::ChannelDeleted {
+                channel_id: e.channel_id,
+            },
+            harmony_api::Event::MemberJoined(e) => Event::MemberJoined {
+                channel_id: e.channel_id,
+                user_id: e.user_id,
+            },
+            harmony_api::Event::MemberLeft(e) => Event::MemberLeft {
+                channel_id: e.channel_id,
+                user_id: e.user_id,
+            },
+            harmony_api::Event::Connected => Event::Connected,
+            harmony_api::Event::Disconnected => Event::Disconnected,
+            harmony_api::Event::Reconnecting {
+                attempt,
+                max_attempts,
+            } => Event::Reconnecting {
+                attempt,
+                max_attempts,
+            },
+            harmony_api::Event::Reconnected => Event::Reconnected,
+            harmony_api::Event::ReconnectionFailed { attempts } => {
+                Event::ReconnectionFailed { attempts }
+            }
+            harmony_api::Event::UserJoinedCall {
+                call_id,
+                user_id,
+                session_id,
+                muted,
+                deafened,
+            } => Event::UserJoinedCall {
+                call_id,
+                user_id,
+                session_id,
+                muted,
+                deafened,
+            },
+            harmony_api::Event::UserLeftCall { call_id, session_id } => Event::UserLeftCall {
+                call_id,
+                session_id,
+            },
+            harmony_api::Event::UserVoiceStateChanged {
+                call_id,
+                session_id,
+                muted,
+                deafened,
+            } => Event::UserVoiceStateChanged {
+                call_id,
+                session_id,
+                muted,
+                deafened,
+            },
+        }
+    }
+}
+
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct ClientOptions {
     pub server_url: String,

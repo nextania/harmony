@@ -15,9 +15,10 @@ use harmony_types::messages::{
 };
 use harmony_types::users::{
     AddContactMethod, AddContactResponse, AddContactUsernameMethod, AddContactUsernameResponse,
-    ContactExtended, CurrentUserResponse, GetContactsMethod, GetContactsResponse,
-    GetCurrentUserMethod, GetUserMethod, GetUserResponse, RemoveContactMethod,
-    RemoveContactResponse, SetKeyPackageMethod, SetKeyPackageResponse,
+    BlockContactMethod, BlockContactResponse, ContactExtended, CurrentUserResponse,
+    GetContactsMethod, GetContactsResponse, GetCurrentUserMethod, GetUserMethod, GetUserResponse,
+    RemoveContactMethod, RemoveContactResponse, SetKeyPackageMethod, SetKeyPackageResponse,
+    UnblockContactMethod, UnblockContactResponse,
 };
 use harmony_types::voice::{
     CreateCallTokenMethod, CreateCallTokenResponse, EndCallMethod, EndCallResponse,
@@ -454,5 +455,33 @@ impl HarmonyClient {
             .await?;
 
         Ok(response.contacts)
+    }
+
+    /// Block a user by ID
+    pub async fn block_contact(&self, user_id: &str) -> Result<()> {
+        let _: BlockContactResponse = self
+            .send_request(
+                "BLOCK_CONTACT",
+                BlockContactMethod {
+                    id: user_id.to_string(),
+                },
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    /// Unblock a previously blocked user by ID
+    pub async fn unblock_contact(&self, user_id: &str) -> Result<ContactExtended> {
+        let response: UnblockContactResponse = self
+            .send_request(
+                "UNBLOCK_CONTACT",
+                UnblockContactMethod {
+                    id: user_id.to_string(),
+                },
+            )
+            .await?;
+
+        Ok(response.contact)
     }
 }

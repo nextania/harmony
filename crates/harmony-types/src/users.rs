@@ -123,3 +123,24 @@ pub struct GetContactsMethod {}
 pub struct GetContactsResponse {
     pub contacts: Vec<ContactExtended>,
 }
+// FIXME: implement these methods on server
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockContactMethod {
+    pub id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct BlockContactResponse {}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnblockContactMethod {
+    pub id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnblockContactResponse {
+    pub contact: ContactExtended,
+}

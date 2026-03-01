@@ -23,14 +23,18 @@ use uuid::Uuid;
 
 use crate::{
     errors::Error,
+    rate_limit::RateLimiter,
     utilities::{HEARTBEAT_TIMEOUT, generate_id},
 };
+
+const MAX_PRE_AUTH_MESSAGES: usize = 5;
 
 #[derive(Clone, Debug)]
 pub struct RpcClient {
     id: String,
     socket: UnboundedSender<Message>,
     user: Option<Arc<Box<dyn Any + Send + Sync>>>,
+    user_id: Option<String>,
     heartbeat_tx: UnboundedSender<()>,
 }
 
@@ -48,6 +52,10 @@ impl RpcClient {
 
     pub fn unique_id(&self) -> &str {
         &self.id
+    }
+
+    pub fn user_id(&self) -> Option<&str> {
+        self.user_id.as_deref()
     }
 
     pub fn emit<T: Serialize + Send + Clone + 'static>(&self, data: T) {
@@ -117,7 +125,7 @@ impl<T: for<'a> Deserialize<'a>> RpcRequest for RpcValue<T> {
 
 pub type AuthenticateFn = Box<dyn CloneableAuthenticateFn>;
 pub trait CloneableAuthenticateFn:
-    Fn(String) -> BoxFuture<'static, Result<Box<dyn Any + Send + Sync>, Error>> + Send + Sync
+    Fn(String) -> BoxFuture<'static, Result<(String, Box<dyn Any + Send + Sync>), Error>> + Send + Sync
 {
     fn clone_box<'a>(&self) -> Box<dyn 'a + CloneableAuthenticateFn>
     where
@@ -125,7 +133,7 @@ pub trait CloneableAuthenticateFn:
 }
 impl<F> CloneableAuthenticateFn for F
 where
-    F: Fn(String) -> BoxFuture<'static, Result<Box<dyn Any + Send + Sync>, Error>>
+    F: Fn(String) -> BoxFuture<'static, Result<(String, Box<dyn Any + Send + Sync>), Error>>
         + Clone
         + Send
         + Sync,
@@ -229,12 +237,17 @@ impl RpcState {
     pub fn is_authenticated(&self) -> bool {
         self.client().user.is_some()
     }
+
+    pub fn user_id(&self) -> Option<String> {
+        self.clients.0.get(&self.id).and_then(|c| c.user_id.clone())
+    }
 }
 
 pub struct RpcServer {
     clients: RpcClients,
     authenticate: AuthenticateFn,
     methods: Arc<DashMap<String, Box<dyn MethodFn>>>,
+    rate_limiter: Option<Arc<dyn RateLimiter>>,
 }
 
 impl RpcServer {
@@ -243,7 +256,13 @@ impl RpcServer {
             clients: RpcClients(Arc::new(DashMap::new())),
             authenticate,
             methods: Arc::new(DashMap::new()),
+            rate_limiter: None,
         }
+    }
+
+    pub fn rate_limiter(mut self, limiter: impl RateLimiter + 'static) -> Self {
+        self.rate_limiter = Some(Arc::new(limiter));
+        self
     }
 
     pub fn clients(&self) -> RpcClients {
@@ -281,7 +300,10 @@ impl RpcServer {
             let clients = self.clients.clone();
             let fnc = self.authenticate.clone();
             let methods = self.methods.clone();
-            task::spawn(async move { start_client(stream, clients, fnc, methods).await });
+            let rate_limiter = self.rate_limiter.clone();
+            task::spawn(
+                async move { start_client(stream, clients, fnc, methods, rate_limiter).await },
+            );
         }
     }
 }
@@ -325,6 +347,7 @@ async fn start_client(
     clients: RpcClients,
     authenticate: AuthenticateFn,
     methods: Arc<DashMap<String, Box<dyn MethodFn>>>,
+    rate_limiter: Option<Arc<dyn RateLimiter>>,
 ) {
     println!("Socket connected: {}", connection.peer_addr().unwrap());
     let ws_stream = accept_async(TokioAdapter::new(connection)).await;
@@ -366,23 +389,49 @@ async fn start_client(
         id: id.clone(),
         socket: s,
         user: None,
+        user_id: None,
         heartbeat_tx: tx,
     };
     clients.0.insert(id.clone(), client);
+
+    let mut is_authenticated = false;
+    let mut pre_auth_count: usize = 0;
+
     while let Some(data) = read.next().await {
         let Ok(data) = data else {
             break;
         };
         match data {
             Message::Binary(bin) => {
+                // flood protection - drop if too many messages are sent before successful authentication
+                if !is_authenticated {
+                    pre_auth_count += 1;
+                    if pre_auth_count > MAX_PRE_AUTH_MESSAGES {
+                        debug!(
+                            "Pre-auth message limit exceeded, dropping connection {}",
+                            id
+                        );
+                        if let Some((_, mut client)) = clients.0.remove(&id) {
+                            client.socket.close().await.ok();
+                        }
+                        break;
+                    }
+                }
+
                 let response = handle_packet(
                     bin.to_vec(),
                     &clients,
                     &id,
                     authenticate.clone(),
                     methods.clone(),
+                    &rate_limiter,
                 )
                 .await;
+
+                if matches!(&response, RpcMessageS2C::Identify {}) {
+                    is_authenticated = true;
+                }
+
                 let serialized = serialize(&response).expect("Failed to serialize");
                 debug!("Sent: {:?}", response);
                 let mut client = clients.0.get_mut(&id.clone()).unwrap();
@@ -407,6 +456,7 @@ pub async fn handle_packet(
     user_id: &String,
     authenticate: AuthenticateFn,
     methods: Arc<DashMap<String, Box<dyn MethodFn>>>,
+    rate_limiter: &Option<Arc<dyn RateLimiter>>,
 ) -> RpcMessageS2C {
     let result = deserialize::<RpcMessageC2S>(bin.as_slice());
     if let Ok(r) = result {
@@ -414,9 +464,10 @@ pub async fn handle_packet(
         match r {
             RpcMessageC2S::Identify { token } => authenticate(token.clone())
                 .await
-                .map(|user| {
+                .map(|(uid, user)| {
                     let mut client = clients.0.get_mut(user_id).unwrap();
                     client.user = Some(Arc::new(user));
+                    client.user_id = Some(uid);
                     RpcMessageS2C::Identify {}
                 })
                 .unwrap_or_else(|e| RpcMessageS2C::Error { error: e }),
@@ -432,6 +483,19 @@ pub async fn handle_packet(
                         error: Error::InvalidRequestId,
                     };
                 }
+
+                if let Some(rl) = rate_limiter {
+                    let client_user_id = clients.0.get(user_id).and_then(|c| c.user_id.clone());
+                    if let Some(uid) = client_user_id {
+                        if !rl.check_rate_limit(&uid, &method).await {
+                            return RpcMessageS2C::Message {
+                                id,
+                                data: to_value(&Error::RateLimited).expect("Failed to serialize"),
+                            };
+                        }
+                    }
+                }
+
                 let method = methods.get(&method);
                 let Some(method) = method else {
                     return RpcMessageS2C::Error {

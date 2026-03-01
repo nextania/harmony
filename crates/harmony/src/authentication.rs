@@ -16,7 +16,9 @@ use crate::{
 // Important: This only accepts a token and will not sign a token.
 // The token is to be obtained from a separate login server
 // (e.g. AS)
-pub async fn authenticate(token: String) -> rapid::errors::Result<Box<dyn Any + Send + Sync>> {
+pub async fn authenticate(
+    token: String,
+) -> rapid::errors::Result<(String, Box<dyn Any + Send + Sync>)> {
     // println!("Public key: {:?}", self.public_key);
     println!("Token: {:?}", token);
     // let as_user = validate_token(&token).await?;
@@ -28,7 +30,7 @@ pub async fn authenticate(token: String) -> rapid::errors::Result<Box<dyn Any + 
     } else {
         user.map_err(|_| rapid::errors::Error::InternalError)?
     };
-    Ok(Box::new(user))
+    Ok((user.id.clone(), Box::new(user)))
 }
 static CLIENT: Lazy<reqwest::Client> = Lazy::new(reqwest::Client::new);
 

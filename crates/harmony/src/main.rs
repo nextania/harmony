@@ -8,6 +8,7 @@ use once_cell::sync::OnceCell;
 use rapid::socket::RpcClients;
 use rapid::socket::RpcServer;
 use services::database;
+use services::rate_limiter::RedisRateLimiter;
 use services::redis;
 use services::voice;
 
@@ -43,6 +44,7 @@ async fn main() {
     let listen_address = LISTEN_ADDRESS.to_owned();
     info!("Starting server at {listen_address}");
     let server = RpcServer::new(Box::new(|token| Box::pin(authenticate(token))))
+        .rate_limiter(RedisRateLimiter)
         // Channels
         .register("GET_CHANNEL", methods::channels::get_channel)
         .register("GET_CHANNELS", methods::channels::get_channels)

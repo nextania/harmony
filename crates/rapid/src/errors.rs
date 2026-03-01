@@ -18,6 +18,9 @@ pub enum Error {
     InvalidToken,
     NotAuthenticated,
     SerializeError,
+
+    // Rate limiting
+    RateLimited,
 }
 
 impl fmt::Display for Error {
@@ -31,6 +34,7 @@ impl fmt::Display for Error {
             Error::InvalidToken => write!(f, "Invalid token"),
             Error::NotAuthenticated => write!(f, "Not authenticated"),
             Error::SerializeError => write!(f, "Serialize error"),
+            Error::RateLimited => write!(f, "Rate limited"),
         }
     }
 }

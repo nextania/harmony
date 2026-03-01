@@ -308,7 +308,7 @@ impl RpcServer {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum RpcMessageC2S {
     #[serde(rename_all = "camelCase")]
@@ -323,7 +323,7 @@ pub enum RpcMessageC2S {
     },
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE", tag = "type")]
 pub enum RpcMessageS2C {
     #[serde(rename_all = "camelCase")]

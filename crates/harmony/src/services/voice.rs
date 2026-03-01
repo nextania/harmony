@@ -208,11 +208,11 @@ pub fn spawn_voice_events() {
 
     // move expired calls to database
     task::spawn(async move {
+        let mut redis = get_connection().await;
         loop {
-            let mut redis = get_connection().await;
             let time = chrono::Utc::now().timestamp_millis() - 30000;
             let expired_calls: Vec<(String, i64)> = redis
-                .zpopmin("voice:empty-calls", 1)
+                .bzpopmin("voice:empty-calls", 1.0)
                 .await
                 .unwrap_or_default();
             let call_id = expired_calls.first();

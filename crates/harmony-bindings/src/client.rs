@@ -24,7 +24,9 @@ impl HarmonyClient {
     }
 
     pub async fn next_event(&self) -> HarmonyResult<Event> {
-        let event = self.recv.lock()
+        let event = self
+            .recv
+            .lock()
             .await
             .recv()
             .await

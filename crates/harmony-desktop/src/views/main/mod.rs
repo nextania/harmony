@@ -1,11 +1,13 @@
 use std::{collections::HashMap, num::NonZero, sync::Arc, time::UNIX_EPOCH};
 
+use async_stream::stream;
 use harmony_api::Event;
 use iced::{
     Element, Length, Task,
     widget::{Space, button, column, container, row, text},
 };
 use lru::LruCache;
+use pulse_api::{PulseClient, PulseClientOptions, PulseEvent};
 use ulid::Ulid;
 
 use crate::{
@@ -17,7 +19,9 @@ use crate::{
     errors::RenderableError,
     icons::{FLUENT_ICONS, Icon},
     theme::{BG_APP, DM_SANS, TEXT_MUTED},
-    views::main::{chat_area::chat_area, chat_list::chat_list, people_list::people_list, sidebar::sidebar},
+    views::main::{
+        chat_area::chat_area, chat_list::chat_list, people_list::people_list, sidebar::sidebar,
+    },
 };
 
 pub mod chat_area;
@@ -45,7 +49,7 @@ pub enum ChatMode {
     Voice,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum MainMessage {
     TabSelected(SidebarTab),
     ChatModeSelected(ChatMode),
@@ -66,6 +70,9 @@ pub enum MainMessage {
     ToggleCamera,
     ToggleScreenShare,
     CallStateLoaded(Option<CallState>),
+    PulseConnected(Arc<PulseClient>),
+    PulseDisconnected,
+    PulseEvent(PulseEvent),
     ToggleChatList,
     ToggleAvatarMenu,
     AvatarMenuDismiss,
@@ -107,6 +114,7 @@ pub struct MainView {
     pub avatar_menu_open: bool,
     pub current_call: Option<String>,
     pub current_call_state: Option<CallState>,
+    pub pulse_client: Option<Arc<PulseClient>>,
 
     pub current_conversation_messages: Vec<ChatMessage>,
 
@@ -141,6 +149,7 @@ impl MainView {
             avatar_menu_open: false,
             current_call: None,
             current_call_state: None,
+            pulse_client: None,
             current_conversation_messages: Vec::new(),
             emoji_picker_open: false,
             emoji_picker_category: emojis::Group::SmileysAndEmotion,
@@ -158,13 +167,12 @@ impl MainView {
                 self.active_tab = tab;
                 if matches!(self.active_tab, SidebarTab::People) && !self.contacts_loaded {
                     let client = self.api.clone();
-                    return Task::perform(
-                        async move { client.get_contacts().await },
-                        |result| match result {
+                    return Task::perform(async move { client.get_contacts().await }, |result| {
+                        match result {
                             Ok(contacts) => Message::Main(MainMessage::ContactsLoaded(contacts)),
                             Err(e) => Message::Main(MainMessage::ApiError(e)),
-                        },
-                    );
+                        }
+                    });
                 }
             }
             MainMessage::ChatModeSelected(mode) => {
@@ -276,13 +284,10 @@ impl MainView {
                                                 chrono::Utc::now().timestamp_millis()
                                             }),
                                         content: match api_msg.content {
-                                            ApiMessageContent::Text(t) => {
-                                                MessageContent::Text(t)
+                                            ApiMessageContent::Text(t) => MessageContent::Text(t),
+                                            ApiMessageContent::CallCard { channel, duration } => {
+                                                MessageContent::CallCard { channel, duration }
                                             }
-                                            ApiMessageContent::CallCard {
-                                                channel,
-                                                duration,
-                                            } => MessageContent::CallCard { channel, duration },
                                         },
                                     };
                                     Message::Main(MainMessage::MessageSent(chat_msg))
@@ -307,11 +312,7 @@ impl MainView {
                     let channel_id = conv_id.clone();
                     let mid = message_id.clone();
                     return Task::perform(
-                        async move {
-                            client
-                                .edit_message(mid, channel_id, new_content)
-                                .await
-                        },
+                        async move { client.edit_message(mid, channel_id, new_content).await },
                         move |result| match result {
                             Ok(api_msg) => {
                                 let chat_msg = ChatMessage {
@@ -324,20 +325,15 @@ impl MainView {
                                                 .as_millis()
                                                 as i64
                                         })
-                                        .unwrap_or_else(|_| {
-                                            chrono::Utc::now().timestamp_millis()
-                                        }),
+                                        .unwrap_or_else(|_| chrono::Utc::now().timestamp_millis()),
                                     content: match api_msg.content {
                                         ApiMessageContent::Text(t) => MessageContent::Text(t),
-                                        ApiMessageContent::CallCard {
-                                            channel,
-                                            duration,
-                                        } => MessageContent::CallCard { channel, duration },
+                                        ApiMessageContent::CallCard { channel, duration } => {
+                                            MessageContent::CallCard { channel, duration }
+                                        }
                                     },
                                 };
-                                Message::Main(MainMessage::MessageEdited(
-                                    message_id, chat_msg,
-                                ))
+                                Message::Main(MainMessage::MessageEdited(message_id, chat_msg))
                             }
                             Err(e) => Message::Main(MainMessage::ApiError(e)),
                         },
@@ -355,9 +351,7 @@ impl MainView {
                     return Task::perform(
                         async move { client.delete_message(mid).await },
                         move |result| match result {
-                            Ok(()) => {
-                                Message::Main(MainMessage::MessageDeleted(message_id, cid))
-                            }
+                            Ok(()) => Message::Main(MainMessage::MessageDeleted(message_id, cid)),
                             Err(e) => Message::Main(MainMessage::ApiError(e)),
                         },
                     );
@@ -369,40 +363,97 @@ impl MainView {
             MainMessage::ServerEvent(event) => {
                 return self.handle_server_event(event);
             }
-            // TODO: implement this
             MainMessage::JoinCall => {
-                if let Some(ref mut call) = self.current_call_state {
-                    let already_in = call
-                        .participants
-                        .iter()
-                        .any(|p| p.profile.id == self.current_user.profile.id);
-                    if !already_in {
-                        call.participants.push(CallParticipant {
-                            profile: self.current_user.profile.clone(),
-                            tracks: CallTrackState {
-                                audio: true,
-                                video: false,
-                                screen: false,
+                if let Some(conv_id) = self.current_conversation.clone() {
+                    let client = self.api.clone();
+                    return Task::stream(stream! {
+                        let token_info = match client.create_call_token(conv_id.clone()).await {
+                            Ok(info) => info,
+                            Err(e) => {
+                                yield Message::Main(MainMessage::ApiError(e));
+                                return;
+                            }
+                        };
+                        let (pulse_client, mut event_rx) = match PulseClient::connect(
+                            PulseClientOptions {
+                                server_url: token_info.server_address,
+                                session_id: token_info.session_id,
+                                session_token: token_info.token,
+                                call_id: token_info.call_id,
                             },
-                        });
-                    }
-                    self.current_call = self.current_conversation.clone();
+                        )
+                        .await
+                        {
+                            Ok(result) => result,
+                            Err(e) => {
+                                yield Message::Main(MainMessage::ApiError(
+                                    RenderableError::UnknownError(format!(
+                                        "Failed to connect to voice server: {e}"
+                                    )),
+                                ));
+                                return;
+                            }
+                        };
+                        yield Message::Main(MainMessage::PulseConnected(Arc::new(pulse_client)));
+                        let call_state = client.get_call(conv_id).await.ok().flatten();
+                        yield Message::Main(MainMessage::CallStateLoaded(call_state));
+                        while let Some(event) = event_rx.recv().await {
+                            yield Message::Main(MainMessage::PulseEvent(event));
+                        }
+                        yield Message::Main(MainMessage::PulseDisconnected);
+                    });
                 }
             }
             MainMessage::StartCall => {
-                self.current_call_state = Some(CallState {
-                    participants: vec![CallParticipant {
-                        profile: self.current_user.profile.clone(),
-                        tracks: CallTrackState {
-                            audio: true,
-                            video: false,
-                            screen: false,
-                        },
-                    }],
-                });
-                self.current_call = self.current_conversation.clone();
+                if let Some(conv_id) = self.current_conversation.clone() {
+                    let client = self.api.clone();
+                    return Task::stream(stream! {
+                        if let Err(e) = client.start_call(conv_id.clone()).await {
+                            yield Message::Main(MainMessage::ApiError(e));
+                            return;
+                        }
+                        let token_info = match client.create_call_token(conv_id.clone()).await {
+                            Ok(info) => info,
+                            Err(e) => {
+                                yield Message::Main(MainMessage::ApiError(e));
+                                return;
+                            }
+                        };
+                        let (pulse_client, mut event_rx) = match PulseClient::connect(
+                            PulseClientOptions {
+                                server_url: token_info.server_address,
+                                session_id: token_info.session_id,
+                                session_token: token_info.token,
+                                call_id: token_info.call_id,
+                            },
+                        )
+                        .await
+                        {
+                            Ok(result) => result,
+                            Err(e) => {
+                                yield Message::Main(MainMessage::ApiError(
+                                    RenderableError::UnknownError(format!(
+                                        "Failed to connect to voice server: {e}"
+                                    )),
+                                ));
+                                return;
+                            }
+                        };
+                        yield Message::Main(MainMessage::PulseConnected(Arc::new(pulse_client)));
+                        let call_state = client.get_call(conv_id).await.ok().flatten();
+                        yield Message::Main(MainMessage::CallStateLoaded(call_state));
+                        while let Some(event) = event_rx.recv().await {
+                            yield Message::Main(MainMessage::PulseEvent(event));
+                        }
+                        yield Message::Main(MainMessage::PulseDisconnected);
+                    });
+                }
             }
             MainMessage::LeaveCall => {
+                if let Some(ref pulse) = self.pulse_client {
+                    pulse.disconnect();
+                }
+                self.pulse_client = None;
                 if let Some(ref mut call) = self.current_call_state {
                     call.participants
                         .retain(|p| p.profile.id != self.current_user.profile.id);
@@ -419,7 +470,37 @@ impl MainView {
                         .iter_mut()
                         .find(|p| p.profile.id == self.current_user.profile.id)
                     {
-                        p.tracks.audio = !p.tracks.audio;
+                        let new_audio = !p.tracks.audio;
+                        p.tracks.audio = new_audio;
+                        if let Some(conv_id) = self.current_conversation.clone() {
+                            let client = self.api.clone();
+                            let pulse = self.pulse_client.clone();
+                            let muted = !new_audio;
+                            return Task::perform(
+                                async move {
+                                    client
+                                        .update_voice_state(conv_id, Some(muted), None)
+                                        .await?;
+                                    if let Some(pulse) = pulse {
+                                        if new_audio {
+                                            let _ = pulse
+                                                .produce_track(
+                                                    "audio".to_string(),
+                                                    pulse_api::MediaHint::Audio,
+                                                )
+                                                .await;
+                                        } else {
+                                            let _ = pulse.stop_producing("audio".to_string()).await;
+                                        }
+                                    }
+                                    Ok::<(), RenderableError>(())
+                                },
+                                |result| match result {
+                                    Ok(()) => Message::Main(MainMessage::DismissError),
+                                    Err(e) => Message::Main(MainMessage::ApiError(e)),
+                                },
+                            );
+                        }
                     }
                 }
             }
@@ -430,7 +511,32 @@ impl MainView {
                         .iter_mut()
                         .find(|p| p.profile.id == self.current_user.profile.id)
                     {
-                        p.tracks.video = !p.tracks.video;
+                        let new_video = !p.tracks.video;
+                        p.tracks.video = new_video;
+                        if let Some(pulse) = self.pulse_client.clone() {
+                            return Task::perform(
+                                async move {
+                                    if new_video {
+                                        pulse
+                                            .produce_track(
+                                                "video".to_string(),
+                                                pulse_api::MediaHint::Video,
+                                            )
+                                            .await
+                                    } else {
+                                        pulse.stop_producing("video".to_string()).await
+                                    }
+                                },
+                                |result| match result {
+                                    Ok(()) => Message::Main(MainMessage::DismissError),
+                                    Err(e) => Message::Main(MainMessage::ApiError(
+                                        RenderableError::UnknownError(format!(
+                                            "Video track error: {e}"
+                                        )),
+                                    )),
+                                },
+                            );
+                        }
                     }
                 }
             }
@@ -441,12 +547,87 @@ impl MainView {
                         .iter_mut()
                         .find(|p| p.profile.id == self.current_user.profile.id)
                     {
-                        p.tracks.screen = !p.tracks.screen;
+                        let new_screen = !p.tracks.screen;
+                        p.tracks.screen = new_screen;
+                        if let Some(pulse) = self.pulse_client.clone() {
+                            return Task::perform(
+                                async move {
+                                    if new_screen {
+                                        pulse
+                                            .produce_track(
+                                                "screen".to_string(),
+                                                pulse_api::MediaHint::ScreenVideo,
+                                            )
+                                            .await
+                                    } else {
+                                        pulse.stop_producing("screen".to_string()).await
+                                    }
+                                },
+                                |result| match result {
+                                    Ok(()) => Message::Main(MainMessage::DismissError),
+                                    Err(e) => Message::Main(MainMessage::ApiError(
+                                        RenderableError::UnknownError(format!(
+                                            "Screen share error: {e}"
+                                        )),
+                                    )),
+                                },
+                            );
+                        }
                     }
                 }
             }
             MainMessage::CallStateLoaded(state) => {
                 self.current_call_state = state;
+            }
+            MainMessage::PulseConnected(pulse_client) => {
+                self.pulse_client = Some(pulse_client);
+                self.current_call = self.current_conversation.clone();
+            }
+            MainMessage::PulseDisconnected => {
+                self.pulse_client = None;
+                if self.current_call.is_some() {
+                    if let Some(ref mut call) = self.current_call_state {
+                        call.participants
+                            .retain(|p| p.profile.id != self.current_user.profile.id);
+                        if call.participants.is_empty() {
+                            self.current_call_state = None;
+                        }
+                    }
+                    self.current_call = None;
+                }
+            }
+            MainMessage::PulseEvent(event) => {
+                match event {
+                    PulseEvent::Disconnected { reconnect } => {
+                        if reconnect.is_none() {
+                            self.pulse_client = None;
+                            self.current_call = None;
+                        }
+                    }
+                    PulseEvent::TrackAvailable(track) => {
+                        if let Some(ref pulse) = self.pulse_client {
+                            let pulse = pulse.clone();
+                            return Task::perform(
+                                async move { pulse.consume_track(&track).await },
+                                |result| match result {
+                                    Ok(_rx) => {
+                                        // TODO: feed into media playback pipeline
+                                        Message::Main(MainMessage::DismissError)
+                                    }
+                                    Err(e) => Message::Main(MainMessage::ApiError(
+                                        RenderableError::UnknownError(format!(
+                                            "Failed to consume track: {e}"
+                                        )),
+                                    )),
+                                },
+                            );
+                        }
+                    }
+                    PulseEvent::TrackUnavailable(_id) => {
+                        // TODO: do something
+                    }
+                    _ => {}
+                }
             }
             MainMessage::ToggleEmojiPicker => self.emoji_picker_open = !self.emoji_picker_open,
             MainMessage::EmojiPickerDismiss => self.emoji_picker_open = false,
@@ -502,7 +683,11 @@ impl MainView {
                 }
             }
             MainMessage::ContactAdded(contact) => {
-                if !self.contacts.iter().any(|c| c.profile.id == contact.profile.id) {
+                if !self
+                    .contacts
+                    .iter()
+                    .any(|c| c.profile.id == contact.profile.id)
+                {
                     self.contacts.push(contact);
                 }
             }
@@ -532,7 +717,11 @@ impl MainView {
                 );
             }
             MainMessage::ContactAccepted(contact) => {
-                if let Some(c) = self.contacts.iter_mut().find(|c| c.profile.id == contact.profile.id) {
+                if let Some(c) = self
+                    .contacts
+                    .iter_mut()
+                    .find(|c| c.profile.id == contact.profile.id)
+                {
                     c.status = ContactStatus::Established;
                 }
             }
@@ -564,7 +753,11 @@ impl MainView {
                 );
             }
             MainMessage::ContactUnblocked(contact) => {
-                if let Some(c) = self.contacts.iter_mut().find(|c| c.profile.id == contact.profile.id) {
+                if let Some(c) = self
+                    .contacts
+                    .iter_mut()
+                    .find(|c| c.profile.id == contact.profile.id)
+                {
                     c.status = ContactStatus::Established;
                 }
             }
@@ -608,10 +801,10 @@ impl MainView {
                     self.current_conversation_messages.push(chat_msg);
                 }
             }
-            Event::MessageEdited(e) => {
-                // TODO: 
+            Event::MessageEdited(_e) => {
+                // TODO:
             }
-            Event::MessageDeleted(e) => {
+            Event::MessageDeleted(_e) => {
                 // TODO:
             }
             Event::ChannelUpdated(e) => {
@@ -631,17 +824,11 @@ impl MainView {
                         let profile = placeholder_profile(&other_id);
                         self.conversations.insert(
                             id.clone(),
-                            crate::api::Channel::Private {
-                                id,
-                                other: profile,
-                            },
+                            crate::api::Channel::Private { id, other: profile },
                         );
                     }
                     harmony_api::Channel::GroupChannel { members, .. } => {
-                        let profiles = members
-                            .iter()
-                            .map(|m| placeholder_profile(&m.id))
-                            .collect();
+                        let profiles = members.iter().map(|m| placeholder_profile(&m.id)).collect();
                         self.conversations.insert(
                             id.clone(),
                             crate::api::Channel::Group {
@@ -674,6 +861,72 @@ impl MainView {
             }
             Event::ReconnectionFailed { .. } => {
                 self.error = Some(RenderableError::NetworkError);
+            }
+            Event::UserJoinedCall {
+                call_id,
+                user_id,
+                session_id: _,
+                muted,
+                deafened: _,
+            } => {
+                // If the call is for the current conversation, update participants
+                if self.current_conversation.as_deref() == Some(&call_id) {
+                    let profile = placeholder_profile(&user_id);
+                    let participant = CallParticipant {
+                        profile,
+                        tracks: CallTrackState {
+                            audio: !muted,
+                            video: false,
+                            screen: false,
+                        },
+                    };
+                    if let Some(ref mut call) = self.current_call_state {
+                        if !call.participants.iter().any(|p| p.profile.id == user_id) {
+                            call.participants.push(participant);
+                        }
+                    } else {
+                        self.current_call_state = Some(CallState {
+                            participants: vec![participant],
+                        });
+                    }
+                }
+            }
+            Event::UserLeftCall {
+                call_id,
+                session_id: _,
+            } => {
+                if self.current_conversation.as_deref() == Some(&call_id) {
+                    if let Some(ref _call) = self.current_call_state {
+                        // TODO: don't reload everything
+                        let client = self.api.clone();
+                        let channel_id = call_id.clone();
+                        return Task::perform(
+                            async move { client.get_call(channel_id).await },
+                            |result| match result {
+                                Ok(state) => Message::Main(MainMessage::CallStateLoaded(state)),
+                                Err(e) => Message::Main(MainMessage::ApiError(e)),
+                            },
+                        );
+                    }
+                }
+            }
+            Event::UserVoiceStateChanged {
+                call_id,
+                session_id: _,
+                muted: _,
+                deafened: _,
+            } => {
+                if self.current_conversation.as_deref() == Some(&call_id) {
+                    let client = self.api.clone();
+                    let channel_id = call_id.clone();
+                    return Task::perform(
+                        async move { client.get_call(channel_id).await },
+                        |result| match result {
+                            Ok(state) => Message::Main(MainMessage::CallStateLoaded(state)),
+                            Err(e) => Message::Main(MainMessage::ApiError(e)),
+                        },
+                    );
+                }
             }
             _ => {}
         }

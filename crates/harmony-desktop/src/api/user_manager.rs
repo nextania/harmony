@@ -58,15 +58,9 @@ pub struct UserManager {
 }
 
 impl UserManager {
-    pub fn new(
-        http: Client,
-        base_url: impl Into<String>,
-        token: impl Into<String>,
-    ) -> Arc<Self> {
+    pub fn new(http: Client, base_url: impl Into<String>, token: impl Into<String>) -> Arc<Self> {
         Arc::new(Self {
-            cache: Mutex::new(LruCache::new(
-                NonZeroUsize::new(CACHE_CAPACITY).unwrap(),
-            )),
+            cache: Mutex::new(LruCache::new(NonZeroUsize::new(CACHE_CAPACITY).unwrap())),
             http,
             base_url: base_url.into(),
             token: token.into(),

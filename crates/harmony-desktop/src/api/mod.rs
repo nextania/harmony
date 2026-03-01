@@ -104,6 +104,14 @@ pub struct CallState {
     pub participants: Vec<CallParticipant>,
 }
 
+#[derive(Debug, Clone)]
+pub struct CallTokenInfo {
+    pub session_id: String,
+    pub token: String,
+    pub server_address: String,
+    pub call_id: String,
+}
+
 #[async_trait]
 pub trait ApiClient: Send + Sync {
     async fn get_current_user(&self) -> RenderableResult<CurrentUser>;
@@ -122,6 +130,14 @@ pub trait ApiClient: Send + Sync {
     ) -> RenderableResult<ApiMessage>;
     async fn delete_message(&self, message_id: String) -> RenderableResult<()>;
     async fn get_call(&self, channel_id: String) -> RenderableResult<Option<CallState>>;
+    async fn start_call(&self, channel_id: String) -> RenderableResult<()>;
+    async fn create_call_token(&self, channel_id: String) -> RenderableResult<CallTokenInfo>;
+    async fn update_voice_state(
+        &self,
+        channel_id: String,
+        muted: Option<bool>,
+        deafened: Option<bool>,
+    ) -> RenderableResult<()>;
     async fn get_contacts(&self) -> RenderableResult<Vec<Contact>>;
     async fn add_contact(&self, username: String) -> RenderableResult<Contact>;
     async fn remove_contact(&self, user_id: String) -> RenderableResult<()>;
@@ -131,10 +147,7 @@ pub trait ApiClient: Send + Sync {
     async fn get_user_profile(&self, user_id: String) -> RenderableResult<UserProfile> {
         Ok(placeholder_profile(&user_id))
     }
-    async fn get_user_profiles(
-        &self,
-        user_ids: Vec<String>,
-    ) -> RenderableResult<Vec<UserProfile>> {
+    async fn get_user_profiles(&self, user_ids: Vec<String>) -> RenderableResult<Vec<UserProfile>> {
         let mut profiles = Vec::with_capacity(user_ids.len());
         for id in &user_ids {
             profiles.push(self.get_user_profile(id.clone()).await?);

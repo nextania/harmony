@@ -31,6 +31,7 @@ pub struct PulseClientOptions {
 /// Provides async methods for producing/consuming tracks and sending media data.
 /// MLS group management (key exchange, commits, epoch transitions) is handled
 /// automatically in the background.
+#[derive(Clone)]
 pub struct PulseClient {
     command_tx: mpsc::UnboundedSender<ClientCommand>,
     pending_requests: Arc<DashMap<String, oneshot::Sender<()>>>,

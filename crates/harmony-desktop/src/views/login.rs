@@ -10,10 +10,16 @@ use iced::{
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::{
-    Message, api::{account, live::LiveApiClient}, errors::RenderableError, icons::{FLUENT_ICONS, Icon}, theme::{
+    Message,
+    api::{account, live::LiveApiClient},
+    errors::RenderableError,
+    icons::{FLUENT_ICONS, Icon},
+    theme::{
         ACCENT_PURPLE, BG_LOGIN_CARD, BG_LOGIN_INPUT, BORDER_CARD, DM_SANS, LINK_COLOR, LOGIN_BG,
         LOGO_SVG, SUBTLE_GREY, TEXT_MUTED, TEXT_WHITE,
-    }, views::main::MainMessage, widgets::button::ButtonExt
+    },
+    views::main::MainMessage,
+    widgets::button::ButtonExt,
 };
 
 use crate::api::{ApiClient, Channel, CurrentUser};
@@ -24,7 +30,7 @@ enum LoginFlow {
         Arc<dyn ApiClient>,
         CurrentUser,
         HashMap<String, Channel>,
-        UnboundedReceiver<Event>
+        UnboundedReceiver<Event>,
     ),
     NeedsMfa(account::LoginMfa),
 }
@@ -93,34 +99,32 @@ impl LoginView {
                 let password = self.password.clone();
                 let backend_account = self.backend_account.clone();
                 let backend_harmony = self.backend_harmony.clone();
-                return Task::stream(
-                    stream! {
-                        let result = async {
-                            match account::login(&backend_account, &email, &password).await? {
-                                account::LoginResult::Success(token) => {
-                                    let (client, stream) = LiveApiClient::connect(&backend_harmony, &token).await?;
-                                    let current_user = client.get_current_user().await?;
-                                    let conversations = client.get_conversations().await?
-                                        .into_iter().map(|c| (c.id(), c)).collect();
-                                    Ok::<_, RenderableError>(LoginFlow::Done(client, current_user, conversations, stream))
-                                }
-                                account::LoginResult::RequiresContinuation(mfa) => {
-                                    Ok::<_, RenderableError>(LoginFlow::NeedsMfa(mfa))
-                                }
+                return Task::stream(stream! {
+                    let result = async {
+                        match account::login(&backend_account, &email, &password).await? {
+                            account::LoginResult::Success(token) => {
+                                let (client, stream) = LiveApiClient::connect(&backend_harmony, &token).await?;
+                                let current_user = client.get_current_user().await?;
+                                let conversations = client.get_conversations().await?
+                                    .into_iter().map(|c| (c.id(), c)).collect();
+                                Ok::<_, RenderableError>(LoginFlow::Done(client, current_user, conversations, stream))
                             }
-                        }.await;
-                        match result {
-                            Ok(LoginFlow::Done(client, user, convs, mut stream)) => {
-                                yield Message::LoginFinished((client, user, convs));
-                                while let Some(event) = stream.recv().await {
-                                    yield Message::Main(MainMessage::ServerEvent(event));
-                                }
+                            account::LoginResult::RequiresContinuation(mfa) => {
+                                Ok::<_, RenderableError>(LoginFlow::NeedsMfa(mfa))
                             }
-                            Ok(LoginFlow::NeedsMfa(mfa)) => yield Message::OpenMfa(mfa),
-                            Err(e) => yield Message::Login(LoginMessage::Failed(e)),
                         }
+                    }.await;
+                    match result {
+                        Ok(LoginFlow::Done(client, user, convs, mut stream)) => {
+                            yield Message::LoginFinished((client, user, convs));
+                            while let Some(event) = stream.recv().await {
+                                yield Message::Main(MainMessage::ServerEvent(event));
+                            }
+                        }
+                        Ok(LoginFlow::NeedsMfa(mfa)) => yield Message::OpenMfa(mfa),
+                        Err(e) => yield Message::Login(LoginMessage::Failed(e)),
                     }
-                );
+                });
             }
             LoginMessage::Failed(e) => {
                 self.login_error = Some(e.to_string());

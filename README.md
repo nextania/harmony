@@ -11,6 +11,8 @@
 ## Description
 Harmony aims to provide secure, robust, and open source encrypted communication with high call quality. It is designed for individuals, communities, as well as organizations with a space and channel structure. In addition to providing a secure communication platform, developers may build upon the platform more easily than other platforms.
 
+A key goal of Harmony is to provide high quality video streaming with low latency, **without third-party SDKs** like LiveKit or Agora. Instead, we use our own in-house media relay, allowing for full control over the media pipeline and ensuring the best possible call quality is delivered.
+
 This repository includes the core server software as well as the desktop client, all built in Rust, making it easy to self-host using containers. You can also use the default instance. Enterprise customers will have the option to purchase support services and hosted instances. Authentication is meant to be used with the [Nextania account services](https://github.com/nextania/account). Single sign-on through OpenID Connect providers can be configured on self-hosted instances.
 
 The Harmony desktop client is included in this repository. Mobile clients will be developed in the future. Bindings are already included through UniFFI, so mobile clients can be developed natively in Kotlin and Swift. The desktop client is built using Iced, a native Rust UI framework. The client is designed to be lightweight and performant, with a focus on providing a seamless user experience.

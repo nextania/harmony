@@ -1,14 +1,16 @@
 use async_stream::stream;
 use iced::{
-    Border, Element, Font, Length, Padding, Task, Theme,
-    alignment, color,
+    Border, Element, Font, Length, Padding, Task, Theme, alignment, color,
     widget::{Space, button, column, container, text, text_input},
 };
 
 use crate::{
-    Message, api::live::LiveApiClient, errors::RenderableError, theme::{
-        ACCENT_PURPLE, BG_APP, BG_LOGIN_INPUT, DM_SANS, SUBTLE_GREY, TEXT_WHITE,
-    }, views::main::MainMessage, widgets::button::ButtonExt
+    Message,
+    api::live::LiveApiClient,
+    errors::RenderableError,
+    theme::{ACCENT_PURPLE, BG_APP, BG_LOGIN_INPUT, DM_SANS, SUBTLE_GREY, TEXT_WHITE},
+    views::main::MainMessage,
+    widgets::button::ButtonExt,
 };
 
 #[derive(Clone)]
@@ -45,26 +47,24 @@ impl TokenView {
                 }
                 let token = self.token.clone();
                 let backend_harmony = self.backend_harmony.clone();
-                return Task::stream(
-                    stream! {
-                        let result = async {
-                            let (client, stream) = LiveApiClient::connect(&backend_harmony, &token).await?;
-                            let current_user = client.get_current_user().await?;
-                            let conversations = client.get_conversations().await?
-                                .into_iter().map(|c| (c.id(), c)).collect();
-                            Ok::<_, RenderableError>((client, current_user, conversations, stream))
-                        }.await;
-                        match result {
-                            Ok((client, user, convs, mut stream)) => {
-                                yield Message::LoginFinished((client, user, convs));
-                                while let Some(event) = stream.recv().await {
-                                    yield Message::Main(MainMessage::ServerEvent(event));
-                                }
+                return Task::stream(stream! {
+                    let result = async {
+                        let (client, stream) = LiveApiClient::connect(&backend_harmony, &token).await?;
+                        let current_user = client.get_current_user().await?;
+                        let conversations = client.get_conversations().await?
+                            .into_iter().map(|c| (c.id(), c)).collect();
+                        Ok::<_, RenderableError>((client, current_user, conversations, stream))
+                    }.await;
+                    match result {
+                        Ok((client, user, convs, mut stream)) => {
+                            yield Message::LoginFinished((client, user, convs));
+                            while let Some(event) = stream.recv().await {
+                                yield Message::Main(MainMessage::ServerEvent(event));
                             }
-                            Err(e) => yield Message::Token(TokenMessage::Failed(e)),
                         }
+                        Err(e) => yield Message::Token(TokenMessage::Failed(e)),
                     }
-                );
+                });
             }
             TokenMessage::Failed(e) => {
                 self.error = Some(e.to_string());

@@ -1,6 +1,5 @@
 use iced::{
-    Border, Element, Length, Padding, Task, Theme,
-    alignment, color,
+    Border, Element, Length, Padding, Task, Theme, alignment, color,
     widget::{Space, button, column, container, row, text, text_input},
 };
 

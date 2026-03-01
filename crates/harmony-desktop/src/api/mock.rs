@@ -7,8 +7,8 @@ use ulid::Ulid;
 use crate::{
     MessageAuthor,
     api::{
-        ApiClient, ApiMessage, ApiMessageContent, CallParticipant, CallState, CallTrackState,
-        Channel, Contact, ContactStatus, CurrentUser, UserProfile, UserStatus,
+        ApiClient, ApiMessage, ApiMessageContent, CallParticipant, CallState, CallTokenInfo,
+        CallTrackState, Channel, Contact, ContactStatus, CurrentUser, UserProfile, UserStatus,
     },
     errors::{RenderableError, RenderableResult},
 };
@@ -235,6 +235,31 @@ impl ApiClient for MockApiClient {
             }),
             _ => None,
         })
+    }
+
+    async fn start_call(&self, _channel_id: String) -> RenderableResult<()> {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        Ok(())
+    }
+
+    async fn create_call_token(&self, _channel_id: String) -> RenderableResult<CallTokenInfo> {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        Ok(CallTokenInfo {
+            session_id: "mock-session".into(),
+            token: "mock-token".into(),
+            server_address: "https://localhost:4433".into(),
+            call_id: "mock-call-id".into(),
+        })
+    }
+
+    async fn update_voice_state(
+        &self,
+        _channel_id: String,
+        _muted: Option<bool>,
+        _deafened: Option<bool>,
+    ) -> RenderableResult<()> {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        Ok(())
     }
 
     async fn get_contacts(&self) -> RenderableResult<Vec<Contact>> {

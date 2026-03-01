@@ -89,7 +89,10 @@ pub struct HarmonyClient {
 }
 
 impl HarmonyClient {
-    pub async fn new_with_recv(options: ClientOptions, evt_tx: mpsc::UnboundedSender<Event>) -> Result<Self> {
+    pub async fn new_with_recv(
+        options: ClientOptions,
+        evt_tx: mpsc::UnboundedSender<Event>,
+    ) -> Result<Self> {
         let (ws_tx, ws_rx) = mpsc::unbounded_channel();
         let (auth_tx, auth_rx) = oneshot::channel();
 
@@ -233,7 +236,8 @@ impl HarmonyClient {
                             });
                         }
                         let (mut ws_tx, mut ws_rx) = stream.split();
-                        let mut next_heartbeat = tokio::time::Instant::now() + Duration::from_secs(10);
+                        let mut next_heartbeat =
+                            tokio::time::Instant::now() + Duration::from_secs(10);
                         loop {
                             tokio::select! {
                                 Some(msg) = receiver.recv() => {

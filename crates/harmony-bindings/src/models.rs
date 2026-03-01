@@ -526,7 +526,10 @@ impl From<harmony_api::Event> for Event {
                 muted,
                 deafened,
             },
-            harmony_api::Event::UserLeftCall { call_id, session_id } => Event::UserLeftCall {
+            harmony_api::Event::UserLeftCall {
+                call_id,
+                session_id,
+            } => Event::UserLeftCall {
                 call_id,
                 session_id,
             },

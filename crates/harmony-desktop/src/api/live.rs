@@ -8,10 +8,9 @@ use tokio::sync::{Mutex, mpsc};
 use crate::{
     MessageAuthor,
     api::{
-        ApiClient, ApiMessage, ApiMessageContent, CallParticipant, CallState, CallTrackState,
-        Channel, Contact, ContactStatus, CurrentUser, UserProfile, UserStatus, UserManager,
-        crypto::PersistentEncryption,
-        placeholder_profile,
+        ApiClient, ApiMessage, ApiMessageContent, CallParticipant, CallState, CallTokenInfo,
+        CallTrackState, Channel, Contact, ContactStatus, CurrentUser, UserManager, UserProfile,
+        UserStatus, crypto::PersistentEncryption, placeholder_profile,
     },
     errors::{RenderableError, RenderableResult},
 };
@@ -29,8 +28,7 @@ impl LiveApiClient {
         url: &str,
         token: &str,
     ) -> Result<(Arc<dyn ApiClient>, mpsc::UnboundedReceiver<Event>), RenderableError> {
-        let (client, recv) =
-            HarmonyClient::new(ClientOptions::new(url, token)).await?;
+        let (client, recv) = HarmonyClient::new(ClientOptions::new(url, token)).await?;
 
         let current = client.get_current_user().await?;
 
@@ -66,10 +64,7 @@ impl LiveApiClient {
         Ok((Arc::new(live), recv))
     }
 
-    async fn channel_peer_key(
-        &self,
-        channel: &harmony_api::Channel,
-    ) -> Option<[u8; 32]> {
+    async fn channel_peer_key(&self, channel: &harmony_api::Channel) -> Option<[u8; 32]> {
         match channel {
             harmony_api::Channel::PrivateChannel {
                 initiator_id,
@@ -184,9 +179,7 @@ impl ApiClient for LiveApiClient {
         let status = match resp.presence.status {
             harmony_api::Status::Online => UserStatus::Online,
             harmony_api::Status::Idle => UserStatus::Away,
-            harmony_api::Status::Busy | harmony_api::Status::BusyNotify => {
-                UserStatus::DoNotDisturb
-            }
+            harmony_api::Status::Busy | harmony_api::Status::BusyNotify => UserStatus::DoNotDisturb,
             harmony_api::Status::Offline => UserStatus::Offline,
         };
         Ok(CurrentUser {
@@ -223,8 +216,7 @@ impl ApiClient for LiveApiClient {
                     });
                 }
                 harmony_api::Channel::GroupChannel { id, members, .. } => {
-                    let member_ids: Vec<String> =
-                        members.iter().map(|m| m.id.clone()).collect();
+                    let member_ids: Vec<String> = members.iter().map(|m| m.id.clone()).collect();
                     let profiles = self
                         .users
                         .get_users(member_ids.clone())
@@ -333,6 +325,36 @@ impl ApiClient for LiveApiClient {
             })
             .collect();
         Ok(Some(CallState { participants }))
+    }
+
+    async fn start_call(&self, channel_id: String) -> RenderableResult<()> {
+        self.client.start_call(&channel_id, None).await?;
+        Ok(())
+    }
+
+    async fn create_call_token(&self, channel_id: String) -> RenderableResult<CallTokenInfo> {
+        let resp = self
+            .client
+            .create_call_token(&channel_id, false, false)
+            .await?;
+        Ok(CallTokenInfo {
+            session_id: resp.id,
+            token: resp.token,
+            server_address: resp.server_address,
+            call_id: resp.call_id,
+        })
+    }
+
+    async fn update_voice_state(
+        &self,
+        channel_id: String,
+        muted: Option<bool>,
+        deafened: Option<bool>,
+    ) -> RenderableResult<()> {
+        self.client
+            .update_voice_state(&channel_id, muted, deafened)
+            .await?;
+        Ok(())
     }
 
     async fn get_contacts(&self) -> RenderableResult<Vec<Contact>> {

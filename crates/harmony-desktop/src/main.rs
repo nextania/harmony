@@ -17,7 +17,8 @@ use std::{
 };
 
 use iced::{
-    Color, Element, Length, Task, Theme, widget::{container, mouse_area, stack, text}
+    Color, Element, Length, Task, Theme,
+    widget::{container, mouse_area, stack, text},
 };
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -69,11 +70,12 @@ mod platform {
 use iced::window;
 
 use crate::{
-    api::{ApiClient, Channel, CurrentUser, account}, views::{
+    api::{ApiClient, Channel, CurrentUser, account},
+    views::{
         login::{LoginMessage, LoginView},
         main::MainView,
         splash::{SplashMessage, SplashView},
-    }
+    },
 };
 use crate::{
     theme::TEXT_PRIMARY,
@@ -184,7 +186,6 @@ impl AppWindow {
     }
 }
 
-
 struct App {
     windows: BTreeMap<window::Id, AppWindow>,
     api: Option<Arc<dyn ApiClient>>,
@@ -194,11 +195,7 @@ struct App {
 
 pub type EventReceiver = UnboundedReceiver<harmony_api::Event>;
 
-pub type LoginResult = (
-    Arc<dyn ApiClient>,
-    CurrentUser,
-    HashMap<String, Channel>,
-);
+pub type LoginResult = (Arc<dyn ApiClient>, CurrentUser, HashMap<String, Channel>);
 
 #[derive(Clone)]
 pub enum Message {
@@ -412,7 +409,13 @@ impl App {
                 #[cfg(not(target_os = "windows"))]
                 let open_done = open_task.discard();
 
-                return Task::batch([open_done, close_login, close_mfa, close_token, close_backend]);
+                return Task::batch([
+                    open_done,
+                    close_login,
+                    close_mfa,
+                    close_token,
+                    close_backend,
+                ]);
             }
             Message::OpenMfa(mfa) => {
                 let parent = self
@@ -525,7 +528,11 @@ impl App {
                 });
                 self.windows.insert(
                     login_id,
-                    AppWindow::new(AppWindowView::Login(views::login::LoginView::new(login_id, self.backend_account.clone(), self.backend_harmony.clone()))),
+                    AppWindow::new(AppWindowView::Login(views::login::LoginView::new(
+                        login_id,
+                        self.backend_account.clone(),
+                        self.backend_harmony.clone(),
+                    ))),
                 );
                 #[cfg(target_os = "windows")]
                 let open_login = open_login
@@ -573,8 +580,7 @@ impl App {
                 return v.update(msg);
             }
             Message::OpenBackend => {
-                if let Some(task) =
-                    self.find_and_focus(|v| matches!(v, AppWindowView::Backend(_)))
+                if let Some(task) = self.find_and_focus(|v| matches!(v, AppWindowView::Backend(_)))
                 {
                     return task;
                 }
@@ -616,7 +622,9 @@ impl App {
                     .values()
                     .any(|w| matches!(w.view, AppWindowView::Login(_)))
                 {
-                    Task::done(Message::Login(LoginMessage::BackendUpdated(account, harmony)))
+                    Task::done(Message::Login(LoginMessage::BackendUpdated(
+                        account, harmony,
+                    )))
                 } else {
                     Task::none()
                 };
@@ -626,9 +634,7 @@ impl App {
                 return self.close_dialog(|v| matches!(v, AppWindowView::Backend(_)));
             }
             Message::OpenToken => {
-                if let Some(task) =
-                    self.find_and_focus(|v| matches!(v, AppWindowView::Token(_)))
-                {
+                if let Some(task) = self.find_and_focus(|v| matches!(v, AppWindowView::Token(_))) {
                     return task;
                 }
                 let parent = self

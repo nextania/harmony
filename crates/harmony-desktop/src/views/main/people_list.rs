@@ -132,43 +132,35 @@ fn contact_row(contact: &Contact) -> Element<MainMessage> {
     let name_col = column![name, status_label].spacing(2);
 
     let actions: Element<MainMessage> = match contact.status {
-        ContactStatus::Established => {
+        ContactStatus::Established => icon_action_btn(
+            Icon::DeleteRegular,
+            DANGER_RED,
+            MainMessage::RemoveContact(profile.id.clone()),
+        ),
+        ContactStatus::Pending => icon_action_btn(
+            Icon::DismissRegular,
+            TEXT_MUTED,
+            MainMessage::RemoveContact(profile.id.clone()),
+        ),
+        ContactStatus::Requested => row![
             icon_action_btn(
-                Icon::DeleteRegular,
-                DANGER_RED,
-                MainMessage::RemoveContact(profile.id.clone()),
-            )
-        }
-        ContactStatus::Pending => {
+                Icon::CheckmarkRegular,
+                ACCENT_PURPLE,
+                MainMessage::AcceptContact(profile.id.clone()),
+            ),
             icon_action_btn(
                 Icon::DismissRegular,
-                TEXT_MUTED,
+                DANGER_RED,
                 MainMessage::RemoveContact(profile.id.clone()),
-            )
-        }
-        ContactStatus::Requested => {
-            row![
-                icon_action_btn(
-                    Icon::CheckmarkRegular,
-                    ACCENT_PURPLE,
-                    MainMessage::AcceptContact(profile.id.clone()),
-                ),
-                icon_action_btn(
-                    Icon::DismissRegular,
-                    DANGER_RED,
-                    MainMessage::RemoveContact(profile.id.clone()),
-                ),
-            ]
-            .spacing(2)
-            .into()
-        }
-        ContactStatus::Blocked => {
-            icon_action_btn(
-                Icon::PersonProhibitedRegular,
-                TEXT_MUTED,
-                MainMessage::UnblockContact(profile.id.clone()),
-            )
-        }
+            ),
+        ]
+        .spacing(2)
+        .into(),
+        ContactStatus::Blocked => icon_action_btn(
+            Icon::PersonProhibitedRegular,
+            TEXT_MUTED,
+            MainMessage::UnblockContact(profile.id.clone()),
+        ),
     };
 
     let left = row![avatar, name_col]

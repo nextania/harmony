@@ -1,8 +1,4 @@
 # Harmony
-![harmony2](https://github.com/user-attachments/assets/69410aaa-837d-44bb-8208-4e5aa01eac8c)
-
-![harmony3](https://github.com/user-attachments/assets/81b73a1c-7017-4a24-a748-a90161f55b95)
-
 
 ## Description
 Harmony aims to provide secure, robust, and open source encrypted communication with high call quality. It is designed for individuals, communities, as well as organizations with a space and channel structure. In addition to providing a secure communication platform, developers may build upon the platform more easily than other platforms.
@@ -17,7 +13,7 @@ The main Harmony server is built on WebSocket-based RPC. It is designed to be ho
 Harmony is not a federated service for the sake of simplicity; instead, it is a centralized service that can be self-hosted.
 
 ## Running in development
-You will need Rust, MongoDB, and Redis to run the server.
+You will need Rust, MongoDB, Redis, as well as an instance of the account service to run the server.
 The following environment variables need to be set:
 * `MONGODB_URI` - The URI to the MongoDB database.
 * `MONGODB_DATABASE` - The name of the MongoDB database.

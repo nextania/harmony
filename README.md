@@ -1,4 +1,12 @@
-# Harmony
+<div align="center">
+  <img height="40" src="https://github.com/user-attachments/assets/7c5c3288-f08f-4f07-8351-d37e1d825e85" alt="Nextania wordmark" />
+</div>
+<h1 align="center">Harmony</h1>
+<div align="center">
+  
+[![License](https://img.shields.io/github/license/nextania/harmony)](https://github.com/nextania/harmony/blob/main/LICENSE)
+
+</div>
 
 ## Description
 Harmony aims to provide secure, robust, and open source encrypted communication with high call quality. It is designed for individuals, communities, as well as organizations with a space and channel structure. In addition to providing a secure communication platform, developers may build upon the platform more easily than other platforms.
@@ -31,7 +39,7 @@ In addition, to run the voice node, you will need to set the following environme
 To run the voice node, you can use `cargo run --bin pulse`.
 
 ## Deployment
-The server and voice node can be deployed easily using Docker. You can build the Docker images using the provided Dockerfiles. The server and voice node can be run using the provided `docker-compose.yml` file, which sets up the necessary services and environment variables. You can run multiple instances of both servers with minimal configuration changes to scale horizontally.
+The server and voice node can be deployed easily using Docker. You can build the Docker images using the provided `Dockerfile`s. The server and voice node can be run using the provided `docker-compose.yml` file, which sets up the necessary services and environment variables. You can run multiple instances of both servers with minimal configuration changes to scale horizontally.
 
 The voice node needs to be run using a server with a public IP address with the server's UDP port open to function properly. Be aware of the amount of bandwidth the voice node may use, as it can be significant with many users.
 

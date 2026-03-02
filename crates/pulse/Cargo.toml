@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-serde = { version = "1.0.144", features = ["derive"] }
+serde = { workspace = true }
 rmp-serde = "1.1.2"
 
 futures = "0.3.24"
@@ -15,7 +15,6 @@ tokio = { version = "1.45.1", features = [
 
 dashmap = "6.1.0"
 lazy_static = "1.4.0"
-once_cell = "1.18.0"
 tracing = { workspace = true }
 opentelemetry = { workspace = true }
 

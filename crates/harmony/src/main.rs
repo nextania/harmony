@@ -3,8 +3,9 @@ pub mod errors;
 pub mod methods;
 pub mod services;
 
+use std::sync::OnceLock;
+
 use authentication::authenticate;
-use once_cell::sync::OnceCell;
 use rapid::socket::RpcClients;
 use rapid::socket::RpcServer;
 use services::database;
@@ -16,7 +17,7 @@ use tracing::info;
 
 use crate::services::environment::LISTEN_ADDRESS;
 
-static RPC_CLIENTS: OnceCell<RpcClients> = OnceCell::new();
+static RPC_CLIENTS: OnceLock<RpcClients> = OnceLock::new();
 
 #[tokio::main]
 async fn main() {

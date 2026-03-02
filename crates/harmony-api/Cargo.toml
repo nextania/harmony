@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-serde = { version = "1.0", features = ["derive"] }
+serde = { workspace = true }
 rmp-serde = "1.1.2"
 rmpv = { git = "https://github.com/infiniwave/msgpack-rust.git", features = [
     "with-serde",

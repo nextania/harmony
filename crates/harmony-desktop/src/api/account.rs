@@ -1,7 +1,8 @@
 // implements the AS account API
 
+use std::sync::LazyLock;
+
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
-use once_cell::sync::Lazy;
 use opaque_ke::rand::rngs::OsRng;
 use opaque_ke::{
     CipherSuite, ClientLogin, ClientLoginFinishParameters, CredentialResponse, Ristretto255,
@@ -73,7 +74,7 @@ pub struct LoginMfa {
     pub base_url: String,
 }
 
-static CLIENT: Lazy<reqwest::Client> = Lazy::new(reqwest::Client::new);
+static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
 
 pub async fn login(
     base_url: &str,

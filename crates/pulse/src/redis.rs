@@ -1,8 +1,10 @@
-use std::{sync::atomic::Ordering, time::Duration};
+use std::{
+    sync::{LazyLock, OnceLock, atomic::Ordering},
+    time::Duration,
+};
 
 use common::{NodeDescription, NodeEvent, NodeEventKind};
 use futures::StreamExt;
-use once_cell::sync::{Lazy, OnceCell};
 use pulse_types::{MediaHint, WtMessageS2C};
 use redis::{AsyncCommands, Client, aio::MultiplexedConnection};
 use tokio::{task, time};
@@ -10,8 +12,8 @@ use ulid::Ulid;
 
 use crate::environment::{PUBLIC_ADDRESS, REDIS_URI, REGION};
 
-static REDIS: OnceCell<Client> = OnceCell::new();
-pub static INSTANCE_ID: Lazy<String> = Lazy::new(|| Ulid::new().to_string());
+static REDIS: OnceLock<Client> = OnceLock::new();
+pub static INSTANCE_ID: LazyLock<String> = LazyLock::new(|| Ulid::new().to_string());
 
 pub fn connect() {
     let client = Client::open(&**REDIS_URI).expect("Failed to connect");

@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 redis = "1.0.3"
-serde = "1.0.215"
+serde = { workspace = true }
 rmp-serde = "1.1.2"
 pulse-types = { path = "../pulse-types" }
 
@@ -15,4 +15,3 @@ opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio", "metrics", "tr
 opentelemetry-otlp = { version = "0.31.0", features = ["tonic", "metrics", "trace", "grpc-tonic"] }
 tracing-opentelemetry = "0.32.1"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
-tokio = { version = "1.45.1", features = ["rt-multi-thread"], default-features = false }

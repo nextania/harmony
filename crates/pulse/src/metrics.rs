@@ -4,7 +4,8 @@
 //! export data only after `common::telemetry::init_telemetry` has registered
 //! the provider (which happens in `main()` before any connection is accepted).
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
+
 use opentelemetry::{
     global,
     metrics::{Counter, UpDownCounter},
@@ -15,7 +16,7 @@ fn meter() -> opentelemetry::metrics::Meter {
 }
 
 /// Raw bytes received from a WebTransport datagram (before reassembly).
-pub static DATAGRAM_BYTES_RECEIVED: Lazy<Counter<u64>> = Lazy::new(|| {
+pub static DATAGRAM_BYTES_RECEIVED: LazyLock<Counter<u64>> = LazyLock::new(|| {
     meter()
         .u64_counter("pulse.datagram.bytes_received")
         .with_description("Total bytes received from producers via WebTransport datagrams")
@@ -24,7 +25,7 @@ pub static DATAGRAM_BYTES_RECEIVED: Lazy<Counter<u64>> = Lazy::new(|| {
 });
 
 /// Bytes forwarded to each consuming session.
-pub static DATAGRAM_BYTES_SENT: Lazy<Counter<u64>> = Lazy::new(|| {
+pub static DATAGRAM_BYTES_SENT: LazyLock<Counter<u64>> = LazyLock::new(|| {
     meter()
         .u64_counter("pulse.datagram.bytes_sent")
         .with_description("Total bytes forwarded to consumers via WebTransport datagrams")
@@ -33,7 +34,7 @@ pub static DATAGRAM_BYTES_SENT: Lazy<Counter<u64>> = Lazy::new(|| {
 });
 
 /// Number of complete (reassembled) datagrams received from producers.
-pub static DATAGRAM_RECEIVED: Lazy<Counter<u64>> = Lazy::new(|| {
+pub static DATAGRAM_RECEIVED: LazyLock<Counter<u64>> = LazyLock::new(|| {
     meter()
         .u64_counter("pulse.datagram.received")
         .with_description("Number of reassembled datagrams received from producers")
@@ -41,7 +42,7 @@ pub static DATAGRAM_RECEIVED: Lazy<Counter<u64>> = Lazy::new(|| {
 });
 
 /// Number of datagram deliveries to individual consumer sessions.
-pub static DATAGRAM_SENT: Lazy<Counter<u64>> = Lazy::new(|| {
+pub static DATAGRAM_SENT: LazyLock<Counter<u64>> = LazyLock::new(|| {
     meter()
         .u64_counter("pulse.datagram.sent")
         .with_description("Number of datagram fan-out deliveries to consumer sessions")
@@ -49,7 +50,7 @@ pub static DATAGRAM_SENT: Lazy<Counter<u64>> = Lazy::new(|| {
 });
 
 /// Number of datagrams dropped (failed to forward).
-pub static DATAGRAM_DROPPED: Lazy<Counter<u64>> = Lazy::new(|| {
+pub static DATAGRAM_DROPPED: LazyLock<Counter<u64>> = LazyLock::new(|| {
     meter()
         .u64_counter("pulse.datagram.dropped")
         .with_description("Number of datagram fan-out failures (send error or oversized)")
@@ -57,7 +58,7 @@ pub static DATAGRAM_DROPPED: Lazy<Counter<u64>> = Lazy::new(|| {
 });
 
 /// Successfully reassembled fragmented payloads.
-pub static FRAGMENT_ASSEMBLED: Lazy<Counter<u64>> = Lazy::new(|| {
+pub static FRAGMENT_ASSEMBLED: LazyLock<Counter<u64>> = LazyLock::new(|| {
     meter()
         .u64_counter("pulse.fragment.assembled")
         .with_description("Number of fragmented payloads successfully reassembled")
@@ -65,7 +66,7 @@ pub static FRAGMENT_ASSEMBLED: Lazy<Counter<u64>> = Lazy::new(|| {
 });
 
 /// Fragments discarded by the FragmentAssembler (TTL expiry or decode error).
-pub static FRAGMENT_DROPPED: Lazy<Counter<u64>> = Lazy::new(|| {
+pub static FRAGMENT_DROPPED: LazyLock<Counter<u64>> = LazyLock::new(|| {
     meter()
         .u64_counter("pulse.fragment.dropped")
         .with_description("Number of fragments discarded (TTL expiry or deserialise error)")
@@ -73,7 +74,7 @@ pub static FRAGMENT_DROPPED: Lazy<Counter<u64>> = Lazy::new(|| {
 });
 
 /// Number of live WebTransport sessions (connections).
-pub static CONNECTIONS_ACTIVE: Lazy<UpDownCounter<i64>> = Lazy::new(|| {
+pub static CONNECTIONS_ACTIVE: LazyLock<UpDownCounter<i64>> = LazyLock::new(|| {
     meter()
         .i64_up_down_counter("pulse.connections.active")
         .with_description("Number of live WebTransport sessions")
@@ -81,7 +82,7 @@ pub static CONNECTIONS_ACTIVE: Lazy<UpDownCounter<i64>> = Lazy::new(|| {
 });
 
 /// Number of calls with at least one participant.
-pub static CALLS_ACTIVE: Lazy<UpDownCounter<i64>> = Lazy::new(|| {
+pub static CALLS_ACTIVE: LazyLock<UpDownCounter<i64>> = LazyLock::new(|| {
     meter()
         .i64_up_down_counter("pulse.calls.active")
         .with_description("Number of active voice/video calls")

@@ -4,12 +4,13 @@ pub mod invites;
 pub mod messages;
 pub mod users;
 
+use std::sync::OnceLock;
+
 use crate::services::environment::{MONGODB_DATABASE, MONGODB_URI};
 
 use mongodb::{Client, Database};
-use once_cell::sync::OnceCell;
 
-static DATABASE: OnceCell<Client> = OnceCell::new();
+static DATABASE: OnceLock<Client> = OnceLock::new();
 
 pub async fn connect() {
     let client = Client::with_uri_str(&*MONGODB_URI)

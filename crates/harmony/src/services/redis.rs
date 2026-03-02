@@ -1,13 +1,15 @@
-use std::time::Duration;
+use std::{
+    sync::{LazyLock, OnceLock},
+    time::Duration,
+};
 
-use once_cell::sync::{Lazy, OnceCell};
 use redis::{AsyncCommands, AsyncConnectionConfig, Client, aio::MultiplexedConnection};
 use ulid::Ulid;
 
 use super::environment::REDIS_URI;
 
-static REDIS: OnceCell<Client> = OnceCell::new();
-pub static INSTANCE_ID: Lazy<String> = Lazy::new(|| Ulid::new().to_string());
+static REDIS: OnceLock<Client> = OnceLock::new();
+pub static INSTANCE_ID: LazyLock<String> = LazyLock::new(|| Ulid::new().to_string());
 
 pub fn connect() {
     let client = Client::open(&**REDIS_URI).expect("Failed to connect");

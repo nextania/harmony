@@ -10,5 +10,5 @@ crate-type = ["cdylib"]
 uniffi = { version = "0.31.0", features = ["cli"] }
 tokio = { version = "1", features = ["rt"] }
 thiserror = "2.0.12"
-serde = { version = "1.0", features = ["derive"] }
+serde = { workspace = true }
 harmony-api = { path = "../harmony-api" }

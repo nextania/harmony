@@ -10,7 +10,7 @@ futures = "0.3.28"
 
 async-tungstenite = { version = "0.33.0", features = ["tokio-runtime"] }
 
-serde = { version = "1.0.183", features = ["derive"] }
+serde = { workspace = true }
 rmp-serde = "1.1.2"
 rmpv = { git = "https://github.com/infiniwave/msgpack-rust.git", features = ["with-serde"] }
 

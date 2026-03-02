@@ -1,6 +1,8 @@
-use std::{any::Any, sync::Arc};
+use std::{
+    any::Any,
+    sync::{Arc, LazyLock},
+};
 
-use once_cell::sync::Lazy;
 use rapid::socket::RpcState;
 use serde::Deserialize;
 use serde_json::json;
@@ -32,7 +34,7 @@ pub async fn authenticate(
     };
     Ok((user.id.clone(), Box::new(user)))
 }
-static CLIENT: Lazy<reqwest::Client> = Lazy::new(reqwest::Client::new);
+static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct AsUser {

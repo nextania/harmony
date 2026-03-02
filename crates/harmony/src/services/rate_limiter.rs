@@ -1,10 +1,23 @@
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use opentelemetry::{KeyValue, global, metrics::Counter};
 use rapid::rate_limit::RateLimiter;
 use redis::AsyncCommands;
 
 use super::redis::get_connection;
+
+static RATE_LIMITED_COUNTER: OnceLock<Counter<u64>> = OnceLock::new();
+
+fn rate_limited_counter() -> &'static Counter<u64> {
+    RATE_LIMITED_COUNTER.get_or_init(|| {
+        global::meter("harmony")
+            .u64_counter("harmony.rate_limit.rejected")
+            .with_description("Number of RPC requests rejected by the rate limiter")
+            .build()
+    })
+}
 
 const WRITE_METHODS: &[&str] = &[
     "SEND_MESSAGE",
@@ -27,11 +40,25 @@ impl RateLimiter for RedisRateLimiter {
     async fn check_rate_limit(&self, user_id: &str, method: &str) -> bool {
         let global_key = format!("rl:{}:global", user_id);
         if !check_and_record(&global_key, GLOBAL_INTERVAL, GLOBAL_MAX_REQUESTS).await {
+            rate_limited_counter().add(
+                1,
+                &[
+                    KeyValue::new("kind", "global"),
+                    KeyValue::new("method", method.to_string()),
+                ],
+            );
             return false;
         }
         if WRITE_METHODS.contains(&method) {
             let method_key = format!("rl:{}:{}", user_id, method);
             if !check_and_record(&method_key, WRITE_INTERVAL, WRITE_MAX_REQUESTS).await {
+                rate_limited_counter().add(
+                    1,
+                    &[
+                        KeyValue::new("kind", "write"),
+                        KeyValue::new("method", method.to_string()),
+                    ],
+                );
                 return false;
             }
         }

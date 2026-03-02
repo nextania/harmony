@@ -17,6 +17,7 @@ use ulid::Ulid;
 use wtransport::endpoint::endpoint_side::Server;
 use wtransport::{Endpoint, ServerConfig};
 
+use crate::metrics::{CONNECTIONS_ACTIVE, FRAGMENT_ASSEMBLED, FRAGMENT_DROPPED};
 use crate::redis::INSTANCE_ID;
 use crate::wt::call::{Call, MlsState, PendingProposal};
 
@@ -88,6 +89,7 @@ async fn handle_session(
 ) -> anyhow::Result<()> {
     let session = session_request.accept().await?;
     info!("New WT session from {}", session.remote_address());
+    CONNECTIONS_ACTIVE.add(1, &[]);
 
     let unique_id = ulid::Ulid::new().to_string();
     let connection = Arc::new(session);
@@ -100,6 +102,7 @@ async fn handle_session(
         handle_session_loop(&connection, &mut send, &mut recv, &unique_id, message_pair).await;
 
     info!("Cleaning up session {}", unique_id);
+    CONNECTIONS_ACTIVE.add(-1, &[]);
 
     let Some(id) = GLOBAL_UNIQUE_SESSIONS.remove(&unique_id).map(|(_, id)| id) else {
         warn!("Session ID not found for unique ID {}", unique_id);
@@ -212,10 +215,12 @@ async fn handle_session_loop(
                                 Ok(f) => f,
                                 Err(e) => {
                                     warn!("Failed to deserialize fragment: {:?}", e);
+                                    FRAGMENT_DROPPED.add(1, &[]);
                                     continue;
                                 }
                             };
                             if let Some(reassembled) = assembler.insert(fragment) {
+                                FRAGMENT_ASSEMBLED.add(1, &[]);
                                 handle_datagram(&reassembled.id, &reassembled.data, &session).await?;
                             }
                         }

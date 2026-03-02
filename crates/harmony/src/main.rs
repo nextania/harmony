@@ -13,7 +13,6 @@ use services::redis;
 use services::voice;
 
 use tracing::info;
-use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::services::environment::LISTEN_ADDRESS;
 
@@ -21,13 +20,8 @@ static RPC_CLIENTS: OnceCell<RpcClients> = OnceCell::new();
 
 #[tokio::main]
 async fn main() {
-    // TODO: environment, negotiate encryption
-
     dotenvy::dotenv().ok();
-    tracing_subscriber::registry()
-        .with(fmt::layer())
-        .with(EnvFilter::from_default_env())
-        .init();
+    common::telemetry::init_telemetry("harmony");
 
     database::connect().await;
     info!("Connected to database");

@@ -5,10 +5,17 @@ use std::{
 
 use arc_swap::ArcSwap;
 use dashmap::DashMap;
+use opentelemetry::KeyValue;
 use pulse_types::{AvailableTrack, WtFragmentedTrackData, WtMessageS2C};
 use tokio::sync::Mutex;
 
-use crate::wt::{GLOBAL_SESSIONS, TrackInfo};
+use crate::{
+    metrics::{
+        CALLS_ACTIVE, DATAGRAM_BYTES_RECEIVED, DATAGRAM_BYTES_SENT, DATAGRAM_DROPPED,
+        DATAGRAM_RECEIVED, DATAGRAM_SENT,
+    },
+    wt::{GLOBAL_SESSIONS, TrackInfo},
+};
 
 #[derive(Clone, Debug)]
 pub struct PendingMember {
@@ -164,6 +171,10 @@ impl Call {
     }
 
     pub async fn dispatch(&self, track_id: &str, data: &[u8]) {
+        let call_attr = [KeyValue::new("call_id", self.id.clone())];
+        DATAGRAM_BYTES_RECEIVED.add(data.len() as u64, &call_attr);
+        DATAGRAM_RECEIVED.add(1, &call_attr);
+
         if let Some(consumer_set) = self.consumers.get(track_id) {
             let sessions = consumer_set.value().load_full();
             for session_id in sessions.iter() {
@@ -231,10 +242,14 @@ impl Call {
                 }
 
                 if !failed {
+                    DATAGRAM_BYTES_SENT.add(data.len() as u64, &call_attr);
+                    DATAGRAM_SENT.add(1, &call_attr);
                     debug!(
                         "Forwarded track {} data ({} fragment(s)) to session {}",
                         track_id, fragment_count, session_id
                     );
+                } else {
+                    DATAGRAM_DROPPED.add(1, &call_attr);
                 }
             }
         }
@@ -245,6 +260,7 @@ impl Call {
             // this is probably a reconnection, so we can just ignore it
             return;
         }
+        let was_empty = self.members.is_empty();
         if !self.members.is_empty() {
             let pending_member = PendingMember {
                 session_id: session_id.clone(),
@@ -270,11 +286,15 @@ impl Call {
             );
         }
         self.members.insert(session_id, ());
+        if was_empty {
+            CALLS_ACTIVE.add(1, &[KeyValue::new("call_id", self.id.clone())]);
+        }
     }
 
     pub async fn remove_member(&self, session_id: &str) {
         self.members.remove(session_id);
         if self.members.is_empty() {
+            CALLS_ACTIVE.add(-1, &[KeyValue::new("call_id", self.id.clone())]);
             // the mls group should be cleared
             let mut state = self.mls_state.lock().await;
             state.pending_members.clear();

@@ -23,7 +23,11 @@ pub enum Error {
     #[error("Not authenticated")]
     NotAuthenticated,
     #[error("Serialize error")]
-    SerializeError(#[from] #[serde(skip)] rmpv::ext::Error),
+    SerializeError(
+        #[from]
+        #[serde(skip)]
+        rmpv::ext::Error,
+    ),
 
     // Rate limiting
     #[error("Rate limited")]

@@ -8,3 +8,11 @@ redis = "1.0.3"
 serde = "1.0.215"
 rmp-serde = "1.1.2"
 pulse-types = { path = "../pulse-types" }
+
+tracing = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio", "metrics", "trace"] }
+opentelemetry-otlp = { version = "0.31.0", features = ["tonic", "metrics", "trace", "grpc-tonic"] }
+tracing-opentelemetry = "0.32.1"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+tokio = { version = "1.45.1", features = ["rt-multi-thread"], default-features = false }

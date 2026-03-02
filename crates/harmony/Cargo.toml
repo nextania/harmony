@@ -21,8 +21,8 @@ num_cpus = "1.16.0"
 ulid = "1.0.0"
 
 dotenvy = "0.15.7"
-tracing = "0.1.37"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+tracing = { workspace = true }
+opentelemetry = { workspace = true }
 
 mongodb = "3.0.0"
 redis = { version = "1.0.3", features = ["tokio-comp", "streams"] }
@@ -37,7 +37,7 @@ openmls_traits = "0.5.0"
 tls_codec = "0.4"
 openmls_basic_credential = "0.5.0"
 
-rapid = { path = "../rapid" }
+rapid = { path = "../rapid", features = ["otel"] }
 common = { path = "../common" }
 pulse-types = { path = "../pulse-types" }
 harmony-types = { path = "../harmony-types", features = ["server"] }

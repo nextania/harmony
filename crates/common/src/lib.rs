@@ -1,3 +1,5 @@
+pub mod telemetry;
+
 use pulse_types::Region;
 use redis::{FromRedisValue, ToRedisArgs, ToSingleRedisArg};
 use rmp_serde::{Deserializer, Serializer};

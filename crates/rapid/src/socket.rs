@@ -7,7 +7,6 @@ use futures::{
     channel::mpsc::{UnboundedSender, unbounded},
     future::BoxFuture,
 };
-use log::{debug, info};
 use rmp_serde::{Deserializer, Serializer};
 use rmpv::{
     Value,
@@ -19,6 +18,7 @@ use tokio::{
     task,
     time::timeout,
 };
+use tracing::{Instrument, debug, info};
 use uuid::Uuid;
 
 use crate::{
@@ -28,6 +28,69 @@ use crate::{
 };
 
 const MAX_PRE_AUTH_MESSAGES: usize = 5;
+
+#[cfg(feature = "otel")]
+use opentelemetry::{
+    KeyValue, global,
+    metrics::{Counter, Histogram, UpDownCounter},
+};
+#[cfg(feature = "otel")]
+use std::sync::OnceLock;
+
+#[cfg(feature = "otel")]
+fn meter() -> opentelemetry::metrics::Meter {
+    global::meter("rapid")
+}
+
+#[cfg(feature = "otel")]
+static RPC_CALLS: OnceLock<Counter<u64>> = OnceLock::new();
+#[cfg(feature = "otel")]
+static RPC_CONNECTIONS: OnceLock<UpDownCounter<i64>> = OnceLock::new();
+#[cfg(feature = "otel")]
+static RPC_DURATION_MS: OnceLock<Histogram<f64>> = OnceLock::new();
+#[cfg(feature = "otel")]
+static RPC_RATE_LIMITED: OnceLock<Counter<u64>> = OnceLock::new();
+
+#[cfg(feature = "otel")]
+fn rpc_calls() -> &'static Counter<u64> {
+    RPC_CALLS.get_or_init(|| {
+        meter()
+            .u64_counter("rapid.rpc.calls")
+            .with_description("Number of RPC method calls dispatched")
+            .build()
+    })
+}
+
+#[cfg(feature = "otel")]
+fn rpc_connections() -> &'static UpDownCounter<i64> {
+    RPC_CONNECTIONS.get_or_init(|| {
+        meter()
+            .i64_up_down_counter("rapid.connections.active")
+            .with_description("Active WebSocket connections")
+            .build()
+    })
+}
+
+#[cfg(feature = "otel")]
+fn rpc_duration_ms() -> &'static Histogram<f64> {
+    RPC_DURATION_MS.get_or_init(|| {
+        meter()
+            .f64_histogram("rapid.rpc.duration_ms")
+            .with_description("RPC method dispatch duration in milliseconds")
+            .with_unit("ms")
+            .build()
+    })
+}
+
+#[cfg(feature = "otel")]
+fn rpc_rate_limited() -> &'static Counter<u64> {
+    RPC_RATE_LIMITED.get_or_init(|| {
+        meter()
+            .u64_counter("rapid.rpc.rate_limited")
+            .with_description("Number of RPC calls rejected by the rate limiter")
+            .build()
+    })
+}
 
 #[derive(Clone, Debug)]
 pub struct RpcClient {
@@ -349,7 +412,9 @@ async fn start_client(
     methods: Arc<DashMap<String, Box<dyn MethodFn>>>,
     rate_limiter: Option<Arc<dyn RateLimiter>>,
 ) {
-    println!("Socket connected: {}", connection.peer_addr().unwrap());
+    info!("Socket connected: {}", connection.peer_addr().unwrap());
+    #[cfg(feature = "otel")]
+    rpc_connections().add(1, &[]);
     let ws_stream = accept_async(TokioAdapter::new(connection)).await;
     let Ok(ws_stream) = ws_stream else {
         return;
@@ -448,6 +513,9 @@ async fn start_client(
             }
         }
     }
+    #[cfg(feature = "otel")]
+    rpc_connections().add(-1, &[]);
+    debug!("Connection {} closed", id);
 }
 
 pub async fn handle_packet(
@@ -488,6 +556,8 @@ pub async fn handle_packet(
                     let client_user_id = clients.0.get(user_id).and_then(|c| c.user_id.clone());
                     if let Some(uid) = client_user_id {
                         if !rl.check_rate_limit(&uid, &method).await {
+                            #[cfg(feature = "otel")]
+                            rpc_rate_limited().add(1, &[KeyValue::new("method", method.clone())]);
                             return RpcMessageS2C::Message {
                                 id,
                                 data: to_value(&Error::RateLimited).expect("Failed to serialize"),
@@ -496,20 +566,30 @@ pub async fn handle_packet(
                     }
                 }
 
-                let method = methods.get(&method);
-                let Some(method) = method else {
+                let method_fn = methods.get(&method);
+                let Some(method_fn) = method_fn else {
                     return RpcMessageS2C::Error {
                         error: Error::InvalidMethod,
                     };
                 };
-                let result = method(
+                #[cfg(feature = "otel")]
+                let method_attrs = [KeyValue::new("method", method.clone())];
+                #[cfg(feature = "otel")]
+                rpc_calls().add(1, &method_attrs);
+                #[cfg(feature = "otel")]
+                let start = std::time::Instant::now();
+                let span = tracing::info_span!("rpc.method", method = %method);
+                let result = method_fn(
                     RpcState {
                         clients: clients.clone(),
                         id: user_id.clone(),
                     },
                     data,
                 )
+                .instrument(span)
                 .await;
+                #[cfg(feature = "otel")]
+                rpc_duration_ms().record(start.elapsed().as_secs_f64() * 1000.0, &method_attrs);
                 RpcMessageS2C::Message { id, data: result }
             }
         }

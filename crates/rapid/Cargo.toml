@@ -17,5 +17,10 @@ rmpv = { git = "https://github.com/infiniwave/msgpack-rust.git", features = ["wi
 dashmap = "6.0.0"
 rand = "0.10.0"
 uuid = "1.17.0"
-log = "0.4.20"
 thiserror = "2.0.18"
+tracing = { workspace = true }
+opentelemetry = { workspace = true, optional = true }
+
+[features]
+default = []
+otel = ["opentelemetry"]

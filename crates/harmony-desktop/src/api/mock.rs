@@ -8,7 +8,8 @@ use crate::{
     MessageAuthor,
     api::{
         ApiClient, ApiMessage, ApiMessageContent, CallParticipant, CallState, CallTokenInfo,
-        CallTrackState, Channel, Contact, ContactStatus, CurrentUser, UserProfile, UserStatus,
+        CallTrackState, Channel, Contact, ContactAction, ContactStatus, CurrentUser, UserProfile,
+        UserStatus,
     },
     errors::{RenderableError, RenderableResult},
 };
@@ -283,7 +284,7 @@ impl ApiClient for MockApiClient {
                     avatar_color_start: color!(0x06b2c1),
                     avatar_color_end: color!(0xaa2cff),
                 },
-                status: ContactStatus::Pending,
+                status: ContactStatus::None,
             },
             Contact {
                 profile: UserProfile {
@@ -298,31 +299,33 @@ impl ApiClient for MockApiClient {
         ])
     }
 
-    async fn add_contact(&self, username: String) -> RenderableResult<Contact> {
+    async fn add_contact(&self, action: ContactAction) -> RenderableResult<Contact> {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        Ok(Contact {
-            profile: UserProfile {
-                id: Ulid::new().to_string(),
-                display_name: username.clone(),
-                username,
-                avatar_color_start: color!(0x555555),
-                avatar_color_end: color!(0x888888),
-            },
-            status: ContactStatus::Pending,
-        })
+        match action {
+            ContactAction::Request { username } => Ok(Contact {
+                profile: UserProfile {
+                    id: Ulid::new().to_string(),
+                    display_name: username.clone(),
+                    username,
+                    avatar_color_start: color!(0x555555),
+                    avatar_color_end: color!(0x888888),
+                },
+                status: ContactStatus::None,
+            }),
+            ContactAction::Accept { user_id } => Ok(Contact {
+                profile: crate::api::placeholder_profile(&user_id),
+                status: ContactStatus::PendingKeyExchange,
+            }),
+            ContactAction::Finalize { user_id } => Ok(Contact {
+                profile: crate::api::placeholder_profile(&user_id),
+                status: ContactStatus::Established,
+            }),
+        }
     }
 
     async fn remove_contact(&self, _user_id: String) -> RenderableResult<()> {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         Ok(())
-    }
-
-    async fn accept_contact(&self, user_id: String) -> RenderableResult<Contact> {
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        Ok(Contact {
-            profile: crate::api::placeholder_profile(&user_id),
-            status: ContactStatus::Established,
-        })
     }
 
     async fn block_contact(&self, _user_id: String) -> RenderableResult<()> {

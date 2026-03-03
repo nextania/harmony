@@ -6,6 +6,7 @@ pub type RenderableResult<T> = Result<T, RenderableError>;
 pub enum RenderableError {
     IncorrectCredentials,
     NetworkError,
+    CryptoError(String),
     UnknownError(String),
 }
 
@@ -15,6 +16,7 @@ impl RenderableError {
         match self {
             RenderableError::IncorrectCredentials => "Invalid email or password".into(),
             RenderableError::NetworkError => "Network error, please try again".into(),
+            RenderableError::CryptoError(msg) => format!("Encryption error: {}", msg),
             RenderableError::UnknownError(msg) => format!("An unknown error occurred: {}", msg),
         }
     }

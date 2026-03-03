@@ -137,7 +137,12 @@ fn contact_row(contact: &Contact) -> Element<MainMessage> {
             DANGER_RED,
             MainMessage::RemoveContact(profile.id.clone()),
         ),
-        ContactStatus::Pending => icon_action_btn(
+        ContactStatus::PendingKeyExchange => icon_action_btn(
+            Icon::DismissRegular,
+            TEXT_MUTED,
+            MainMessage::RemoveContact(profile.id.clone()),
+        ),
+        ContactStatus::None => icon_action_btn(
             Icon::DismissRegular,
             TEXT_MUTED,
             MainMessage::RemoveContact(profile.id.clone()),
@@ -184,7 +189,8 @@ fn contact_row(contact: &Contact) -> Element<MainMessage> {
 fn contact_status_badge(status: ContactStatus) -> Element<'static, MainMessage> {
     let (label, color) = match status {
         ContactStatus::Established => ("Friend", Color::from_rgb(0.13, 0.65, 0.35)),
-        ContactStatus::Pending => ("Pending", Color::from_rgb(0.85, 0.65, 0.13)),
+        ContactStatus::PendingKeyExchange => ("Key Exchange", Color::from_rgb(0.85, 0.45, 0.13)),
+        ContactStatus::None => ("Pending", Color::from_rgb(0.85, 0.65, 0.13)),
         ContactStatus::Requested => ("Request", Color::from_rgb(0.55, 0.30, 0.90)),
         ContactStatus::Blocked => ("Blocked", Color::from_rgb(0.75, 0.15, 0.15)),
     };

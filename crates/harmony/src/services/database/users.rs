@@ -1,5 +1,5 @@
 use futures_util::StreamExt;
-use harmony_types::users::UserProfile;
+use harmony_types::users::{AddContactStage, UserProfile};
 use mongodb::bson::{self, doc};
 use serde::{Deserialize, Serialize};
 
@@ -9,13 +9,13 @@ use crate::{
     services::redis::is_user_online,
 };
 
-pub use harmony_types::users::{Contact, ContactExtended, Presence, Relationship, Status};
+pub use harmony_types::users::{
+    Contact, ContactExtended, Encapsulated, Presence, RelationshipState, Status, UnifiedPublicKey,
+};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct KeyPackage {
-    // x25519 public key for persistent encryption (DMs / persistent group channels)
-    pub public_key: Vec<u8>,
-    // encrypted private key and other key material, encrypted by a key derived from the user's password
+    // encrypted local keystore blob (encrypted by a key derived from the user's password)
     pub encrypted_keys: Vec<u8>,
 }
 
@@ -102,85 +102,205 @@ impl User {
         Ok(user)
     }
 
-    pub async fn add_contact(&self, contact_id: &String) -> Result<()> {
+    pub async fn add_contact(
+        &self,
+        stage: AddContactStage,
+    ) -> Result<(UserProfile, RelationshipState)> {
         let users = super::get_database().collection::<User>("users");
-        User::get(contact_id).await?;
-        let contact = self.contacts.iter().find(|a| &a.id == contact_id);
-        if let Some(contact) = contact {
-            match contact.relationship {
-                Relationship::Established => Err(Error::AlreadyEstablished),
-                Relationship::Blocked => Err(Error::Blocked),
-                Relationship::Requested => Err(Error::AlreadyRequested),
-                Relationship::Pending => {
-                    users
-                        .update_one(
-                            doc! {
-                                "id": &self.id
-                            },
-                            doc! {
-                                "$set": {
-                                    "contacts.$[contact].relationship": bson::to_bson(&Relationship::Established)?
-                                }
-                            }).with_options(
-                            Some(mongodb::options::UpdateOptions::builder()
-                                .array_filters(vec![doc! {
-                                    "contact.id": &contact_id
-                                }])
-                                .build()),
-                        )
-                        .await?;
-                    users
-                        .update_one(
-                            doc! {
-                                "id": &contact_id
-                            },
-                            doc! {
-                                "$set": {
-                                    "contacts.$[contact].relationship": bson::to_bson(&Relationship::Established)?
-                                }
-                            }).with_options(
-                            Some(mongodb::options::UpdateOptions::builder()
-                                .array_filters(vec![doc! {
-                                    "contact.id": &self.id
-                                }])
-                                .build()),
-                        )
-                        .await?;
-                    Ok(())
+        match stage {
+            AddContactStage::Request {
+                username,
+                public_key,
+            } => {
+                let target = User::get_by_username(&username).await?;
+                let contact_id = &target.id;
+                let existing = self.contacts.iter().find(|a| &a.id == contact_id);
+                if let Some(existing) = existing {
+                    match &existing.state {
+                        RelationshipState::Established { .. } => {
+                            return Err(Error::AlreadyEstablished);
+                        }
+                        RelationshipState::Blocked => return Err(Error::Blocked),
+                        RelationshipState::Requested { .. } => return Err(Error::AlreadyRequested),
+                        RelationshipState::PendingKeyExchange { .. } => {
+                            return Err(Error::AlreadyRequested);
+                        }
+                        RelationshipState::None => {} // allow re-request
+                    }
                 }
+                let self_state = RelationshipState::Requested { public_key: None };
+                let target_state = RelationshipState::Requested {
+                    public_key: Some(public_key),
+                };
+
+                if existing.is_some() {
+                    users
+                        .update_one(
+                            doc! { "id": &self.id },
+                            doc! { "$set": { "contacts.$[contact].state": bson::to_bson(&self_state)? } },
+                        )
+                        .with_options(Some(
+                            mongodb::options::UpdateOptions::builder()
+                                .array_filters(vec![doc! { "contact.id": contact_id }])
+                                .build(),
+                        ))
+                        .await?;
+                } else {
+                    users
+                        .update_one(
+                            doc! { "id": &self.id },
+                            doc! { "$push": { "contacts": bson::to_bson(&Contact { id: contact_id.clone(), state: self_state.clone() })? } },
+                        )
+                        .await?;
+                }
+
+                let target_existing = target.contacts.iter().find(|a| a.id == self.id);
+                if target_existing.is_some() {
+                    users
+                        .update_one(
+                            doc! { "id": contact_id },
+                            doc! { "$set": { "contacts.$[contact].state": bson::to_bson(&target_state)? } },
+                        )
+                        .with_options(Some(
+                            mongodb::options::UpdateOptions::builder()
+                                .array_filters(vec![doc! { "contact.id": &self.id }])
+                                .build(),
+                        ))
+                        .await?;
+                } else {
+                    users
+                        .update_one(
+                            doc! { "id": contact_id },
+                            doc! { "$push": { "contacts": bson::to_bson(&Contact { id: self.id.clone(), state: target_state })? } },
+                        )
+                        .await?;
+                }
+
+                Ok((
+                    UserProfile {
+                        id: target.id.clone(),
+                        presence: None,
+                    },
+                    self_state,
+                ))
             }
-        } else {
-            users
-                .update_one(
-                    doc! {
-                        "id": &self.id
+            AddContactStage::Accept {
+                user_id,
+                public_key,
+                encapsulated,
+            } => {
+                let contact = self
+                    .contacts
+                    .iter()
+                    .find(|a| a.id == user_id)
+                    .ok_or(Error::NotFound)?;
+                match &contact.state {
+                    RelationshipState::Requested {
+                        public_key: Some(_),
+                    } => {}
+                    _ => return Err(Error::InvalidStage),
+                };
+
+                let self_state = RelationshipState::PendingKeyExchange {
+                    public_key: None,
+                    encapsulated: None,
+                };
+                let requester_state = RelationshipState::PendingKeyExchange {
+                    public_key: Some(public_key),
+                    encapsulated: Some(encapsulated),
+                };
+
+                users
+                    .update_one(
+                        doc! { "id": &self.id },
+                        doc! { "$set": { "contacts.$[contact].state": bson::to_bson(&self_state)? } },
+                    )
+                    .with_options(Some(
+                        mongodb::options::UpdateOptions::builder()
+                            .array_filters(vec![doc! { "contact.id": &user_id }])
+                            .build(),
+                    ))
+                    .await?;
+                users
+                    .update_one(
+                        doc! { "id": &user_id },
+                        doc! { "$set": { "contacts.$[contact].state": bson::to_bson(&requester_state)? } },
+                    )
+                    .with_options(Some(
+                        mongodb::options::UpdateOptions::builder()
+                            .array_filters(vec![doc! { "contact.id": &self.id }])
+                            .build(),
+                    ))
+                    .await?;
+
+                Ok((
+                    UserProfile {
+                        id: user_id.clone(),
+                        presence: None,
                     },
-                    doc! {
-                        "$push": {
-                            "contacts": {
-                                "id": contact_id,
-                                "relationship": bson::to_bson(&Relationship::Requested)?
-                            }
-                        }
+                    self_state,
+                ))
+            }
+            AddContactStage::Finalize {
+                user_id,
+                public_key,
+                encapsulated,
+            } => {
+                let contact = self
+                    .contacts
+                    .iter()
+                    .find(|a| a.id == user_id)
+                    .ok_or(Error::NotFound)?;
+                let (peer_pk, their_ct) = match &contact.state {
+                    RelationshipState::PendingKeyExchange {
+                        public_key: Some(pk),
+                        encapsulated: Some(ct),
+                    } => (pk.clone(), ct.clone()),
+                    _ => return Err(Error::InvalidStage),
+                };
+
+                let self_state = RelationshipState::Established {
+                    public_key: peer_pk,
+                    encapsulated: their_ct,
+                };
+                let acceptor_state = RelationshipState::Established {
+                    public_key,
+                    encapsulated,
+                };
+
+                users
+                    .update_one(
+                        doc! { "id": &self.id },
+                        doc! { "$set": { "contacts.$[contact].state": bson::to_bson(&self_state)? } },
+                    )
+                    .with_options(Some(
+                        mongodb::options::UpdateOptions::builder()
+                            .array_filters(vec![doc! { "contact.id": &user_id }])
+                            .build(),
+                    ))
+                    .await?;
+                users
+                    .update_one(
+                        doc! { "id": &user_id },
+                        doc! { "$set": { "contacts.$[contact].state": bson::to_bson(&acceptor_state)? } },
+                    )
+                    .with_options(Some(
+                        mongodb::options::UpdateOptions::builder()
+                            .array_filters(vec![doc! { "contact.id": &self.id }])
+                            .build(),
+                    ))
+                    .await?;
+
+                Ok((
+                    UserProfile {
+                        id: user_id.clone(),
+                        presence: Some(
+                            get_presentable_presence(&User::get(&user_id).await?).await?,
+                        ),
                     },
-                )
-                .await?;
-            users
-                .update_one(
-                    doc! {
-                        "id": &contact_id
-                    },
-                    doc! {
-                        "$push": {
-                            "contacts": {
-                                "id": &self.id,
-                                "relationship": bson::to_bson(&Relationship::Pending)?
-                            }
-                        }
-                    },
-                )
-                .await?;
-            Ok(())
+                    self_state,
+                ))
+            }
         }
     }
 
@@ -189,100 +309,19 @@ impl User {
         User::get(contact_id).await?;
         let contact = self.contacts.iter().find(|a| &a.id == contact_id);
         if let Some(contact) = contact {
-            match contact.relationship {
-                // remove contact
-                Relationship::Established => {
+            match &contact.state {
+                RelationshipState::Blocked => Err(Error::Blocked),
+                _ => {
                     users
                         .update_one(
-                            doc! {
-                                "id": &self.id
-                            },
-                            doc! {
-                                "$pull": {
-                                    "contacts": {
-                                        "id": contact_id
-                                    }
-                                }
-                            },
+                            doc! { "id": &self.id },
+                            doc! { "$pull": { "contacts": { "id": contact_id } } },
                         )
                         .await?;
                     users
                         .update_one(
-                            doc! {
-                                "id": contact_id
-                            },
-                            doc! {
-                                "$pull": {
-                                    "contacts": {
-                                        "id": &self.id
-                                    }
-                                }
-                            },
-                        )
-                        .await?;
-                    Ok(())
-                }
-                Relationship::Blocked => Err(Error::Blocked),
-                // revoke friend request
-                Relationship::Requested => {
-                    users
-                        .update_one(
-                            doc! {
-                                "id": &self.id
-                            },
-                            doc! {
-                                "$pull": {
-                                    "contacts": {
-                                        "id": contact_id
-                                    }
-                                }
-                            },
-                        )
-                        .await?;
-                    users
-                        .update_one(
-                            doc! {
-                                "id": contact_id
-                            },
-                            doc! {
-                                "$pull": {
-                                    "contacts": {
-                                        "id": &self.id
-                                    }
-                                }
-                            },
-                        )
-                        .await?;
-                    Ok(())
-                }
-                // deny friend request
-                Relationship::Pending => {
-                    users
-                        .update_one(
-                            doc! {
-                                "id": &self.id
-                            },
-                            doc! {
-                                "$pull": {
-                                    "contacts": {
-                                        "id": contact_id
-                                    }
-                                }
-                            },
-                        )
-                        .await?;
-                    users
-                        .update_one(
-                            doc! {
-                                "id": contact_id
-                            },
-                            doc! {
-                                "$pull": {
-                                    "contacts": {
-                                        "id": &self.id
-                                    }
-                                }
-                            },
+                            doc! { "id": contact_id },
+                            doc! { "$pull": { "contacts": { "id": &self.id } } },
                         )
                         .await?;
                     Ok(())
@@ -296,7 +335,7 @@ impl User {
     pub async fn get_established_contacts(&self) -> Result<Vec<User>> {
         let users = super::get_database().collection::<User>("users");
         let contacts = self.contacts.iter().map(|contact| async {
-            if contact.relationship == Relationship::Established {
+            if matches!(contact.state, RelationshipState::Established { .. }) {
                 users
                     .find_one(doc! {
                         "id": &contact.id
@@ -327,11 +366,10 @@ impl User {
             let presence = get_presentable_presence(&user).await.ok()?;
             Some(ContactExtended {
                 id: contact.id.clone(),
-                relationship: contact.relationship.clone(),
+                state: contact.state.clone(),
                 user: UserProfile {
                     id: user.id.clone(),
-                    public_key: user.key_package.as_ref().map(|kp| kp.public_key.clone()),
-                    presence: if contact.relationship == Relationship::Established {
+                    presence: if matches!(contact.state, RelationshipState::Established { .. }) {
                         Some(presence)
                     } else {
                         None
@@ -347,9 +385,9 @@ impl User {
         Ok(contacts)
     }
 
-    pub async fn relationship_with(&self, other_id: &String) -> Result<Option<Relationship>> {
+    pub async fn relationship_with(&self, other_id: &String) -> Result<Option<RelationshipState>> {
         let contact = self.contacts.iter().find(|c| &c.id == other_id);
-        Ok(contact.map(|c| c.relationship.clone()))
+        Ok(contact.map(|c| c.state.clone()))
     }
 
     // pub async fn accept_invite(&self, invite_code: &String) -> Result<Space> {
@@ -409,11 +447,7 @@ impl User {
         Ok(channels)
     }
 
-    pub async fn set_key_package(
-        &self,
-        public_key: Vec<u8>,
-        encrypted_keys: Vec<u8>,
-    ) -> Result<()> {
+    pub async fn set_key_package(&self, encrypted_keys: Vec<u8>) -> Result<()> {
         let users = super::get_database().collection::<User>("users");
         users
             .update_one(
@@ -421,7 +455,6 @@ impl User {
                 doc! {
                     "$set": {
                         "keyPackage": bson::to_bson(&KeyPackage {
-                            public_key,
                             encrypted_keys,
                         })?
                     }
@@ -434,7 +467,10 @@ impl User {
     pub async fn can_dm(&self, other: &User) -> Result<bool> {
         let contact = self.contacts.iter().find(|c| c.id == other.id);
         if let Some(contact) = contact {
-            Ok(contact.relationship == Relationship::Established)
+            Ok(matches!(
+                contact.state,
+                RelationshipState::Established { .. }
+            ))
         } else {
             Ok(false)
         }

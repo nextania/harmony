@@ -1,5 +1,6 @@
 pub mod account;
 pub mod crypto;
+pub mod keystore;
 pub mod live;
 pub mod mock;
 pub mod user_manager;
@@ -75,7 +76,8 @@ impl Channel {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContactStatus {
     Established,
-    Pending,
+    PendingKeyExchange,
+    None,
     Requested,
     Blocked,
 }
@@ -112,6 +114,13 @@ pub struct CallTokenInfo {
     pub call_id: String,
 }
 
+#[derive(Debug, Clone)]
+pub enum ContactAction {
+    Request { username: String },
+    Accept { user_id: String },
+    Finalize { user_id: String },
+}
+
 #[async_trait]
 pub trait ApiClient: Send + Sync {
     async fn get_current_user(&self) -> RenderableResult<CurrentUser>;
@@ -139,9 +148,8 @@ pub trait ApiClient: Send + Sync {
         deafened: Option<bool>,
     ) -> RenderableResult<()>;
     async fn get_contacts(&self) -> RenderableResult<Vec<Contact>>;
-    async fn add_contact(&self, username: String) -> RenderableResult<Contact>;
+    async fn add_contact(&self, action: ContactAction) -> RenderableResult<Contact>;
     async fn remove_contact(&self, user_id: String) -> RenderableResult<()>;
-    async fn accept_contact(&self, user_id: String) -> RenderableResult<Contact>;
     async fn block_contact(&self, user_id: String) -> RenderableResult<()>;
     async fn unblock_contact(&self, user_id: String) -> RenderableResult<Contact>;
     async fn get_user_profile(&self, user_id: String) -> RenderableResult<UserProfile> {

@@ -1,7 +1,6 @@
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct UserProfile {
     pub id: String,
-    pub public_key: Option<Vec<u8>>,
     pub presence: Option<Presence>,
 }
 
@@ -9,7 +8,6 @@ impl From<harmony_api::UserProfile> for UserProfile {
     fn from(user: harmony_api::UserProfile) -> Self {
         Self {
             id: user.id,
-            public_key: user.public_key,
             presence: user.presence.map(Into::into),
         }
     }
@@ -18,7 +16,6 @@ impl From<harmony_api::UserProfile> for UserProfile {
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct CurrentUserResponse {
     pub id: String,
-    pub public_key: Option<Vec<u8>>,
     pub encrypted_keys: Option<Vec<u8>>,
     pub presence: Presence,
 }
@@ -27,7 +24,6 @@ impl From<harmony_api::CurrentUserResponse> for CurrentUserResponse {
     fn from(user: harmony_api::CurrentUserResponse) -> Self {
         Self {
             id: user.id,
-            public_key: user.public_key,
             encrypted_keys: user.encrypted_keys,
             presence: user.presence.into(),
         }
@@ -70,21 +66,72 @@ impl From<harmony_api::Presence> for Presence {
     }
 }
 
-#[derive(Clone, Debug, uniffi::Enum)]
-pub enum Relationship {
-    Established,
-    Blocked,
-    Requested,
-    Pending,
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct UnifiedPublicKey {
+    pub x25519: Vec<u8>,
+    pub mlkem: Vec<u8>,
 }
 
-impl From<harmony_api::Relationship> for Relationship {
-    fn from(relationship: harmony_api::Relationship) -> Self {
-        match relationship {
-            harmony_api::Relationship::Established => Relationship::Established,
-            harmony_api::Relationship::Blocked => Relationship::Blocked,
-            harmony_api::Relationship::Requested => Relationship::Requested,
-            harmony_api::Relationship::Pending => Relationship::Pending,
+impl From<harmony_api::UnifiedPublicKey> for UnifiedPublicKey {
+    fn from(pk: harmony_api::UnifiedPublicKey) -> Self {
+        Self {
+            x25519: pk.x25519.to_vec(),
+            mlkem: pk.mlkem,
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct KeyExchangeData {
+    pub public_key: UnifiedPublicKey,
+    pub encapsulated: Vec<u8>,
+}
+
+#[derive(Clone, Debug, uniffi::Enum)]
+pub enum RelationshipState {
+    None,
+    Requested {
+        public_key: Option<UnifiedPublicKey>,
+    },
+    PendingKeyExchange {
+        data: Option<KeyExchangeData>,
+    },
+    Established {
+        public_key: UnifiedPublicKey,
+        encapsulated: Vec<u8>,
+    },
+    Blocked,
+}
+
+impl From<harmony_api::RelationshipState> for RelationshipState {
+    fn from(state: harmony_api::RelationshipState) -> Self {
+        match state {
+            harmony_api::RelationshipState::None => RelationshipState::None,
+            harmony_api::RelationshipState::Requested { public_key } => {
+                RelationshipState::Requested {
+                    public_key: public_key.map(Into::into),
+                }
+            }
+            harmony_api::RelationshipState::PendingKeyExchange {
+                public_key,
+                encapsulated,
+            } => RelationshipState::PendingKeyExchange {
+                data: match (public_key, encapsulated) {
+                    (Some(pk), Some(ct)) => Some(KeyExchangeData {
+                        public_key: pk.into(),
+                        encapsulated: ct,
+                    }),
+                    _ => None,
+                },
+            },
+            harmony_api::RelationshipState::Established {
+                public_key,
+                encapsulated,
+            } => RelationshipState::Established {
+                public_key: public_key.into(),
+                encapsulated,
+            },
+            harmony_api::RelationshipState::Blocked => RelationshipState::Blocked,
         }
     }
 }
@@ -92,14 +139,14 @@ impl From<harmony_api::Relationship> for Relationship {
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct Contact {
     pub id: String,
-    pub relationship: Relationship,
+    pub state: RelationshipState,
 }
 
 impl From<harmony_api::Contact> for Contact {
     fn from(contact: harmony_api::Contact) -> Self {
         Self {
             id: contact.id,
-            relationship: contact.relationship.into(),
+            state: contact.state.into(),
         }
     }
 }
@@ -107,7 +154,7 @@ impl From<harmony_api::Contact> for Contact {
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct ContactExtended {
     pub id: String,
-    pub relationship: Relationship,
+    pub state: RelationshipState,
     pub user: UserProfile,
 }
 
@@ -115,7 +162,7 @@ impl From<harmony_api::ContactExtended> for ContactExtended {
     fn from(contact: harmony_api::ContactExtended) -> Self {
         Self {
             id: contact.id,
-            relationship: contact.relationship.into(),
+            state: contact.state.into(),
             user: contact.user.into(),
         }
     }

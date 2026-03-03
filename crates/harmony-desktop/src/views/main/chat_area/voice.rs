@@ -20,7 +20,6 @@ pub fn voice_area(state: &MainView) -> Element<MainMessage> {
 
     match &state.current_call_state {
         None => {
-            // No active call — show "Start Call" button
             let start_btn = button(
                 container(
                     text("Start call")
@@ -138,7 +137,6 @@ pub fn voice_area(state: &MainView) -> Element<MainMessage> {
                 })
                 .into()
             } else {
-                // User is in the call — show full participant view with controls
                 voice_in_call(state, call)
             }
         }

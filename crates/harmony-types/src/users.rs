@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+pub const MLKEM768_EK_BYTES: usize = 1184;
+pub const MLKEM768_CT_BYTES: usize = 1088;
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum Status {
     Online = 0,
@@ -15,25 +18,47 @@ pub struct Presence {
     pub message: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+/// Combined X25519 + ML-KEM-768 public key for hybrid post-quantum key exchange.
+/// Layout: [ x25519_pk (32 bytes) | mlkem_ek (1184 bytes) ]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub enum Relationship {
-    Established = 0,
-    Blocked = 1,
-    Requested = 2,
-    Pending = 3,
+pub struct UnifiedPublicKey {
+    pub x25519: [u8; 32],
+    pub mlkem: Vec<u8>,
+}
+
+// TODO: we're using Vec here because serde doesn't support large fixed arrays
+/// Raw ML-KEM-768 ciphertext (1088 bytes) produced during encapsulation.
+pub type Encapsulated = Vec<u8>;
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase", tag = "state")]
+pub enum RelationshipState {
+    None,
+    Requested {
+        public_key: Option<UnifiedPublicKey>,
+    },
+    PendingKeyExchange {
+        public_key: Option<UnifiedPublicKey>,
+        encapsulated: Option<Encapsulated>,
+    },
+    Established {
+        public_key: UnifiedPublicKey,
+        encapsulated: Encapsulated,
+    },
+    Blocked,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Contact {
     pub id: String,
-    pub relationship: Relationship,
+    pub state: RelationshipState,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ContactExtended {
     pub id: String,
-    pub relationship: Relationship,
+    pub state: RelationshipState,
     pub user: UserProfile,
 }
 
@@ -41,8 +66,6 @@ pub struct ContactExtended {
 #[serde(rename_all = "camelCase")]
 pub struct UserProfile {
     pub id: String,
-    /// x25519 public key (persistent encryption). `None` if no keys uploaded yet.
-    pub public_key: Option<Vec<u8>>,
     // None if user does not have established relationship with requester
     // or if this user data was sent in a context where presence is not relevant (e.g. message)
     pub presence: Option<Presence>,
@@ -52,7 +75,6 @@ pub struct UserProfile {
 #[serde(rename_all = "camelCase")]
 pub struct CurrentUserResponse {
     pub id: String,
-    pub public_key: Option<Vec<u8>>,
     pub encrypted_keys: Option<Vec<u8>>,
     pub presence: Presence,
 }
@@ -76,9 +98,7 @@ pub struct GetUserResponse {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetKeyPackageMethod {
-    /// x25519 public key for persistent encryption (DMs / persistent group channels).
-    pub public_key: Vec<u8>,
-    /// Encrypted private key material (encrypted client-side, opaque to server).
+    /// TODO: race condition
     pub encrypted_keys: Vec<u8>,
 }
 
@@ -87,22 +107,38 @@ pub struct SetKeyPackageMethod {
 pub struct SetKeyPackageResponse {}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", tag = "action")]
+pub enum AddContactStage {
+    // 1. send a request with our public key
+    Request {
+        username: String,
+        public_key: UnifiedPublicKey,
+    },
+    // 2. accept the request and send our public key + ML-KEM encapsulation to requester
+    Accept {
+        user_id: String,
+        public_key: UnifiedPublicKey,
+        encapsulated: Encapsulated,
+    },
+    // 3. finalize and send our ML-KEM encapsulation back to the acceptor
+    Finalize {
+        user_id: String,
+        public_key: UnifiedPublicKey,
+        encapsulated: Encapsulated,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AddContactMethod {
-    pub id: String,
+    pub stage: AddContactStage,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct AddContactResponse {}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AddContactUsernameMethod {
-    pub username: String,
+pub struct AddContactResponse {
+    pub profile: UserProfile,
+    pub state: RelationshipState,
 }
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct AddContactUsernameResponse {}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

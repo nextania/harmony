@@ -65,6 +65,8 @@ pub enum Error {
     AlreadyEstablished,
     #[error("Already requested")]
     AlreadyRequested,
+    #[error("Invalid contact stage for current relationship state")]
+    InvalidStage,
 
     // Call errors
     #[error("Already exists")]

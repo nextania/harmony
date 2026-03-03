@@ -14,7 +14,7 @@ use crate::{
     ChatMessage, Message, MessageContent,
     api::{
         ApiClient, ApiMessageContent, CallParticipant, CallState, CallTrackState, Contact,
-        ContactStatus, placeholder_profile,
+        ContactAction, ContactStatus, placeholder_profile,
     },
     errors::RenderableError,
     icons::{FLUENT_ICONS, Icon},
@@ -674,7 +674,11 @@ impl MainView {
                     self.add_contact_input.clear();
                     let client = self.api.clone();
                     return Task::perform(
-                        async move { client.add_contact(username).await },
+                        async move {
+                            client
+                                .add_contact(ContactAction::Request { username })
+                                .await
+                        },
                         |result| match result {
                             Ok(contact) => Message::Main(MainMessage::ContactAdded(contact)),
                             Err(e) => Message::Main(MainMessage::ApiError(e)),
@@ -709,7 +713,11 @@ impl MainView {
                 let client = self.api.clone();
                 let uid = user_id.clone();
                 return Task::perform(
-                    async move { client.accept_contact(uid).await },
+                    async move {
+                        client
+                            .add_contact(ContactAction::Accept { user_id: uid })
+                            .await
+                    },
                     move |result| match result {
                         Ok(contact) => Message::Main(MainMessage::ContactAccepted(contact)),
                         Err(e) => Message::Main(MainMessage::ApiError(e)),
@@ -722,7 +730,7 @@ impl MainView {
                     .iter_mut()
                     .find(|c| c.profile.id == contact.profile.id)
                 {
-                    c.status = ContactStatus::Established;
+                    c.status = contact.status;
                 }
             }
             MainMessage::BlockContact(user_id) => {

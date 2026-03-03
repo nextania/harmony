@@ -14,9 +14,9 @@ use harmony_types::messages::{
     GetMessagesMethod, GetMessagesResponse, SendMessageMethod, SendMessageResponse,
 };
 use harmony_types::users::{
-    AddContactMethod, AddContactResponse, AddContactUsernameMethod, AddContactUsernameResponse,
-    BlockContactMethod, BlockContactResponse, ContactExtended, CurrentUserResponse,
-    GetContactsMethod, GetContactsResponse, GetCurrentUserMethod, GetUserMethod, GetUserResponse,
+    AddContactMethod, AddContactResponse, AddContactStage, BlockContactMethod,
+    BlockContactResponse, ContactExtended, CurrentUserResponse, GetContactsMethod,
+    GetContactsResponse, GetCurrentUserMethod, GetUserMethod, GetUserResponse, RelationshipState,
     RemoveContactMethod, RemoveContactResponse, SetKeyPackageMethod, SetKeyPackageResponse,
     UnblockContactMethod, UnblockContactResponse,
 };
@@ -364,26 +364,16 @@ impl HarmonyClient {
         Ok(response.pending)
     }
 
-    /// Upload key material (x25519 public key, encrypted private keys)
-    pub async fn set_key_package(
-        &self,
-        public_key: Vec<u8>,
-        encrypted_keys: Vec<u8>,
-    ) -> Result<()> {
+    /// Upload encrypted keystore blob
+    pub async fn set_key_package(&self, encrypted_keys: Vec<u8>) -> Result<()> {
         let _: SetKeyPackageResponse = self
-            .send_request(
-                "SET_KEY_PACKAGE",
-                SetKeyPackageMethod {
-                    public_key,
-                    encrypted_keys,
-                },
-            )
+            .send_request("SET_KEY_PACKAGE", SetKeyPackageMethod { encrypted_keys })
             .await?;
 
         Ok(())
     }
 
-    /// Get a user's public profile (x25519 public key)
+    /// Get a user's public profile
     pub async fn get_user(&self, user_id: &str) -> Result<crate::UserProfile> {
         let response: GetUserResponse = self
             .send_request(
@@ -406,32 +396,13 @@ impl HarmonyClient {
         Ok(response)
     }
 
-    /// Add a contact by user ID
-    pub async fn add_contact(&self, user_id: &str) -> Result<()> {
-        let _: AddContactResponse = self
-            .send_request(
-                "ADD_CONTACT",
-                AddContactMethod {
-                    id: user_id.to_string(),
-                },
-            )
+    /// Advance the contact handshake and return the resulting state.
+    pub async fn add_contact(&self, stage: AddContactStage) -> Result<AddContactResponse> {
+        let response: AddContactResponse = self
+            .send_request("ADD_CONTACT", AddContactMethod { stage })
             .await?;
 
-        Ok(())
-    }
-
-    /// Add a contact by username
-    pub async fn add_contact_username(&self, username: &str) -> Result<()> {
-        let _: AddContactUsernameResponse = self
-            .send_request(
-                "ADD_CONTACT_USERNAME",
-                AddContactUsernameMethod {
-                    username: username.to_string(),
-                },
-            )
-            .await?;
-
-        Ok(())
+        Ok(response)
     }
 
     /// Remove a contact by user ID

@@ -1,7 +1,6 @@
 use harmony_types::users::{
-    AddContactMethod, AddContactResponse, AddContactUsernameMethod, CurrentUserResponse,
-    GetContactsMethod, GetContactsResponse, GetCurrentUserMethod, RemoveContactMethod,
-    RemoveContactResponse,
+    AddContactMethod, AddContactResponse, CurrentUserResponse, GetContactsMethod,
+    GetContactsResponse, GetCurrentUserMethod, RemoveContactMethod, RemoveContactResponse,
 };
 use rapid::socket::{RpcResponder, RpcState, RpcValue};
 
@@ -10,20 +9,11 @@ use crate::{authentication::check_authenticated, errors::Error, services::databa
 pub async fn add_contact(state: RpcState, data: RpcValue<AddContactMethod>) -> impl RpcResponder {
     let user = check_authenticated(&state)?;
     let data = data.into_inner();
-    let friend = User::get(&data.id).await?;
-    User::add_contact(&user, &friend.id).await?;
-    Ok::<_, Error>(RpcValue(AddContactResponse {}))
-}
-
-pub async fn add_contact_username(
-    state: RpcState,
-    data: RpcValue<AddContactUsernameMethod>,
-) -> impl RpcResponder {
-    let user = check_authenticated(&state)?;
-    let data = data.into_inner();
-    let friend = User::get_by_username(&data.username).await?;
-    User::add_contact(&user, &friend.id).await?;
-    Ok::<_, Error>(RpcValue(AddContactResponse {}))
+    let (profile, new_state) = user.add_contact(data.stage).await?;
+    Ok::<_, Error>(RpcValue(AddContactResponse {
+        profile,
+        state: new_state,
+    }))
 }
 
 pub async fn remove_contact(
@@ -55,7 +45,6 @@ pub async fn get_current_user(
     let user = check_authenticated(&state)?;
     Ok::<_, Error>(RpcValue(CurrentUserResponse {
         id: user.id.clone(),
-        public_key: user.key_package.as_ref().map(|kp| kp.public_key.clone()),
         encrypted_keys: user
             .key_package
             .as_ref()

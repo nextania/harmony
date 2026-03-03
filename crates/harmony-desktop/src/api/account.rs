@@ -69,9 +69,8 @@ pub enum LoginResult {
 
 #[derive(Clone)]
 pub struct LoginMfa {
-    // TODO:
-    pub continue_token: String,
-    pub base_url: String,
+    continue_token: String,
+    base_url: String,
 }
 
 static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);

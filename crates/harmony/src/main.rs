@@ -61,7 +61,6 @@ async fn main() {
         // Users
         .register("GET_CURRENT_USER", methods::users::get_current_user)
         .register("ADD_CONTACT", methods::users::add_contact)
-        .register("ADD_CONTACT_USERNAME", methods::users::add_contact_username)
         .register("REMOVE_CONTACT", methods::users::remove_contact)
         .register("GET_CONTACTS", methods::users::get_contacts)
         // Keys

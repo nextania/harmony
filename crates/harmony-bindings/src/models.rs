@@ -312,6 +312,7 @@ impl From<harmony_api::Invite> for Invite {
 #[derive(Clone, Debug, uniffi::Enum)]
 pub enum InviteInformation {
     Group {
+        channel_id: String,
         metadata: Vec<u8>,
         inviter_id: String,
         authorized: bool,
@@ -331,11 +332,13 @@ impl From<harmony_api::InviteInformation> for InviteInformation {
     fn from(info: harmony_api::InviteInformation) -> Self {
         match info {
             harmony_api::InviteInformation::Group {
+                channel_id,
                 metadata,
                 inviter_id,
                 authorized,
                 member_count,
             } => InviteInformation::Group {
+                channel_id,
                 metadata,
                 inviter_id,
                 authorized,

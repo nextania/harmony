@@ -41,6 +41,7 @@ yuv = "0.8.11"
 async-stream = "0.3.6"
 notify-rust = "4.12.0"
 ml-kem = { version = "0.3.0-rc.0", features = ["getrandom"] }
+argon2 = "0.5.3"
 
 [build-dependencies]
 winres = "0.1.12"

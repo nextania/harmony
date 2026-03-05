@@ -351,7 +351,7 @@ impl HarmonyClient {
     }
 
     /// Accept an invite by code
-    pub async fn accept_invite(&self, code: &str) -> Result<bool> {
+    pub async fn accept_invite(&self, code: &str) -> Result<(bool, String)> {
         let response: AcceptInviteResponse = self
             .send_request(
                 "ACCEPT_INVITE",
@@ -361,7 +361,7 @@ impl HarmonyClient {
             )
             .await?;
 
-        Ok(response.pending)
+        Ok((response.pending, response.channel_id))
     }
 
     /// Upload encrypted keystore blob

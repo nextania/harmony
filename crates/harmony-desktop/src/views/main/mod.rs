@@ -184,7 +184,7 @@ impl MainView {
                     if let Some(conv_id) = self.current_conversation.clone() {
                         let client = self.api.clone();
                         return Task::perform(
-                            async move { client.get_call(conv_id).await },
+                            async move { client.get_call(&conv_id).await },
                             |result| match result {
                                 Ok(state) => Message::Main(MainMessage::CallStateLoaded(state)),
                                 Err(e) => Message::Main(MainMessage::ApiError(e)),
@@ -204,7 +204,7 @@ impl MainView {
                 let call_client = self.api.clone();
                 let call_channel_id = i.clone();
                 let call_task = Task::perform(
-                    async move { call_client.get_call(call_channel_id).await },
+                    async move { call_client.get_call(&call_channel_id).await },
                     |result| match result {
                         Ok(state) => Message::Main(MainMessage::CallStateLoaded(state)),
                         Err(e) => Message::Main(MainMessage::ApiError(e)),
@@ -216,7 +216,7 @@ impl MainView {
                     let client = self.api.clone();
                     Task::perform(
                         async move {
-                            let raw = client.get_messages(i.clone()).await?;
+                            let raw = client.get_messages(&i).await?;
                             let messages = raw
                                 .into_iter()
                                 .map(|api_msg| ChatMessage {
@@ -267,7 +267,7 @@ impl MainView {
                         self.chat_input.clear();
                         let _current_user = self.current_user.clone();
                         return Task::perform(
-                            async move { client.send_message(channel_id, content).await },
+                            async move { client.send_message(&channel_id, &content).await },
                             move |result| match result {
                                 Ok(api_msg) => {
                                     let chat_msg = ChatMessage {
@@ -312,7 +312,7 @@ impl MainView {
                     let channel_id = conv_id.clone();
                     let mid = message_id.clone();
                     return Task::perform(
-                        async move { client.edit_message(mid, channel_id, new_content).await },
+                        async move { client.edit_message(&mid, &channel_id, &new_content).await },
                         move |result| match result {
                             Ok(api_msg) => {
                                 let chat_msg = ChatMessage {
@@ -349,7 +349,7 @@ impl MainView {
                     let mid = message_id.clone();
                     let cid = conv_id.clone();
                     return Task::perform(
-                        async move { client.delete_message(mid).await },
+                        async move { client.delete_message(&mid).await },
                         move |result| match result {
                             Ok(()) => Message::Main(MainMessage::MessageDeleted(message_id, cid)),
                             Err(e) => Message::Main(MainMessage::ApiError(e)),
@@ -367,7 +367,7 @@ impl MainView {
                 if let Some(conv_id) = self.current_conversation.clone() {
                     let client = self.api.clone();
                     return Task::stream(stream! {
-                        let token_info = match client.create_call_token(conv_id.clone()).await {
+                        let token_info = match client.create_call_token(&conv_id).await {
                             Ok(info) => info,
                             Err(e) => {
                                 yield Message::Main(MainMessage::ApiError(e));
@@ -395,7 +395,7 @@ impl MainView {
                             }
                         };
                         yield Message::Main(MainMessage::PulseConnected(Arc::new(pulse_client)));
-                        let call_state = client.get_call(conv_id).await.ok().flatten();
+                        let call_state = client.get_call(&conv_id).await.ok().flatten();
                         yield Message::Main(MainMessage::CallStateLoaded(call_state));
                         while let Some(event) = event_rx.recv().await {
                             yield Message::Main(MainMessage::PulseEvent(event));
@@ -408,11 +408,11 @@ impl MainView {
                 if let Some(conv_id) = self.current_conversation.clone() {
                     let client = self.api.clone();
                     return Task::stream(stream! {
-                        if let Err(e) = client.start_call(conv_id.clone()).await {
+                        if let Err(e) = client.start_call(&conv_id).await {
                             yield Message::Main(MainMessage::ApiError(e));
                             return;
                         }
-                        let token_info = match client.create_call_token(conv_id.clone()).await {
+                        let token_info = match client.create_call_token(&conv_id).await {
                             Ok(info) => info,
                             Err(e) => {
                                 yield Message::Main(MainMessage::ApiError(e));
@@ -440,7 +440,7 @@ impl MainView {
                             }
                         };
                         yield Message::Main(MainMessage::PulseConnected(Arc::new(pulse_client)));
-                        let call_state = client.get_call(conv_id).await.ok().flatten();
+                        let call_state = client.get_call(&conv_id).await.ok().flatten();
                         yield Message::Main(MainMessage::CallStateLoaded(call_state));
                         while let Some(event) = event_rx.recv().await {
                             yield Message::Main(MainMessage::PulseEvent(event));
@@ -479,7 +479,7 @@ impl MainView {
                             return Task::perform(
                                 async move {
                                     client
-                                        .update_voice_state(conv_id, Some(muted), None)
+                                        .update_voice_state(&conv_id, Some(muted), None)
                                         .await?;
                                     if let Some(pulse) = pulse {
                                         if new_audio {
@@ -699,7 +699,7 @@ impl MainView {
                 let client = self.api.clone();
                 let uid = user_id.clone();
                 return Task::perform(
-                    async move { client.remove_contact(uid).await },
+                    async move { client.remove_contact(&uid).await },
                     move |result| match result {
                         Ok(()) => Message::Main(MainMessage::ContactRemoved(user_id)),
                         Err(e) => Message::Main(MainMessage::ApiError(e)),
@@ -737,7 +737,7 @@ impl MainView {
                 let client = self.api.clone();
                 let uid = user_id.clone();
                 return Task::perform(
-                    async move { client.block_contact(uid).await },
+                    async move { client.block_contact(&uid).await },
                     move |result| match result {
                         Ok(()) => Message::Main(MainMessage::ContactBlocked(user_id)),
                         Err(e) => Message::Main(MainMessage::ApiError(e)),
@@ -753,7 +753,7 @@ impl MainView {
                 let client = self.api.clone();
                 let uid = user_id.clone();
                 return Task::perform(
-                    async move { client.unblock_contact(uid).await },
+                    async move { client.unblock_contact(&uid).await },
                     move |result| match result {
                         Ok(contact) => Message::Main(MainMessage::ContactUnblocked(contact)),
                         Err(e) => Message::Main(MainMessage::ApiError(e)),
@@ -909,7 +909,7 @@ impl MainView {
                         let client = self.api.clone();
                         let channel_id = call_id.clone();
                         return Task::perform(
-                            async move { client.get_call(channel_id).await },
+                            async move { client.get_call(&channel_id).await },
                             |result| match result {
                                 Ok(state) => Message::Main(MainMessage::CallStateLoaded(state)),
                                 Err(e) => Message::Main(MainMessage::ApiError(e)),
@@ -928,7 +928,7 @@ impl MainView {
                     let client = self.api.clone();
                     let channel_id = call_id.clone();
                     return Task::perform(
-                        async move { client.get_call(channel_id).await },
+                        async move { client.get_call(&channel_id).await },
                         |result| match result {
                             Ok(state) => Message::Main(MainMessage::CallStateLoaded(state)),
                             Err(e) => Message::Main(MainMessage::ApiError(e)),

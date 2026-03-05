@@ -41,6 +41,7 @@ impl Invite {
 pub enum InviteInformation {
     #[serde(rename_all = "camelCase")]
     Group {
+        channel_id: String,
         metadata: Vec<u8>,
         inviter_id: String,
         authorized: bool,
@@ -115,4 +116,5 @@ pub struct AcceptInviteMethod {
 #[serde(rename_all = "camelCase")]
 pub struct AcceptInviteResponse {
     pub pending: bool,
+    pub channel_id: String,
 }

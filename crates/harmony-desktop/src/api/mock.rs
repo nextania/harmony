@@ -90,7 +90,7 @@ impl ApiClient for MockApiClient {
         ])
     }
 
-    async fn get_messages(&self, id: String) -> RenderableResult<Vec<ApiMessage>> {
+    async fn get_messages(&self, id: &str) -> RenderableResult<Vec<ApiMessage>> {
         // simulate network delay
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         let alice_author = MessageAuthor::User {
@@ -118,7 +118,7 @@ impl ApiClient for MockApiClient {
             avatar_color_end: color!(0xfe44b4),
         };
         // Err(RenderableError::IncorrectCredentials)
-        Ok(match id.as_str() {
+        Ok(match id {
             Self::ALICE_ID => vec![
                 ApiMessage {
                     id: Ulid::from_parts(0, 1).to_string(),
@@ -176,8 +176,8 @@ impl ApiClient for MockApiClient {
 
     async fn send_message(
         &self,
-        _channel_id: String,
-        content: String,
+        _channel_id: &str,
+        content: &str,
     ) -> RenderableResult<ApiMessage> {
         let me_author = MessageAuthor::User {
             id: Self::ME_ID.into(),
@@ -188,15 +188,15 @@ impl ApiClient for MockApiClient {
         Ok(ApiMessage {
             id: Ulid::new().to_string(),
             author: me_author,
-            content: ApiMessageContent::Text(content),
+            content: ApiMessageContent::Text(content.to_string()),
         })
     }
 
     async fn edit_message(
         &self,
-        message_id: String,
-        _channel_id: String,
-        content: String,
+        message_id: &str,
+        _channel_id: &str,
+        content: &str,
     ) -> RenderableResult<ApiMessage> {
         let me_author = MessageAuthor::User {
             id: Self::ME_ID.into(),
@@ -205,19 +205,19 @@ impl ApiClient for MockApiClient {
             avatar_color_end: color!(0xfe44b4),
         };
         Ok(ApiMessage {
-            id: message_id,
+            id: message_id.to_string(),
             author: me_author,
-            content: ApiMessageContent::Text(content),
+            content: ApiMessageContent::Text(content.to_string()),
         })
     }
 
-    async fn delete_message(&self, _message_id: String) -> RenderableResult<()> {
+    async fn delete_message(&self, _message_id: &str) -> RenderableResult<()> {
         Ok(())
     }
 
-    async fn get_call(&self, channel_id: String) -> RenderableResult<Option<CallState>> {
+    async fn get_call(&self, channel_id: &str) -> RenderableResult<Option<CallState>> {
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        Ok(match channel_id.as_str() {
+        Ok(match channel_id {
             Self::ALICE_ID => Some(CallState {
                 participants: vec![CallParticipant {
                     profile: UserProfile {
@@ -238,12 +238,12 @@ impl ApiClient for MockApiClient {
         })
     }
 
-    async fn start_call(&self, _channel_id: String) -> RenderableResult<()> {
+    async fn start_call(&self, _channel_id: &str) -> RenderableResult<()> {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         Ok(())
     }
 
-    async fn create_call_token(&self, _channel_id: String) -> RenderableResult<CallTokenInfo> {
+    async fn create_call_token(&self, _channel_id: &str) -> RenderableResult<CallTokenInfo> {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         Ok(CallTokenInfo {
             session_id: "mock-session".into(),
@@ -255,7 +255,7 @@ impl ApiClient for MockApiClient {
 
     async fn update_voice_state(
         &self,
-        _channel_id: String,
+        _channel_id: &str,
         _muted: Option<bool>,
         _deafened: Option<bool>,
     ) -> RenderableResult<()> {
@@ -323,21 +323,41 @@ impl ApiClient for MockApiClient {
         }
     }
 
-    async fn remove_contact(&self, _user_id: String) -> RenderableResult<()> {
+    async fn remove_contact(&self, _user_id: &str) -> RenderableResult<()> {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         Ok(())
     }
 
-    async fn block_contact(&self, _user_id: String) -> RenderableResult<()> {
+    async fn block_contact(&self, _user_id: &str) -> RenderableResult<()> {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         Ok(())
     }
 
-    async fn unblock_contact(&self, user_id: String) -> RenderableResult<Contact> {
+    async fn unblock_contact(&self, user_id: &str) -> RenderableResult<Contact> {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         Ok(Contact {
-            profile: crate::api::placeholder_profile(&user_id),
+            profile: crate::api::placeholder_profile(user_id),
             status: ContactStatus::Established,
         })
+    }
+
+    async fn create_group_channel(&self, _name: Option<&str>, _description: Option<&str>) -> RenderableResult<Channel> {
+        Err(RenderableError::UnknownError("Not implemented in mock".into()))
+    }
+
+    async fn get_group_key(&self, _channel_id: &str) -> RenderableResult<Option<Vec<u8>>> {
+        Err(RenderableError::UnknownError("Not implemented in mock".into()))
+    }
+
+    async fn create_group_invite(&self, _channel_id: &str) -> RenderableResult<String> {
+        Err(RenderableError::UnknownError("Not implemented in mock".into()))
+    }
+
+    async fn join_group(
+        &self,
+        _invite_code: &str,
+        _group_key: &[u8],
+    ) -> RenderableResult<()> {
+        Err(RenderableError::UnknownError("Not implemented in mock".into()))
     }
 }

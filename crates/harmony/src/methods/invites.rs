@@ -57,13 +57,14 @@ pub async fn get_invite(state: RpcState, data: RpcValue<GetInviteMethod>) -> imp
     let channel = Channel::get(&invite.channel_id).await?;
     //ban?
     let Channel::GroupChannel {
-        metadata, members, ..
+        id: channel_id, metadata, members, ..
     } = channel
     else {
         return Err(Error::InvalidInvite);
     };
     Ok(RpcValue(GetInviteResponse {
         invite: InviteInformation::Group {
+            channel_id,
             metadata: metadata.clone(),
             inviter_id: invite.creator,
             authorized: invite
@@ -126,7 +127,7 @@ pub async fn accept_invite(
                 user_id: user.id.clone(),
             }),
         );
-        Ok(RpcValue(AcceptInviteResponse { pending }))
+        Ok(RpcValue(AcceptInviteResponse { pending, channel_id: channel.id().to_string() }))
     } else {
         Err(Error::InvalidInvite)
     }

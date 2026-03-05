@@ -4,6 +4,7 @@ pub mod keystore;
 pub mod live;
 pub mod mock;
 pub mod user_manager;
+pub mod channel_manager;
 
 pub use user_manager::UserManager;
 
@@ -121,47 +122,56 @@ pub enum ContactAction {
     Finalize { user_id: String },
 }
 
+// An ApiClient directly maps API methods to renderables
 #[async_trait]
 pub trait ApiClient: Send + Sync {
     async fn get_current_user(&self) -> RenderableResult<CurrentUser>;
     async fn get_conversations(&self) -> RenderableResult<Vec<Channel>>;
-    async fn get_messages(&self, conversation_id: String) -> RenderableResult<Vec<ApiMessage>>;
+    async fn get_messages(&self, conversation_id: &str) -> RenderableResult<Vec<ApiMessage>>;
     async fn send_message(
         &self,
-        channel_id: String,
-        content: String,
+        channel_id: &str,
+        content: &str,
     ) -> RenderableResult<ApiMessage>;
     async fn edit_message(
         &self,
-        message_id: String,
-        channel_id: String,
-        content: String,
+        message_id: &str,
+        channel_id: &str,
+        content: &str,
     ) -> RenderableResult<ApiMessage>;
-    async fn delete_message(&self, message_id: String) -> RenderableResult<()>;
-    async fn get_call(&self, channel_id: String) -> RenderableResult<Option<CallState>>;
-    async fn start_call(&self, channel_id: String) -> RenderableResult<()>;
-    async fn create_call_token(&self, channel_id: String) -> RenderableResult<CallTokenInfo>;
+    async fn delete_message(&self, message_id: &str) -> RenderableResult<()>;
+    async fn get_call(&self, channel_id: &str) -> RenderableResult<Option<CallState>>;
+    async fn start_call(&self, channel_id: &str) -> RenderableResult<()>;
+    async fn create_call_token(&self, channel_id: &str) -> RenderableResult<CallTokenInfo>;
     async fn update_voice_state(
         &self,
-        channel_id: String,
+        channel_id: &str,
         muted: Option<bool>,
         deafened: Option<bool>,
     ) -> RenderableResult<()>;
     async fn get_contacts(&self) -> RenderableResult<Vec<Contact>>;
     async fn add_contact(&self, action: ContactAction) -> RenderableResult<Contact>;
-    async fn remove_contact(&self, user_id: String) -> RenderableResult<()>;
-    async fn block_contact(&self, user_id: String) -> RenderableResult<()>;
-    async fn unblock_contact(&self, user_id: String) -> RenderableResult<Contact>;
-    async fn get_user_profile(&self, user_id: String) -> RenderableResult<UserProfile> {
-        Ok(placeholder_profile(&user_id))
+    async fn remove_contact(&self, user_id: &str) -> RenderableResult<()>;
+    async fn block_contact(&self, user_id: &str) -> RenderableResult<()>;
+    async fn unblock_contact(&self, user_id: &str) -> RenderableResult<Contact>;
+    async fn get_user_profile(&self, user_id: &str) -> RenderableResult<UserProfile> {
+        Ok(placeholder_profile(user_id))
     }
     async fn get_user_profiles(&self, user_ids: Vec<String>) -> RenderableResult<Vec<UserProfile>> {
         let mut profiles = Vec::with_capacity(user_ids.len());
         for id in &user_ids {
-            profiles.push(self.get_user_profile(id.clone()).await?);
+            profiles.push(self.get_user_profile(id).await?);
         }
         Ok(profiles)
     }
+    async fn create_group_channel(&self, name: Option<&str>, description: Option<&str>) -> RenderableResult<Channel>;
+    async fn get_group_key(&self, channel_id: &str) -> RenderableResult<Option<Vec<u8>>>;
+    async fn create_group_invite(&self, channel_id: &str) -> RenderableResult<String>;
+    async fn join_group(
+        &self,
+        invite_code: &str,
+        group_key: &[u8],
+    ) -> RenderableResult<()>;
 }
 
 pub fn placeholder_profile(user_id: &str) -> UserProfile {

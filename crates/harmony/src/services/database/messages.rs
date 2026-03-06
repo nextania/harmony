@@ -2,7 +2,7 @@ use mongodb::bson::{Binary, doc, spec::BinarySubtype};
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
-use crate::errors::{Error, Result};
+use crate::{errors::{Error, Result}, services::database::channels::Channel};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -19,6 +19,7 @@ pub struct Message {
     pub(crate) reactions: Vec<Reaction>,
     pub(crate) author_id: String,
     pub(crate) edited_at: Option<i64>,
+    pub(crate) key_id: Option<String>,
     pub(crate) channel_id: String,
 }
 
@@ -45,14 +46,19 @@ impl Message {
         todo!()
     }
 
-    pub async fn create(channel_id: &str, author_id: &str, content: &[u8]) -> Result<Message> {
+    pub async fn create(channel: &Channel, author_id: &str, content: &[u8]) -> Result<Message> {
+        let key_id = match channel {
+            Channel::PrivateChannel { last_key_id, .. } => Some(last_key_id.clone()),
+            Channel::GroupChannel { .. } => None,
+        };
         let message = Message {
             id: Ulid::new().to_string(),
             content: content.to_vec(),
             author_id: author_id.to_string(),
             edited_at: None,
-            channel_id: channel_id.to_string(),
+            channel_id: channel.id().to_string(),
             reactions: Vec::new(),
+            key_id,
         };
         let database = super::get_database();
         database
@@ -109,6 +115,7 @@ impl From<Message> for harmony_types::messages::Message {
             author_id: m.author_id,
             edited_at: m.edited_at,
             channel_id: m.channel_id,
+            key_id: m.key_id,
         }
     }
 }

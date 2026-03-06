@@ -1,5 +1,6 @@
 use harmony_api::HarmonyError;
 
+/// A `Result` type with localizable error messages.
 pub type RenderableResult<T> = Result<T, RenderableError>;
 
 #[derive(Debug, Clone)]

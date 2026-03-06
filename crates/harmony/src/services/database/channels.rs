@@ -19,6 +19,7 @@ pub enum Channel {
         id: String,
         initiator_id: String,
         target_id: String,
+        last_key_id: String,
     },
     GroupChannel {
         id: String,
@@ -31,7 +32,7 @@ pub enum Channel {
 }
 
 impl Channel {
-    pub async fn get(id: &String) -> Result<Channel> {
+    pub async fn get(id: &str) -> Result<Channel> {
         let database = super::get_database();
         let channel = database
             .collection::<Channel>("channels")
@@ -105,7 +106,7 @@ impl Channel {
             _ => Err(Error::NotFound),
         }
     }
-    pub fn is_manager(&self, user_id: &String) -> bool {
+    pub fn is_manager(&self, user_id: &str) -> bool {
         match self {
             Channel::GroupChannel { members, .. } => members
                 .iter()
@@ -113,12 +114,13 @@ impl Channel {
             _ => false,
         }
     }
-    pub async fn create_private(initiator_id: String, target_id: String) -> Result<Channel> {
+    pub async fn create_private(initiator_id: String, target_id: String, key_id: String) -> Result<Channel> {
         let database = super::get_database();
         let channel = Channel::PrivateChannel {
             id: Ulid::new().to_string(),
             initiator_id,
             target_id,
+            last_key_id: key_id,
         };
         database
             .collection::<Channel>("channels")
@@ -149,6 +151,37 @@ impl Channel {
             .insert_one(&channel)
             .await?;
         Ok(channel)
+    }
+
+    pub async fn get_between(user1: &str, user2: &str) -> Result<Option<Channel>> {
+        let database = super::get_database();
+        let query = doc! {
+            "type": "PrivateChannel",
+            "$or": [
+                { "initiator_id": user1, "target_id": user2 },
+                { "initiator_id": user2, "target_id": user1 },
+            ]
+        };
+        let channel = database
+            .collection::<Channel>("channels")
+            .find_one(query)
+            .await?;
+        Ok(channel)
+    }
+
+    pub async fn update_key_id(&self, key_id: &str) -> Result<()> {
+        let id = self.id();
+        let database = super::get_database();
+        database
+            .collection::<Channel>("channels")
+            .update_one(
+                doc! { "id": id },
+                doc! {
+                    "$set": { "last_key_id": key_id }
+                },
+            )
+            .await?;
+        Ok(())
     }
 
     pub fn id(&self) -> &str {
@@ -316,10 +349,12 @@ impl From<Channel> for harmony_types::channels::Channel {
                 id,
                 initiator_id,
                 target_id,
+                last_key_id,
             } => harmony_types::channels::Channel::PrivateChannel {
                 id,
                 initiator_id,
                 target_id,
+                last_key_id,
             },
             Channel::GroupChannel {
                 id,

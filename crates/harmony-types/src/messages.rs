@@ -8,6 +8,10 @@ pub struct Message {
     pub author_id: String,
     pub edited_at: Option<i64>,
     pub channel_id: String,
+    // Private messages will have a key ID,
+    // since a new key is generated each time a user establishes
+    // a relationship with another user
+    pub key_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

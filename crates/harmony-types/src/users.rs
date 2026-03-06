@@ -45,6 +45,7 @@ pub enum RelationshipState {
     Established {
         public_key: UnifiedPublicKey,
         encapsulated: Encapsulated,
+        key_id: String,
     },
     Blocked,
 }

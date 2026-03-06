@@ -1,7 +1,8 @@
 use futures_util::StreamExt;
 use harmony_types::users::{AddContactStage, UserProfile};
-use mongodb::bson::{self, doc};
+use mongodb::{bson::{self, doc}, options::UpdateOptions};
 use serde::{Deserialize, Serialize};
+use ulid::Ulid;
 
 use super::channels::Channel;
 use crate::{
@@ -216,7 +217,7 @@ impl User {
                         doc! { "$set": { "contacts.$[contact].state": bson::to_bson(&self_state)? } },
                     )
                     .with_options(Some(
-                        mongodb::options::UpdateOptions::builder()
+                        UpdateOptions::builder()
                             .array_filters(vec![doc! { "contact.id": &user_id }])
                             .build(),
                     ))
@@ -227,7 +228,7 @@ impl User {
                         doc! { "$set": { "contacts.$[contact].state": bson::to_bson(&requester_state)? } },
                     )
                     .with_options(Some(
-                        mongodb::options::UpdateOptions::builder()
+                        UpdateOptions::builder()
                             .array_filters(vec![doc! { "contact.id": &self.id }])
                             .build(),
                     ))
@@ -258,14 +259,17 @@ impl User {
                     } => (pk.clone(), ct.clone()),
                     _ => return Err(Error::InvalidStage),
                 };
+                let key_id = Ulid::new().to_string();
 
                 let self_state = RelationshipState::Established {
                     public_key: peer_pk,
                     encapsulated: their_ct,
+                    key_id: key_id.clone(),
                 };
                 let acceptor_state = RelationshipState::Established {
                     public_key,
                     encapsulated,
+                    key_id: key_id.clone(),
                 };
 
                 users
@@ -274,7 +278,7 @@ impl User {
                         doc! { "$set": { "contacts.$[contact].state": bson::to_bson(&self_state)? } },
                     )
                     .with_options(Some(
-                        mongodb::options::UpdateOptions::builder()
+                        UpdateOptions::builder()
                             .array_filters(vec![doc! { "contact.id": &user_id }])
                             .build(),
                     ))
@@ -285,11 +289,19 @@ impl User {
                         doc! { "$set": { "contacts.$[contact].state": bson::to_bson(&acceptor_state)? } },
                     )
                     .with_options(Some(
-                        mongodb::options::UpdateOptions::builder()
+                        UpdateOptions::builder()
                             .array_filters(vec![doc! { "contact.id": &self.id }])
                             .build(),
                     ))
                     .await?;
+
+                // if there is already a channel between the users, 
+                // this means that there was previously a relationship that was removed
+                // then update the last_key_id for that channel with the new key_id
+                let channel = Channel::get_between(&self.id, &user_id).await?;
+                if let Some(channel) = channel {
+                    channel.update_key_id(&key_id).await?;
+                }
 
                 Ok((
                     UserProfile {
@@ -464,15 +476,15 @@ impl User {
         Ok(())
     }
 
-    pub async fn can_dm(&self, other: &User) -> Result<bool> {
+    pub async fn can_dm(&self, other: &User) -> Result<Option<String>> {
         let contact = self.contacts.iter().find(|c| c.id == other.id);
         if let Some(contact) = contact {
-            Ok(matches!(
-                contact.state,
-                RelationshipState::Established { .. }
-            ))
+            match &contact.state {
+                RelationshipState::Established { key_id, .. } => Ok(Some(key_id.clone())),
+                _ => Ok(None),
+            }
         } else {
-            Ok(false)
+            Ok(None)
         }
     }
 }

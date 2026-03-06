@@ -112,13 +112,18 @@ impl PersistentEncryption {
         ss_1: &[u8; 32],
         ss_2: &[u8; 32],
     ) -> [u8; 32] {
+        let (ss_a, ss_b) = if ss_1 <= ss_2 {
+            (ss_1, ss_2)
+        } else {
+            (ss_2, ss_1)
+        };
         let their_x25519_pk = PublicKey::from(their_pk.x25519);
         let ss_x25519 = self.x25519_secret.diffie_hellman(&their_x25519_pk);
 
         let mut ikm = [0u8; 96];
         ikm[..32].copy_from_slice(ss_x25519.as_bytes());
-        ikm[32..64].copy_from_slice(ss_1);
-        ikm[64..].copy_from_slice(ss_2);
+        ikm[32..64].copy_from_slice(ss_a);
+        ikm[64..].copy_from_slice(ss_b);
         let hkdf = Hkdf::<Sha256>::new(None, &ikm);
         let mut key = [0u8; 32];
         hkdf.expand(HKDF_INFO, &mut key)

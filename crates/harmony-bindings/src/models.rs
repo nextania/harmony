@@ -99,6 +99,7 @@ pub enum RelationshipState {
     Established {
         public_key: UnifiedPublicKey,
         encapsulated: Vec<u8>,
+        key_id: String,
     },
     Blocked,
 }
@@ -127,9 +128,11 @@ impl From<harmony_api::RelationshipState> for RelationshipState {
             harmony_api::RelationshipState::Established {
                 public_key,
                 encapsulated,
+                key_id,
             } => RelationshipState::Established {
                 public_key: public_key.into(),
                 encapsulated,
+                key_id,
             },
             harmony_api::RelationshipState::Blocked => RelationshipState::Blocked,
         }
@@ -219,6 +222,7 @@ pub enum Channel {
         id: String,
         initiator_id: String,
         target_id: String,
+        last_key_id: String,
     },
     GroupChannel {
         id: String,
@@ -237,10 +241,12 @@ impl From<harmony_api::Channel> for Channel {
                 id,
                 initiator_id,
                 target_id,
+                last_key_id,
             } => Channel::PrivateChannel {
                 id,
                 initiator_id,
                 target_id,
+                last_key_id,
             },
             harmony_api::Channel::GroupChannel {
                 id,

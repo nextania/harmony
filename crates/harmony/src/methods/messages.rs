@@ -10,7 +10,7 @@ use crate::{
     methods::{Event, MessageDeletedEvent, MessageEditedEvent, NewMessageEvent, emit_to_ids},
     services::database::{
         channels::{Channel, EncryptionHint},
-        messages::Message,
+        messages::Message, users::User,
     },
 };
 
@@ -54,6 +54,16 @@ pub async fn send_message(state: RpcState, data: RpcValue<SendMessageMethod>) ->
     if !channel.is_member(&user.id) {
         return Err(Error::NotInChannel);
     }
+    if let Channel::PrivateChannel { initiator_id, target_id, .. } = &channel {
+        let other_id = if initiator_id == &user.id {
+            target_id
+        } else {
+            initiator_id
+        };
+        if (user.can_dm(&User::get(other_id).await?).await?).is_none() {
+            return Err(Error::InvalidTarget);
+        }
+    }
     let is_mls = matches!(
         &channel,
         Channel::GroupChannel {
@@ -65,7 +75,7 @@ pub async fn send_message(state: RpcState, data: RpcValue<SendMessageMethod>) ->
     let message = if is_mls {
         Message::ephemeral(&data.channel_id, &user.id, &data.content).await?
     } else {
-        Message::create(&data.channel_id, &user.id, &data.content).await?
+        Message::create(&channel, &user.id, &data.content).await?
     };
 
     let member_ids = channel.member_ids();

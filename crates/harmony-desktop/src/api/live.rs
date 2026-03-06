@@ -65,84 +65,44 @@ impl LiveApiClient {
         let _ = self.client.set_key_package(ks.to_bytes()).await;
     }
 
-    // TODO: key cache
-    async fn derive_key_for_contact(&self, contact_id: &str) -> RenderableResult<Option<[u8; 32]>> {
-        let contacts = self.client.get_contacts().await?;
-        let contact =
-            contacts
-                .iter()
-                .find(|c| c.id == contact_id)
-                .ok_or(RenderableError::UnknownError(
-                    "Failed to find contact".to_string(),
-                ))?;
-        let (peer_pk, their_ct) = match &contact.state {
-            RelationshipState::Established {
-                public_key,
-                encapsulated,
-            } => (public_key, encapsulated),
-            _ => return Ok(None),
-        };
-        let ks = self.keystore.lock().await;
-        let enc = ks
-            .get_encryption(contact_id)
-            .ok_or(RenderableError::CryptoError(
-                "Failed to get encryption for contact".to_string(),
-            ))?;
-        let ss_1 = enc.decapsulate(their_ct);
-        let ss_2 = ks
-            .get_outgoing_ss(contact_id)
-            .ok_or(RenderableError::CryptoError(
-                "Failed to get own shared secret".to_string(),
-            ))?;
-        // Sort the two ML-KEM shared secrets lexicographically so both peers feed them into
-        // HKDF in the same order, regardless of who was the requester and who was the acceptor.
-        let (ss_a, ss_b) = if ss_1 <= ss_2 {
-            (ss_1, ss_2)
-        } else {
-            (ss_2, ss_1)
-        };
-        let key = enc.derive_channel_key(peer_pk, &ss_a, &ss_b);
-        Ok(Some(key))
-    }
-
     pub async fn decrypt_content(
         &self,
-        content: &[u8],
-        channel_id: &str,
+        msg: &harmony_api::Message,
     ) -> RenderableResult<String> {
-        if content.is_empty() {
+        if msg.content.is_empty() {
             return Err(RenderableError::UnknownError("Empty encrypted message payload".to_string()));
         }
-        let channel = self.channels.get_channel(channel_id).await?;
+        let channel = self.channels.get_channel(&msg.channel_id).await?;
         match channel {
             harmony_api::Channel::GroupChannel { encryption_hint, .. } => {
                 if matches!(encryption_hint, EncryptionHint::Mls) {
                     todo!()
                 } else {
                     let ks = self.keystore.lock().await;
-                    let Some(key) = ks.get_group_key(channel_id) else {
+                    let Some(key) = ks.get_group_key(&msg.channel_id) else {
                         return Err(RenderableError::CryptoError(
                             "No group key available for channel".to_string(),
                         ));
                     };
-                    match PersistentEncryption::decrypt_with_key(&key, content) {
+                    match PersistentEncryption::decrypt_with_key(&key, &msg.content) {
                         Ok(plaintext) => return Ok(String::from_utf8_lossy(&plaintext).into_owned()),
                         Err(e) => return Err(RenderableError::CryptoError(e.to_string())),
                     }
                 }
             },
-            harmony_api::Channel::PrivateChannel { initiator_id, target_id, .. } => {
-                let peer = if initiator_id == self.user_id {
-                    target_id
-                } else {
-                    initiator_id
+            harmony_api::Channel::PrivateChannel { .. } => {
+                let Some(key_id) = &msg.key_id else {
+                    return Err(RenderableError::CryptoError(
+                        "Missing key ID for private message".to_string(),
+                    ))
                 };
-                let Some(key) = self.derive_key_for_contact(&peer).await? else {
+                let ks = self.keystore.lock().await;
+                let Some(key) = ks.get_direct_key(key_id) else {
                     return Err(RenderableError::CryptoError(
                         "Failed to derive key for contact".to_string(),
                     ))
                 };
-                match PersistentEncryption::decrypt_with_key(&key, content) {
+                match PersistentEncryption::decrypt_with_key(&key, &msg.content) {
                     Ok(plaintext) => return Ok(String::from_utf8_lossy(&plaintext).into_owned()),
                     Err(e) => return Err(RenderableError::CryptoError(e.to_string())),
                 }
@@ -173,13 +133,9 @@ impl LiveApiClient {
                     ));
                 }
             },
-            harmony_api::Channel::PrivateChannel { initiator_id, target_id, .. } => {
-                let peer = if initiator_id == self.user_id {
-                    target_id
-                } else {
-                    initiator_id
-                };
-                let Some(key) = self.derive_key_for_contact(&peer).await? else {
+            harmony_api::Channel::PrivateChannel { last_key_id, .. } => {
+                let ks = self.keystore.lock().await;
+                let Some(key) = ks.get_direct_key(&last_key_id) else {
                     return Err(RenderableError::CryptoError(
                         "Failed to derive key for contact".to_string(),
                     ))
@@ -193,7 +149,7 @@ impl LiveApiClient {
     }
 
     async fn map_message(&self, msg: &harmony_api::Message) -> RenderableResult<ApiMessage> {
-        let text = self.decrypt_content(&msg.content, &msg.channel_id).await?;
+        let text = self.decrypt_content(msg).await?;
         let profile = self
             .users
             .get_user(&msg.author_id)
@@ -268,6 +224,7 @@ impl ApiClient for LiveApiClient {
                     id,
                     initiator_id,
                     target_id,
+                    ..
                 } => {
                     let other_id = if *initiator_id == self.user_id {
                         target_id
@@ -492,30 +449,44 @@ impl ApiClient for LiveApiClient {
                     .find(|c| c.id == user_id)
                     .ok_or_else(|| RenderableError::UnknownError("Contact not found".into()))?;
 
-                let acceptor_pk = match &contact.state {
+                let (acceptor_pk, encapsulated) = match &contact.state {
                     RelationshipState::PendingKeyExchange {
                         public_key: Some(pk),
-                        ..
-                    } => pk.clone(),
+                        encapsulated: Some(encapsulated)
+                    } => (pk.clone(), encapsulated.clone()),
                     _ => {
                         return Err(RenderableError::UnknownError(
                             "Cannot finalize: not in PendingKeyExchange state".into(),
                         ));
                     }
                 };
-                // Encapsulate to the acceptor's ML-KEM key and persist the shared secret so
-                // it can be used for symmetric channel-key derivation later.
-                let (ct, ss) = PersistentEncryption::encapsulate_to(&acceptor_pk);
+
+                // decapsulate the acceptor's response to get the shared secret
                 let mut ks = self.keystore.lock().await;
-                ks.store_outgoing_ss(&user_id, &ss);
-                let our_pk = ks.get_encryption(&user_id).map(|e| e.public_key()).ok_or(
-                    RenderableError::CryptoError("Failed to get own public key for contact".into()),
-                )?;
-                self.client.add_contact(AddContactStage::Finalize {
+                let enc = ks
+                    .get_encryption(&user_id)
+                    .ok_or(RenderableError::CryptoError(
+                        "Failed to get encryption for contact".to_string(),
+                    ))?;
+                let ss1 = enc.decapsulate(&encapsulated);
+                // encapsulate back to the acceptor to get the second shared secret
+                let (ct, ss2) = PersistentEncryption::encapsulate_to(&acceptor_pk);
+                ks.store_outgoing_ss(&user_id, &ss2);
+
+                let our_pk = enc.public_key();
+                let result = self.client.add_contact(AddContactStage::Finalize {
                     user_id,
                     public_key: our_pk,
                     encapsulated: ct,
-                }).await?
+                }).await?;
+                let RelationshipState::Established { ref key_id, .. } = result.state else {
+                    return Err(RenderableError::UnknownError(
+                        "Expected Established relationship state after finalizing contact".into(),
+                    ));
+                };
+                let key = enc.derive_channel_key(&acceptor_pk, &ss1, &ss2);
+                ks.store_direct_key(key_id, key);
+                result
             }
         };
 

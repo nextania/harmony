@@ -50,10 +50,10 @@ pub async fn create_channel(
             }
             // check if the user's relationship with the target allows for creating a private channel
             let target = crate::services::database::users::User::get(&target_id).await?;
-            if !user.can_dm(&target).await? {
+            let Some(key_id) = user.can_dm(&target).await? else {
                 return Err(Error::InvalidTarget);
-            }
-            Channel::create_private(user.id.clone(), target_id).await?
+            };
+            Channel::create_private(user.id.clone(), target_id, key_id).await?
         }
         ChannelInformation::GroupChannel {
             metadata,

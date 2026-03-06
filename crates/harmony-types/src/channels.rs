@@ -30,6 +30,7 @@ pub enum Channel {
         id: String,
         initiator_id: String,
         target_id: String,
+        last_key_id: String,
     },
     GroupChannel {
         id: String,

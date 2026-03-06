@@ -9,7 +9,6 @@
         "password": "密码",
         "passkey": "使用密钥",
         "more_options": "更多选项",
-        "token": "使用令牌登录",
         "register": "创建账户",
         "custom_server": "配置自定义服务器 URL",
         "help": "获取帮助"

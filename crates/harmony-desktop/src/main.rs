@@ -85,7 +85,6 @@ use crate::{
             external_link::{ExternalLinkMessage, ExternalLinkView},
             mfa::{MfaMessage, MfaView},
             settings::{SettingsMessage, SettingsView},
-            token::{TokenMessage, TokenView},
         },
         main::MainMessage,
     },
@@ -157,7 +156,6 @@ pub enum AppWindowView {
     Settings(SettingsView),
     ExternalLink(ExternalLinkView),
     Backend(BackendView),
-    Token(TokenView),
 }
 
 pub struct AppWindow {
@@ -218,8 +216,6 @@ pub enum Message {
     Backend(BackendMessage),
     BackendChanged(String, String),
     CloseBackend,
-    OpenToken,
-    Token(TokenMessage),
     Logout,
     WindowClosed(window::Id),
     #[cfg(target_os = "windows")]
@@ -382,12 +378,6 @@ impl App {
                     .next()
                     .map(|(id, _)| window::close(id))
                     .unwrap_or_else(Task::none);
-                let close_token = self
-                    .windows
-                    .extract_if(.., |_, w| matches!(w.view, AppWindowView::Token(_)))
-                    .next()
-                    .map(|(id, _)| window::close(id))
-                    .unwrap_or_else(Task::none);
                 let close_backend = self
                     .windows
                     .extract_if(.., |_, w| matches!(w.view, AppWindowView::Backend(_)))
@@ -415,7 +405,6 @@ impl App {
                     open_done,
                     close_login,
                     close_mfa,
-                    close_token,
                     close_backend,
                 ]);
             }
@@ -635,36 +624,6 @@ impl App {
             Message::CloseBackend => {
                 return self.close_dialog(|v| matches!(v, AppWindowView::Backend(_)));
             }
-            Message::OpenToken => {
-                if let Some(task) = self.find_and_focus(|v| matches!(v, AppWindowView::Token(_))) {
-                    return task;
-                }
-                let parent = self
-                    .find_window_id(|v| matches!(v, AppWindowView::Login(_)))
-                    .expect("Login window should exist when opening token login");
-                return self.open_dialog(
-                    parent,
-                    AppWindowView::Token(TokenView::new(self.backend_harmony.clone())),
-                    iced::Size::new(400.0, 200.0),
-                );
-            }
-            Message::Token(msg) => {
-                let (
-                    _,
-                    AppWindow {
-                        view: AppWindowView::Token(v),
-                        ..
-                    },
-                ) = self
-                    .windows
-                    .iter_mut()
-                    .find(|(_, w)| matches!(w.view, AppWindowView::Token(_)))
-                    .expect("Token window should exist")
-                else {
-                    unreachable!()
-                };
-                return v.update(msg);
-            }
             #[cfg(target_os = "windows")]
             Message::HwndCaptured(id, hwnd) => {
                 if let Some(window) = self.windows.get_mut(&id) {
@@ -760,7 +719,6 @@ impl App {
             }
             Some(AppWindowView::Settings(v)) => v.view().map(Message::Settings),
             Some(AppWindowView::Backend(v)) => v.view().map(Message::Backend),
-            Some(AppWindowView::Token(v)) => v.view().map(Message::Token),
             None => text("").into(),
         }
     }
@@ -782,7 +740,6 @@ impl App {
             Some(AppWindowView::Main(_)) => "Harmony".into(),
             Some(AppWindowView::Settings(_)) => "Settings".into(),
             Some(AppWindowView::Backend(_)) => "Custom server URLs".into(),
-            Some(AppWindowView::Token(_)) => "Sign in with token".into(),
             None => "Harmony".into(),
         }
     }
@@ -799,5 +756,7 @@ fn main() -> iced::Result {
             "../assets/fonts/dm-sans-italic-variable.ttf"
         ))
         .font(include_bytes!("../assets/fonts/fluentsystemicons-resizable.ttf").as_slice())
+        .font(include_bytes!("../assets/fonts/noto-sans-sc-variable.ttf").as_slice())
+        .default_font(iced::Font::with_name("Noto Sans SC"))
         .run()
 }

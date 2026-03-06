@@ -9,7 +9,6 @@
         "password": "Password",
         "passkey": "Use a passkey",
         "more_options": "More options",
-        "token": "Sign in with token",
         "register": "Create an account",
         "custom_server": "Configure custom server URL",
         "help": "Get help"

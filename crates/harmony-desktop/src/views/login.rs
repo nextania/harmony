@@ -7,19 +7,15 @@ use iced::{
     },
     window,
 };
+use iced_aw::{DropDown, drop_down::Alignment as DropDownAlignment};
+use rust_i18n::t;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::{
-    Message,
-    api::{account, live::LiveApiClient},
-    errors::RenderableError,
-    icons::{FLUENT_ICONS, Icon},
-    theme::{
+    Message, api::{account, live::LiveApiClient}, errors::RenderableError, icons::{FLUENT_ICONS, Icon}, preferences::Locale, theme::{
         ACCENT_PURPLE, BG_LOGIN_CARD, BG_LOGIN_INPUT, BORDER_CARD, DM_SANS, LINK_COLOR, LOGIN_BG,
         LOGO_SVG, SUBTLE_GREY, TEXT_MUTED, TEXT_WHITE,
-    },
-    views::main::MainMessage,
-    widgets::button::ButtonExt,
+    }, views::main::MainMessage, widgets::button::ButtonExt
 };
 
 use crate::api::{ApiClient, Channel, CurrentUser};
@@ -43,8 +39,9 @@ pub enum LoginMessage {
     Failed(RenderableError),
     OpenExternalLink(String),
     OpenBackend,
-    OpenToken,
     BackendUpdated(String, String),
+    ToggleLocaleDropdown,
+    SetLocale(Locale),
 }
 
 pub struct LoginView {
@@ -56,6 +53,7 @@ pub struct LoginView {
     id: window::Id,
     backend_account: String,
     backend_harmony: String,
+    locale_dropdown_open: bool,
 }
 
 impl LoginView {
@@ -69,6 +67,7 @@ impl LoginView {
             id,
             backend_account,
             backend_harmony,
+            locale_dropdown_open: false,
         }
     }
     pub fn update(&mut self, message: LoginMessage) -> Task<Message> {
@@ -86,9 +85,6 @@ impl LoginView {
             }
             LoginMessage::OpenBackend => {
                 return Task::done(Message::OpenBackend);
-            }
-            LoginMessage::OpenToken => {
-                return Task::done(Message::OpenToken);
             }
             LoginMessage::BackendUpdated(account, harmony) => {
                 self.backend_account = account;
@@ -129,6 +125,13 @@ impl LoginView {
             LoginMessage::Failed(e) => {
                 self.login_error = Some(e.to_string());
             }
+            LoginMessage::ToggleLocaleDropdown => {
+                self.locale_dropdown_open = !self.locale_dropdown_open;
+            }
+            LoginMessage::SetLocale(locale) => {
+                rust_i18n::set_locale(&locale.code());
+                self.locale_dropdown_open = false;
+            }
         }
         Task::none()
     }
@@ -150,23 +153,88 @@ impl LoginView {
             .spacing(12)
             .align_y(alignment::Vertical::Center);
 
-        let globe = container(
-            text(Icon::GlobeRegular.unicode())
-                .size(20)
-                .color(TEXT_MUTED)
-                .font(FLUENT_ICONS),
+        let locale_menu = container(column(Locale::all().into_iter().map(
+            |locale| {
+                    button(text(locale.display_name().to_string()).size(12).color(TEXT_WHITE).font(DM_SANS))
+                        .on_press(LoginMessage::SetLocale(locale.clone()))
+                        .width(Length::Fill)
+                        .padding(Padding::from([4, 8]))
+                        .style(|_theme, status| button::Style {
+                            background: Some(iced::Background::Color(match status {
+                                button::Status::Hovered => color!(0x3a3a4a),
+                                button::Status::Pressed => color!(0x2a2a38),
+                                _ => iced::Color::TRANSPARENT,
+                            })),
+                            border: Border::default().rounded(4),
+                            text_color: TEXT_WHITE,
+                            ..Default::default()
+                        })
+                        .cursor_default()
+            },
+        )).spacing(2).width(Length::Fill))
+        .padding(6)
+        .width(Length::Fixed(150.0))
+        .style(|_theme| container::Style {
+            background: Some(iced::Background::Color(BG_LOGIN_CARD)),
+            border: Border {
+                color: BORDER_CARD,
+                width: 1.0,
+                radius: 8.into(),
+            },
+            shadow: Shadow {
+                color: Color {
+                    r: 0.0,
+                    g: 0.0,
+                    b: 0.0,
+                    a: 0.35,
+                },
+                offset: Vector::new(0.0, 4.0),
+                blur_radius: 6.0,
+            },
+            ..Default::default()
+        });
+
+        let globe_btn = button(
+            container(
+                text(Icon::GlobeRegular.unicode())
+                    .size(20)
+                    .color(TEXT_MUTED)
+                    .font(FLUENT_ICONS),
+            )
+            .padding(Padding::from([2, 2])),
         )
-        .padding(Padding::from([2, 2]));
+        .on_press(LoginMessage::ToggleLocaleDropdown)
+        .padding(0)
+        .style(|_theme, status| button::Style {
+            background: Some(iced::Background::Color(match status {
+                button::Status::Hovered => color!(0x3a3a4a),
+                button::Status::Pressed => color!(0x2a2a38),
+                _ => iced::Color::TRANSPARENT,
+            })),
+            border: Border::default().rounded(4),
+            text_color: TEXT_MUTED,
+            ..Default::default()
+        })
+        .cursor_default();
+
+        let globe = DropDown::new(globe_btn, locale_menu, self.locale_dropdown_open)
+            .width(Length::Fill)
+            .alignment(DropDownAlignment::Bottom)
+            .on_dismiss(LoginMessage::ToggleLocaleDropdown);
 
         let card_header = row![logo, Space::new().width(Length::Fill), globe,]
             .align_y(alignment::Vertical::Center);
 
         let title_block = column![
-            text("Sign in").size(24).color(TEXT_WHITE).font(Font {
-                weight: iced::font::Weight::Bold,
-                ..DM_SANS
-            }),
-            text("Authenticate with your Nextania account.")
+            text(t!("login.sign_in"))
+                .size(24)
+                .color(TEXT_WHITE)
+                .font(Font {
+                    weight: iced::font::Weight::Bold,
+                    ..DM_SANS
+                })
+                .shaping(iced::widget::text::Shaping::Advanced),
+            text(t!("login.authenticate"))
                 .size(14)
                 .color(TEXT_WHITE)
                 .font(Font {
@@ -189,14 +257,14 @@ impl LoginView {
             selection: ACCENT_PURPLE,
         };
 
-        let email_input = text_input("Email", &self.email)
+        let email_input = text_input(&t!("login.email"), &self.email)
             .on_input(LoginMessage::EmailChanged)
             .size(12)
             .font(DM_SANS)
             .style(input_style)
             .width(Length::Fill);
 
-        let password_input = text_input("Password", &self.password)
+        let password_input = text_input(&t!("login.password"), &self.password)
             .on_input(LoginMessage::PasswordChanged)
             .on_submit(LoginMessage::Submit)
             .secure(true)
@@ -207,7 +275,7 @@ impl LoginView {
 
         let sign_in_btn = button(
             container(
-                text("Sign in")
+                text(t!("login.sign_in"))
                     .size(12)
                     .color(TEXT_WHITE)
                     .font(DM_SANS)
@@ -230,7 +298,7 @@ impl LoginView {
         })
         .cursor_default();
 
-        let use_passkey = text("Use a passkey")
+        let use_passkey = text(t!("login.passkey"))
             .size(12)
             .color(LINK_COLOR)
             .font(DM_SANS);
@@ -251,26 +319,15 @@ impl LoginView {
         };
 
         let more_options = column![
-            text("More options").size(12).color(SUBTLE_GREY).font(Font {
-                weight: iced::font::Weight::Light,
-                ..DM_SANS
-            }),
+            text(t!("login.more_options"))
+                .size(12)
+                .color(SUBTLE_GREY)
+                .font(Font {
+                    weight: iced::font::Weight::Light,
+                    ..DM_SANS
+                }),
             button(
-                text("Sign in with token")
-                    .size(12)
-                    .color(LINK_COLOR)
-                    .font(DM_SANS)
-            )
-            .padding(Padding::ZERO)
-            .style(|_theme, _status| button::Style {
-                background: None,
-                border: Border::default(),
-                text_color: LINK_COLOR,
-                ..Default::default()
-            })
-            .on_press(LoginMessage::OpenToken),
-            button(
-                text("Create an account")
+                text(t!("login.register"))
                     .size(12)
                     .color(LINK_COLOR)
                     .font(DM_SANS)
@@ -286,7 +343,7 @@ impl LoginView {
                 "https://account.nextania.com/register".to_string()
             )),
             button(
-                text("Configure custom server URL")
+                text(t!("login.custom_server"))
                     .size(12)
                     .color(LINK_COLOR)
                     .font(DM_SANS)
@@ -299,17 +356,22 @@ impl LoginView {
                 ..Default::default()
             })
             .on_press(LoginMessage::OpenBackend),
-            button(text("Get help").size(12).color(LINK_COLOR).font(DM_SANS))
-                .padding(Padding::ZERO)
-                .style(|_theme, _status| button::Style {
-                    background: None,
-                    border: Border::default(),
-                    text_color: LINK_COLOR,
-                    ..Default::default()
-                })
-                .on_press(LoginMessage::OpenExternalLink(
-                    "https://nextania.com".to_string()
-                )),
+            button(
+                text(t!("login.help"))
+                    .size(12)
+                    .color(LINK_COLOR)
+                    .font(DM_SANS)
+            )
+            .padding(Padding::ZERO)
+            .style(|_theme, _status| button::Style {
+                background: None,
+                border: Border::default(),
+                text_color: LINK_COLOR,
+                ..Default::default()
+            })
+            .on_press(LoginMessage::OpenExternalLink(
+                "https://nextania.com".to_string()
+            )),
         ]
         .spacing(2);
 

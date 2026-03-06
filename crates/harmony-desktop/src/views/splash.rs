@@ -2,6 +2,7 @@ use iced::{
     Element, Font, Length, Padding, alignment,
     widget::{Space, Svg, column, container, row, svg::Handle, text},
 };
+use rust_i18n::t;
 
 use crate::theme::{BG_SPLASH, DM_SANS, LOGO_SVG, TEXT_MUTED, TEXT_WHITE};
 
@@ -31,7 +32,7 @@ impl SplashView {
             .align_y(alignment::Vertical::Center);
 
         let bottom = row![
-            text("Authenticating...")
+            text(t!("splash.authenticating"))
                 .size(12)
                 .color(TEXT_MUTED)
                 .font(Font {

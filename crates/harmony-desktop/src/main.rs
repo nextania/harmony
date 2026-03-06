@@ -147,6 +147,8 @@ impl MessageAuthor {
     }
 }
 
+rust_i18n::i18n!("i18n");
+
 pub enum AppWindowView {
     Splash(SplashView),
     Login(LoginView),
@@ -787,6 +789,7 @@ impl App {
 }
 
 fn main() -> iced::Result {
+    rust_i18n::set_locale("en");
     iced::daemon(App::new, App::update, App::view)
         .title(App::title)
         .theme(App::theme)

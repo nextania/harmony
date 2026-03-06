@@ -1,0 +1,28 @@
+{
+    "splash": {
+        "authenticating": "Authenticating..."
+    },
+    "login": {
+        "sign_in": "Sign in",
+        "authenticate": "Authenticate with your Nextania account.",
+        "email": "Email",
+        "password": "Password",
+        "passkey": "Use a passkey",
+        "more_options": "More options",
+        "token": "Sign in with token",
+        "register": "Create an account",
+        "custom_server": "Configure custom server URL",
+        "help": "Get help"
+    },
+    "messaging": {
+        "message_placeholder": "Type a message..."
+    },
+    "voice": {
+        "call_started": "Call started",
+        "start_call": "Start call",
+        "join_call": "Join call"
+    },
+    "errors": {
+        "invalid_credentials": "Invalid email or password."
+    }
+}

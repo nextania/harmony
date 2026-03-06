@@ -1,0 +1,28 @@
+{
+    "splash": {
+        "authenticating": "正在认证..."
+    },
+    "login": {
+        "sign_in": "登录",
+        "authenticate": "使用您的 Nextania 账户进行认证。",
+        "email": "邮箱",
+        "password": "密码",
+        "passkey": "使用密钥",
+        "more_options": "更多选项",
+        "token": "使用令牌登录",
+        "register": "创建账户",
+        "custom_server": "配置自定义服务器 URL",
+        "help": "获取帮助"
+    },
+    "messaging": {
+        "message_placeholder": "输入消息..."
+    },
+    "voice": {
+        "call_started": "通话已开始",
+        "start_call": "开始通话",
+        "join_call": "加入通话"
+    },
+    "errors": {
+        "invalid_credentials": "无效的邮箱或密码。"
+    }
+}

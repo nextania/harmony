@@ -97,6 +97,32 @@ impl UserManager {
 
         Ok(profile)
     }
+    pub async fn get_user_by_username(&self, username: &str) -> Result<UserProfile, RenderableError> {
+        let resp = self
+            .http
+            .get(format!(
+                "{}/api/user/username/{}",
+                self.base_url, username
+            ))
+            .bearer_auth(&self.token)
+            .send()
+            .await
+            .map_err(|_| RenderableError::NetworkError)?;
+
+        let public_user: PublicUser = resp
+            .json()
+            .await
+            .map_err(|e| RenderableError::UnknownError(e.to_string()))?;
+
+        let profile = UserProfile::from(public_user);
+
+        {
+            let mut cache = self.cache.lock().await;
+            cache.put(profile.id.clone(), profile.clone());
+        }
+
+        Ok(profile)
+    }
 
     pub async fn get_users(
         &self,

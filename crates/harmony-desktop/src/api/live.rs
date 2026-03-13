@@ -238,6 +238,13 @@ impl ApiClient for LiveApiClient {
             .map_err(|_| RenderableError::NetworkError)
     }
 
+    async fn get_user_profile_by_username(&self, username: &str) -> RenderableResult<UserProfile> {
+        self.users
+            .get_user_by_username(username)
+            .await
+            .map_err(|_| RenderableError::NetworkError)
+    }
+
     async fn get_user_profiles(&self, user_ids: Vec<String>) -> RenderableResult<Vec<UserProfile>> {
         self.users
             .get_users(user_ids.clone())
@@ -447,13 +454,13 @@ impl ApiClient for LiveApiClient {
 
     async fn add_contact(&self, action: ContactAction) -> RenderableResult<Contact> {
         let new_state = match action {
-            ContactAction::Request { username } => {
+            ContactAction::Request { user_id } => {
                 let mut ks = self.keystore.lock().await;
                 let (public_key, private_key) = ks.generate();
                 let result = self
                     .client
                     .add_contact(AddContactStage::Request {
-                        username: username.clone(),
+                        id: user_id.clone(),
                         public_key,
                     })
                     .await?;

@@ -675,8 +675,9 @@ impl MainView {
                     let client = self.api.clone();
                     return Task::perform(
                         async move {
+                            let user = client.get_user_profile_by_username(&username).await?;
                             client
-                                .add_contact(ContactAction::Request { username })
+                                .add_contact(ContactAction::Request { user_id: user.id })
                                 .await
                         },
                         |result| match result {

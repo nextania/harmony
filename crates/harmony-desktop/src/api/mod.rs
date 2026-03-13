@@ -117,7 +117,7 @@ pub struct CallTokenInfo {
 
 #[derive(Debug, Clone)]
 pub enum ContactAction {
-    Request { username: String },
+    Request { user_id: String },
     Accept { user_id: String },
     Finalize { user_id: String },
 }
@@ -152,6 +152,9 @@ pub trait ApiClient: Send + Sync {
     async fn unblock_contact(&self, user_id: &str) -> RenderableResult<Contact>;
     async fn get_user_profile(&self, user_id: &str) -> RenderableResult<UserProfile> {
         Ok(placeholder_profile(user_id))
+    }
+    async fn get_user_profile_by_username(&self, _username: &str) -> RenderableResult<UserProfile> {
+        todo!()
     }
     async fn get_user_profiles(&self, user_ids: Vec<String>) -> RenderableResult<Vec<UserProfile>> {
         let mut profiles = Vec::with_capacity(user_ids.len());

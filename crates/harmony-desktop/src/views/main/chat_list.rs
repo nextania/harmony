@@ -1,12 +1,12 @@
 use iced::{
-    Border, Color, Element, Font, Length, Padding, alignment,
+    Border, Element, Font, Length, Padding, alignment,
     widget::{Column, button, column, container, row, text},
 };
 
 use crate::{
-    theme::{BG_HOVER, BG_PANEL, BG_SELECTED_CHAT, DM_SANS, TEXT_PRIMARY, TEXT_WHITE},
+    theme::{BG_PANEL, DM_SANS, TEXT_PRIMARY, TEXT_WHITE},
     views::main::{MainMessage, MainView},
-    widgets::button::ButtonExt,
+    widgets::{button::ButtonExt, styles},
 };
 
 pub fn chat_list(state: &MainView) -> Element<MainMessage> {
@@ -61,20 +61,7 @@ pub fn chat_list(state: &MainView) -> Element<MainMessage> {
         let chat_btn = button(container(user_row).padding(Padding::from([4, 0])))
             .on_press(MainMessage::ChatSelected(id.clone()))
             .width(Length::Fill)
-            .style(move |_theme, status| button::Style {
-                background: Some(iced::Background::Color(if is_selected {
-                    BG_SELECTED_CHAT
-                } else {
-                    match status {
-                        button::Status::Hovered => BG_HOVER,
-                        button::Status::Pressed => BG_SELECTED_CHAT,
-                        _ => Color::TRANSPARENT,
-                    }
-                })),
-                border: Border::default().rounded(5),
-                text_color: TEXT_PRIMARY,
-                ..Default::default()
-            })
+            .style(styles::chat_item(is_selected))
             .cursor_default();
 
         chat_items = chat_items.push(chat_btn);

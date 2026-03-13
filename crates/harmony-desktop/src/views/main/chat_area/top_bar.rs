@@ -6,12 +6,9 @@ use iced::{
 use crate::{
     api::Channel,
     icons::{FLUENT_ICONS, Icon},
-    theme::{
-        ACCENT_PURPLE, BG_HOVER, BG_PANEL, BG_SELECTED, BG_SUNKEN, BORDER, DM_SANS,
-        TEXT_PLACEHOLDER, TEXT_PRIMARY,
-    },
+    theme::{ACCENT_PURPLE, BG_PANEL, BG_SUNKEN, BORDER, DM_SANS, TEXT_PLACEHOLDER, TEXT_PRIMARY},
     views::main::{ChatMode, MainMessage, MainView},
-    widgets::button::ButtonExt,
+    widgets::{button::ButtonExt, styles},
 };
 
 pub fn top_bar(state: &MainView) -> Element<MainMessage> {
@@ -77,32 +74,7 @@ pub fn top_bar(state: &MainView) -> Element<MainMessage> {
     )
     .padding(Padding::from([2, 8]))
     .on_press(MainMessage::ChatModeSelected(ChatMode::Text))
-    .style(move |_theme, status| {
-        let border = if text_active {
-            Border {
-                color: ACCENT_PURPLE,
-                width: 2.0,
-                radius: 4.into(),
-            }
-        } else {
-            Border::default().rounded(4)
-        };
-        let bg = if text_active {
-            BG_SELECTED
-        } else {
-            match status {
-                button::Status::Hovered => BG_HOVER,
-                button::Status::Pressed => BG_SELECTED,
-                _ => Color::TRANSPARENT,
-            }
-        };
-        button::Style {
-            background: Some(iced::Background::Color(bg)),
-            border,
-            text_color: TEXT_PRIMARY,
-            ..Default::default()
-        }
-    })
+    .style(styles::tab_mode(text_active))
     .cursor_default();
 
     let voice_btn = button(
@@ -131,32 +103,7 @@ pub fn top_bar(state: &MainView) -> Element<MainMessage> {
     )
     .padding(Padding::from([2, 8]))
     .on_press(MainMessage::ChatModeSelected(ChatMode::Voice))
-    .style(move |_theme, status| {
-        let border = if voice_active {
-            Border {
-                color: ACCENT_PURPLE,
-                width: 2.0,
-                radius: 4.into(),
-            }
-        } else {
-            Border::default().rounded(4)
-        };
-        let bg = if voice_active {
-            BG_SELECTED
-        } else {
-            match status {
-                button::Status::Hovered => BG_HOVER,
-                button::Status::Pressed => BG_SELECTED,
-                _ => Color::TRANSPARENT,
-            }
-        };
-        button::Style {
-            background: Some(iced::Background::Color(bg)),
-            border,
-            text_color: TEXT_PRIMARY,
-            ..Default::default()
-        }
-    })
+    .style(styles::tab_mode(voice_active))
     .cursor_default();
 
     let mode_selector = container(row![text_btn, voice_btn].spacing(4))

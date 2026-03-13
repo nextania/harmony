@@ -6,11 +6,9 @@ use iced_aw::{DropDown, drop_down::Alignment};
 
 use crate::{
     icons::{FLUENT_ICONS, Icon},
-    theme::{
-        BG_HOVER, BG_SELECTED, BG_SIDEBAR, BORDER, DM_SANS, LINK_COLOR, TEXT_MUTED, TEXT_PRIMARY,
-    },
+    theme::{BG_HOVER, BG_SIDEBAR, BORDER, DM_SANS, LINK_COLOR, TEXT_MUTED, TEXT_PRIMARY},
     views::main::{AvatarAction, MainMessage, MainView, SidebarTab},
-    widgets::button::ButtonExt,
+    widgets::{button::ButtonExt, styles},
 };
 
 pub fn sidebar(state: &MainView) -> Element<MainMessage> {
@@ -21,16 +19,7 @@ pub fn sidebar(state: &MainView) -> Element<MainMessage> {
             .font(FLUENT_ICONS),
     )
     .on_press(MainMessage::ToggleChatList)
-    .style(|_theme, status| button::Style {
-        background: Some(iced::Background::Color(match status {
-            button::Status::Hovered => BG_HOVER,
-            button::Status::Pressed => BG_SELECTED,
-            _ => Color::TRANSPARENT,
-        })),
-        border: Border::default().rounded(5),
-        text_color: TEXT_PRIMARY,
-        ..Default::default()
-    })
+    .style(styles::ghost)
     .cursor_default();
 
     let tab_button = |label: &str,
@@ -71,20 +60,7 @@ pub fn sidebar(state: &MainView) -> Element<MainMessage> {
 
         button(container(content).center_x(Length::Fill))
             .on_press(MainMessage::TabSelected(tab))
-            .style(move |_theme, status| button::Style {
-                background: Some(iced::Background::Color(if is_active {
-                    BG_SELECTED
-                } else {
-                    match status {
-                        button::Status::Hovered => BG_HOVER,
-                        button::Status::Pressed => BG_SELECTED,
-                        _ => Color::TRANSPARENT,
-                    }
-                })),
-                border: Border::default().rounded(5),
-                text_color: TEXT_PRIMARY,
-                ..Default::default()
-            })
+            .style(styles::selectable(is_active))
             .cursor_default()
     };
 
@@ -158,10 +134,7 @@ pub fn sidebar(state: &MainView) -> Element<MainMessage> {
     let avatar_btn = button(avatar_with_status)
         .on_press(MainMessage::ToggleAvatarMenu)
         .padding(0)
-        .style(|_theme, _status| button::Style {
-            background: None,
-            ..Default::default()
-        })
+        .style(styles::invisible)
         .cursor_default();
 
     let menu_item =
@@ -179,16 +152,7 @@ pub fn sidebar(state: &MainView) -> Element<MainMessage> {
             )
             .on_press(MainMessage::AvatarMenuAction(action))
             .width(Length::Fill)
-            .style(|_theme, status| button::Style {
-                background: Some(iced::Background::Color(match status {
-                    button::Status::Hovered => BG_HOVER,
-                    button::Status::Pressed => BG_SELECTED,
-                    _ => Color::TRANSPARENT,
-                })),
-                border: Border::default().rounded(5),
-                text_color: TEXT_PRIMARY,
-                ..Default::default()
-            })
+            .style(styles::ghost)
             .cursor_default()
         };
 

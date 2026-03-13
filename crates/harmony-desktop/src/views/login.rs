@@ -12,10 +12,17 @@ use rust_i18n::t;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::{
-    Message, api::{account, live::LiveApiClient}, errors::RenderableError, icons::{FLUENT_ICONS, Icon}, preferences::Locale, theme::{
+    Message,
+    api::{account, live::LiveApiClient},
+    errors::RenderableError,
+    icons::{FLUENT_ICONS, Icon},
+    preferences::Locale,
+    theme::{
         ACCENT_PURPLE, BG_LOGIN_CARD, BG_LOGIN_INPUT, BORDER_CARD, DM_SANS, LINK_COLOR, LOGIN_BG,
         LOGO_SVG, SUBTLE_GREY, TEXT_MUTED, TEXT_WHITE,
-    }, views::main::MainMessage, widgets::button::ButtonExt
+    },
+    views::main::MainMessage,
+    widgets::{button::ButtonExt, styles},
 };
 
 use crate::api::{ApiClient, Channel, CurrentUser};
@@ -153,23 +160,28 @@ impl LoginView {
             .spacing(12)
             .align_y(alignment::Vertical::Center);
 
-        let locale_menu = container(column(Locale::all().into_iter().map(
-            |locale| {
-                    button(text(locale.display_name().to_string()).size(12).color(TEXT_WHITE).font(DM_SANS))
-                        .on_press(LoginMessage::SetLocale(locale.clone()))
-                        .width(Length::Fill)
-                        .padding(Padding::from([4, 8]))
-                        .style(|_theme, status| button::Style {
-                            background: Some(iced::Background::Color(match status {
-                                button::Status::Hovered => color!(0x3a3a4a),
-                                button::Status::Pressed => color!(0x2a2a38),
-                                _ => iced::Color::TRANSPARENT,
-                            })),
-                            border: Border::default().rounded(4),
-                            text_color: TEXT_WHITE,
-                            ..Default::default()
-                        })
-                        .cursor_default()
+        let locale_menu = container(
+            column(Locale::all().into_iter().map(|locale| {
+                button(
+                    text(locale.display_name().to_string())
+                        .size(12)
+                        .color(TEXT_WHITE)
+                        .font(DM_SANS),
+                )
+                .on_press(LoginMessage::SetLocale(locale.clone()))
+                .width(Length::Fill)
+                .padding(Padding::from([4, 8]))
+                .style(|_theme, status| button::Style {
+                    background: Some(iced::Background::Color(match status {
+                        button::Status::Hovered => color!(0x3a3a4a),
+                        button::Status::Pressed => color!(0x2a2a38),
+                        _ => iced::Color::TRANSPARENT,
+                    })),
+                    border: Border::default().rounded(4),
+                    text_color: TEXT_WHITE,
+                    ..Default::default()
+                })
+                .cursor_default()
             }))
             .spacing(2)
             .width(Length::Fill),
@@ -288,16 +300,7 @@ impl LoginView {
         .on_press(LoginMessage::Submit)
         .width(Length::Fill)
         .padding(Padding::from([4, 8]))
-        .style(|_theme, status| button::Style {
-            background: Some(iced::Background::Color(match status {
-                button::Status::Hovered => color!(0xa000cc),
-                button::Status::Pressed => color!(0x6e008a),
-                _ => ACCENT_PURPLE,
-            })),
-            border: Border::default().rounded(4),
-            text_color: TEXT_WHITE,
-            ..Default::default()
-        })
+        .style(styles::primary)
         .cursor_default();
 
         let use_passkey = text(t!("login.passkey"))
@@ -335,12 +338,7 @@ impl LoginView {
                     .font(DM_SANS)
             )
             .padding(Padding::ZERO)
-            .style(|_theme, _status| button::Style {
-                background: None,
-                border: Border::default(),
-                text_color: LINK_COLOR,
-                ..Default::default()
-            })
+            .style(styles::link)
             .on_press(LoginMessage::OpenExternalLink(
                 "https://account.nextania.com/register".to_string()
             )),
@@ -351,12 +349,7 @@ impl LoginView {
                     .font(DM_SANS)
             )
             .padding(Padding::ZERO)
-            .style(|_theme, _status| button::Style {
-                background: None,
-                border: Border::default(),
-                text_color: LINK_COLOR,
-                ..Default::default()
-            })
+            .style(styles::link)
             .on_press(LoginMessage::OpenBackend),
             button(
                 text(t!("login.help"))
@@ -365,12 +358,7 @@ impl LoginView {
                     .font(DM_SANS)
             )
             .padding(Padding::ZERO)
-            .style(|_theme, _status| button::Style {
-                background: None,
-                border: Border::default(),
-                text_color: LINK_COLOR,
-                ..Default::default()
-            })
+            .style(styles::link)
             .on_press(LoginMessage::OpenExternalLink(
                 "https://nextania.com".to_string()
             )),

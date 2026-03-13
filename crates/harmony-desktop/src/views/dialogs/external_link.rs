@@ -5,7 +5,7 @@ use iced::{
     widget::{Space, button, column, container, row, text},
 };
 
-use crate::Message;
+use crate::{Message, widgets::styles};
 use crate::{
     theme::{
         ACCENT_PURPLE, BG_APP, BG_SELECTED, BG_SUNKEN, BORDER, DM_SANS, TEXT_MUTED, TEXT_WHITE,
@@ -77,34 +77,12 @@ impl ExternalLinkView {
                     button(text("Open link").font(DM_SANS).size(12))
                         .on_press(ExternalLinkMessage::Open)
                         .padding(Padding::from([4, 8]))
-                        .style(|_theme, status| button::Style {
-                            background: Some(iced::Background::Color(match status {
-                                button::Status::Hovered => color!(0xa000cc),
-                                button::Status::Pressed => color!(0x6e008a),
-                                _ => ACCENT_PURPLE,
-                            })),
-                            border: Border::default().rounded(4),
-                            text_color: TEXT_WHITE,
-                            ..Default::default()
-                        })
+                        .style(styles::primary)
                         .cursor_default(),
                     button(text("Cancel").font(DM_SANS).size(12))
                         .on_press(ExternalLinkMessage::Close)
                         .padding(Padding::from([4, 8]))
-                        .style(|_theme, status| button::Style {
-                            background: Some(iced::Background::Color(match status {
-                                button::Status::Hovered => color!(0x3d2448),
-                                button::Status::Pressed => color!(0x231528),
-                                _ => BG_SELECTED,
-                            })),
-                            border: Border {
-                                color: BORDER,
-                                width: 1.0,
-                                ..Border::default().rounded(4)
-                            },
-                            text_color: TEXT_WHITE,
-                            ..Default::default()
-                        })
+                        .style(styles::secondary)
                         .cursor_default(),
                 ]
                 .spacing(8)

@@ -11,7 +11,7 @@ use crate::{
         TEXT_MUTED, TEXT_PLACEHOLDER, TEXT_PRIMARY,
     },
     views::main::{MainMessage, MainView},
-    widgets::button::ButtonExt,
+    widgets::{button::ButtonExt, styles},
 };
 
 pub fn chat_frame(state: &MainView) -> Element<MainMessage> {
@@ -35,24 +35,7 @@ pub fn chat_frame(state: &MainView) -> Element<MainMessage> {
             .font(FLUENT_ICONS),
     )
     .on_press(MainMessage::JoinCall)
-    .style(|_theme, status| match status {
-        button::Status::Hovered => button::Style {
-            border: Border::default().rounded(5),
-            text_color: ACCENT_PURPLE,
-            ..Default::default()
-        },
-        button::Status::Pressed => button::Style {
-            border: Border::default().rounded(5),
-            text_color: TEXT_MUTED,
-            ..Default::default()
-        },
-        _ => button::Style {
-            background: Some(iced::Background::Color(Color::TRANSPARENT)),
-            border: Border::default().rounded(5),
-            text_color: TEXT_PRIMARY,
-            ..Default::default()
-        },
-    })
+    .style(styles::icon_accent)
     .padding(0)
     .cursor_default();
 
@@ -66,24 +49,7 @@ pub fn chat_frame(state: &MainView) -> Element<MainMessage> {
         .font(FLUENT_ICONS),
     )
     .on_press(MainMessage::ToggleEmojiPicker)
-    .style(|_theme, status| match status {
-        button::Status::Hovered => button::Style {
-            border: Border::default().rounded(5),
-            text_color: ACCENT_PURPLE,
-            ..Default::default()
-        },
-        button::Status::Pressed => button::Style {
-            border: Border::default().rounded(5),
-            text_color: TEXT_MUTED,
-            ..Default::default()
-        },
-        _ => button::Style {
-            background: Some(iced::Background::Color(Color::TRANSPARENT)),
-            border: Border::default().rounded(5),
-            text_color: TEXT_PRIMARY,
-            ..Default::default()
-        },
-    })
+    .style(styles::icon_accent)
     .padding(0)
     .cursor_default();
 

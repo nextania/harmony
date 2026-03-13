@@ -11,7 +11,7 @@ use crate::{
         TEXT_MUTED, TEXT_PRIMARY, TEXT_WHITE,
     },
     views::main::{MainMessage, MainView},
-    widgets::button::ButtonExt,
+    widgets::{button::ButtonExt, styles},
 };
 
 pub fn people_list(state: &MainView) -> Element<MainMessage> {
@@ -48,16 +48,7 @@ pub fn people_list(state: &MainView) -> Element<MainMessage> {
     )
     .on_press(MainMessage::AddContactSubmit)
     .padding(Padding::from([6, 8]))
-    .style(|_theme, status| button::Style {
-        background: Some(iced::Background::Color(match status {
-            button::Status::Hovered => BG_HOVER,
-            button::Status::Pressed => BG_SELECTED,
-            _ => Color::TRANSPARENT,
-        })),
-        border: Border::default().rounded(5),
-        text_color: TEXT_PRIMARY,
-        ..Default::default()
-    })
+    .style(styles::ghost)
     .cursor_default();
 
     let add_row = row![add_input, add_btn]

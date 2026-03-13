@@ -10,7 +10,7 @@ use crate::{
     errors::RenderableError,
     theme::{ACCENT_PURPLE, BG_APP, BG_LOGIN_INPUT, DM_SANS, SUBTLE_GREY, TEXT_WHITE},
     views::main::MainMessage,
-    widgets::button::ButtonExt,
+    widgets::{button::ButtonExt, styles},
 };
 
 #[derive(Clone)]
@@ -132,16 +132,7 @@ impl MfaView {
         .on_press(MfaMessage::Submit)
         .width(Length::Fill)
         .padding(Padding::from([6, 8]))
-        .style(|_theme, status| button::Style {
-            background: Some(iced::Background::Color(match status {
-                button::Status::Hovered => color!(0xa000cc),
-                button::Status::Pressed => color!(0x6e008a),
-                _ => ACCENT_PURPLE,
-            })),
-            border: Border::default().rounded(4),
-            text_color: TEXT_WHITE,
-            ..Default::default()
-        })
+        .style(styles::primary)
         .cursor_default();
 
         let mut content = column![

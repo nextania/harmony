@@ -1,15 +1,12 @@
 use iced::{
-    Border, Element, Length, Padding, Task, Theme, alignment, color,
+    Border, Element, Length, Padding, Task, Theme, alignment,
     widget::{Space, button, column, container, row, text, text_input},
 };
 
 use crate::{
     Message,
-    theme::{
-        ACCENT_PURPLE, BG_APP, BG_LOGIN_INPUT, BG_SELECTED, BORDER, DM_SANS, SUBTLE_GREY,
-        TEXT_MUTED, TEXT_WHITE,
-    },
-    widgets::button::ButtonExt,
+    theme::{ACCENT_PURPLE, BG_APP, BG_LOGIN_INPUT, DM_SANS, SUBTLE_GREY, TEXT_MUTED, TEXT_WHITE},
+    widgets::{button::ButtonExt, styles},
 };
 
 #[derive(Clone)]
@@ -107,55 +104,30 @@ impl BackendView {
             .width(Length::Fill);
 
         let save_btn = button(
-            container(
                 text("Save")
                     .size(12)
                     .color(TEXT_WHITE)
                     .font(DM_SANS)
                     .align_x(alignment::Horizontal::Center),
-            )
-            .center_x(Length::Fill),
+
         )
         .on_press(BackendMessage::Save)
         .padding(Padding::from([4, 8]))
-        .style(|_theme, status| button::Style {
-            background: Some(iced::Background::Color(match status {
-                button::Status::Hovered => color!(0xa000cc),
-                button::Status::Pressed => color!(0x6e008a),
-                _ => ACCENT_PURPLE,
-            })),
-            border: Border::default().rounded(4),
-            text_color: TEXT_WHITE,
-            ..Default::default()
-        })
+        .style(styles::primary)
         .cursor_default();
 
         let cancel_btn = button(
-            container(
+            
                 text("Cancel")
                     .size(12)
                     .color(TEXT_WHITE)
                     .font(DM_SANS)
                     .align_x(alignment::Horizontal::Center),
-            )
-            .center_x(Length::Fill),
+
         )
         .on_press(BackendMessage::Close)
         .padding(Padding::from([4, 8]))
-        .style(|_theme, status| button::Style {
-            background: Some(iced::Background::Color(match status {
-                button::Status::Hovered => color!(0x3d2448),
-                button::Status::Pressed => color!(0x231528),
-                _ => BG_SELECTED,
-            })),
-            border: Border {
-                color: BORDER,
-                width: 1.0,
-                ..Border::default().rounded(4)
-            },
-            text_color: TEXT_WHITE,
-            ..Default::default()
-        })
+        .style(styles::secondary)
         .cursor_default();
 
         let content = column![

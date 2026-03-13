@@ -7,12 +7,11 @@ use crate::{
     api::CallState,
     icons::{FLUENT_ICONS, Icon},
     theme::{
-        ACCENT_PURPLE, ACCENT_PURPLE_DIM, BG_APP, BG_CTRL_INACTIVE, BG_PARTICIPANT_CARD,
-        BG_PARTICIPANT_LABEL, BG_SCREENSHARE_PANEL, DANGER_RED, DM_SANS, OVERLAY, TEXT_MUTED,
-        TEXT_PRIMARY,
+        ACCENT_PURPLE, BG_APP, BG_CTRL_INACTIVE, BG_PARTICIPANT_CARD, BG_PARTICIPANT_LABEL,
+        BG_SCREENSHARE_PANEL, DANGER_RED, DM_SANS, OVERLAY, TEXT_MUTED, TEXT_PRIMARY,
     },
     views::main::{MainMessage, MainView},
-    widgets::button::ButtonExt,
+    widgets::{button::ButtonExt, styles},
 };
 
 pub fn voice_area(state: &MainView) -> Element<MainMessage> {
@@ -33,22 +32,7 @@ pub fn voice_area(state: &MainView) -> Element<MainMessage> {
             .width(Length::Shrink)
             .on_press(MainMessage::StartCall)
             .padding(Padding::from([6, 12]))
-            .style(|_theme, _status| button::Style {
-                background: Some(iced::Background::Color(ACCENT_PURPLE_DIM)),
-                border: Border::default().rounded(5),
-                text_color: TEXT_PRIMARY,
-                shadow: Shadow {
-                    color: Color {
-                        r: 106.0 / 255.0,
-                        g: 0.0,
-                        b: 155.0 / 255.0,
-                        a: 0.25,
-                    },
-                    offset: Vector::new(0.0, 4.0),
-                    blur_radius: 4.0,
-                },
-                ..Default::default()
-            })
+            .style(styles::accent_dim)
             .cursor_default();
 
             let label = text("No active call in this channel")
@@ -106,22 +90,7 @@ pub fn voice_area(state: &MainView) -> Element<MainMessage> {
                 .width(Length::Shrink)
                 .on_press(MainMessage::JoinCall)
                 .padding(Padding::from([6, 12]))
-                .style(|_theme, _status| button::Style {
-                    background: Some(iced::Background::Color(ACCENT_PURPLE_DIM)),
-                    border: Border::default().rounded(5),
-                    text_color: TEXT_PRIMARY,
-                    shadow: Shadow {
-                        color: Color {
-                            r: 106.0 / 255.0,
-                            g: 0.0,
-                            b: 155.0 / 255.0,
-                            a: 0.25,
-                        },
-                        offset: Vector::new(0.0, 4.0),
-                        blur_radius: 4.0,
-                    },
-                    ..Default::default()
-                })
+                .style(styles::accent_dim)
                 .cursor_default();
 
                 container(
@@ -323,12 +292,7 @@ fn voice_in_call<'a>(state: &'a MainView, call: &'a CallState) -> Element<'a, Ma
         )
         .on_press(msg)
         .padding(0)
-        .style(move |_theme, _status| button::Style {
-            background: Some(iced::Background::Color(bg)),
-            border: Border::default().rounded(5),
-            text_color: TEXT_PRIMARY,
-            ..Default::default()
-        })
+        .style(styles::call_ctrl(bg))
         .cursor_default()
         .into()
     };

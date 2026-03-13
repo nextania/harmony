@@ -78,18 +78,6 @@ impl User {
             None => Err(Error::NotFound),
         }
     }
-    pub async fn get_by_username(username: &String) -> Result<User> {
-        let users = super::get_database().collection::<User>("users");
-        let user = users
-            .find_one(doc! {
-                "username": username
-            })
-            .await?;
-        match user {
-            Some(user) => Ok(user),
-            None => Err(Error::NotFound),
-        }
-    }
 
     pub async fn create(id: String) -> Result<User> {
         let users = super::get_database().collection::<User>("users");
@@ -113,10 +101,10 @@ impl User {
         let users = super::get_database().collection::<User>("users");
         match stage {
             AddContactStage::Request {
-                username,
+                id,
                 public_key,
             } => {
-                let target = User::get_by_username(&username).await?;
+                let target = User::get(&id).await?;
                 let contact_id = &target.id;
                 let existing = self.contacts.iter().find(|a| &a.id == contact_id);
                 if let Some(existing) = existing {
@@ -298,7 +286,7 @@ impl User {
                     ))
                     .await?;
 
-                // if there is already a channel between the users,
+                // if there is already a channel between the users, 
                 // this means that there was previously a relationship that was removed
                 // then update the last_key_id for that channel with the new key_id
                 let channel = Channel::get_between(&self.id, &user_id).await?;
@@ -469,7 +457,7 @@ impl User {
                 doc! { "id": &self.id },
                 doc! {
                     "$set": {
-                        "keyPackage": bson::to_bson(&KeyPackage {
+                        "key_package": bson::to_bson(&KeyPackage {
                             encrypted_keys,
                         })?
                     }

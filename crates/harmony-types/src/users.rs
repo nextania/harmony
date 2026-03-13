@@ -112,7 +112,7 @@ pub struct SetKeyPackageResponse {}
 pub enum AddContactStage {
     // 1. send a request with our public key
     Request {
-        username: String,
+        id: String,
         public_key: UnifiedPublicKey,
     },
     // 2. accept the request and send our public key + ML-KEM encapsulation to requester

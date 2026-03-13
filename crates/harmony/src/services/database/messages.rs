@@ -2,7 +2,10 @@ use mongodb::bson::{Binary, doc, spec::BinarySubtype};
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
-use crate::{errors::{Error, Result}, services::database::channels::Channel};
+use crate::{
+    errors::{Error, Result},
+    services::database::channels::Channel,
+};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

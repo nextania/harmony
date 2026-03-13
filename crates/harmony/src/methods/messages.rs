@@ -10,7 +10,8 @@ use crate::{
     methods::{Event, MessageDeletedEvent, MessageEditedEvent, NewMessageEvent, emit_to_ids},
     services::database::{
         channels::{Channel, EncryptionHint},
-        messages::Message, users::User,
+        messages::Message,
+        users::User,
     },
 };
 
@@ -54,7 +55,12 @@ pub async fn send_message(state: RpcState, data: RpcValue<SendMessageMethod>) ->
     if !channel.is_member(&user.id) {
         return Err(Error::NotInChannel);
     }
-    if let Channel::PrivateChannel { initiator_id, target_id, .. } = &channel {
+    if let Channel::PrivateChannel {
+        initiator_id,
+        target_id,
+        ..
+    } = &channel
+    {
         let other_id = if initiator_id == &user.id {
             target_id
         } else {

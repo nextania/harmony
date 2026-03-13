@@ -114,7 +114,11 @@ impl Channel {
             _ => false,
         }
     }
-    pub async fn create_private(initiator_id: String, target_id: String, key_id: String) -> Result<Channel> {
+    pub async fn create_private(
+        initiator_id: String,
+        target_id: String,
+        key_id: String,
+    ) -> Result<Channel> {
         let database = super::get_database();
         let channel = Channel::PrivateChannel {
             id: Ulid::new().to_string(),

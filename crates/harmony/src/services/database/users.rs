@@ -1,6 +1,9 @@
 use futures_util::StreamExt;
 use harmony_types::users::{AddContactStage, UserProfile};
-use mongodb::{bson::{self, doc}, options::UpdateOptions};
+use mongodb::{
+    bson::{self, doc},
+    options::UpdateOptions,
+};
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
@@ -295,7 +298,7 @@ impl User {
                     ))
                     .await?;
 
-                // if there is already a channel between the users, 
+                // if there is already a channel between the users,
                 // this means that there was previously a relationship that was removed
                 // then update the last_key_id for that channel with the new key_id
                 let channel = Channel::get_between(&self.id, &user_id).await?;

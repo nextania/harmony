@@ -1,10 +1,10 @@
 pub mod account;
+pub mod channel_manager;
 pub mod crypto;
 pub mod keystore;
 pub mod live;
 pub mod mock;
 pub mod user_manager;
-pub mod channel_manager;
 
 pub use user_manager::UserManager;
 
@@ -128,11 +128,7 @@ pub trait ApiClient: Send + Sync {
     async fn get_current_user(&self) -> RenderableResult<CurrentUser>;
     async fn get_conversations(&self) -> RenderableResult<Vec<Channel>>;
     async fn get_messages(&self, conversation_id: &str) -> RenderableResult<Vec<ApiMessage>>;
-    async fn send_message(
-        &self,
-        channel_id: &str,
-        content: &str,
-    ) -> RenderableResult<ApiMessage>;
+    async fn send_message(&self, channel_id: &str, content: &str) -> RenderableResult<ApiMessage>;
     async fn edit_message(
         &self,
         message_id: &str,
@@ -164,14 +160,14 @@ pub trait ApiClient: Send + Sync {
         }
         Ok(profiles)
     }
-    async fn create_group_channel(&self, name: Option<&str>, description: Option<&str>) -> RenderableResult<Channel>;
+    async fn create_group_channel(
+        &self,
+        name: Option<&str>,
+        description: Option<&str>,
+    ) -> RenderableResult<Channel>;
     async fn get_group_key(&self, channel_id: &str) -> RenderableResult<Option<Vec<u8>>>;
     async fn create_group_invite(&self, channel_id: &str) -> RenderableResult<String>;
-    async fn join_group(
-        &self,
-        invite_code: &str,
-        group_key: &[u8],
-    ) -> RenderableResult<()>;
+    async fn join_group(&self, invite_code: &str, group_key: &[u8]) -> RenderableResult<()>;
 }
 
 pub fn placeholder_profile(user_id: &str) -> UserProfile {

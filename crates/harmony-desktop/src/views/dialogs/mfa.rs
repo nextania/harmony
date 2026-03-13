@@ -25,15 +25,17 @@ pub struct MfaView {
     code: String,
     error: Option<String>,
     backend_harmony: String,
+    password: String,
 }
 
 impl MfaView {
-    pub fn new(mfa: account::LoginMfa, backend_harmony: String) -> Self {
+    pub fn new(mfa: account::LoginMfa, backend_harmony: String, password: String) -> Self {
         Self {
             mfa: Some(mfa),
             code: String::new(),
             error: None,
             backend_harmony,
+            password,
         }
     }
 
@@ -53,10 +55,11 @@ impl MfaView {
                     let mfa = mfa.clone();
                     let code = self.code.clone();
                     let backend_harmony = self.backend_harmony.clone();
+                    let password = self.password.clone();
                     return Task::stream(stream! {
                         let result = async {
-                            let token = mfa.code(&code).await?;
-                            let (client, stream) = LiveApiClient::connect(&backend_harmony, &token).await?;
+                            let (token, encrypted_key) = mfa.code(&code).await?;
+                            let (client, stream) = LiveApiClient::connect(&backend_harmony, &token, &encrypted_key, &password).await?;
                             let current_user = client.get_current_user().await?;
                             let conversations = client.get_conversations().await?
                                 .into_iter().map(|c| (c.id(), c)).collect();

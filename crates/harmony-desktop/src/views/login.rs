@@ -98,8 +98,8 @@ impl LoginView {
                 return Task::stream(stream! {
                     let result = async {
                         match account::login(&backend_account, &email, &password).await? {
-                            account::LoginResult::Success(token) => {
-                                let (client, stream) = LiveApiClient::connect(&backend_harmony, &token).await?;
+                            account::LoginResult::Success((token, encrypted_key)) => {
+                                let (client, stream) = LiveApiClient::connect(&backend_harmony, &token, &encrypted_key, &password).await?;
                                 let current_user = client.get_current_user().await?;
                                 let conversations = client.get_conversations().await?
                                     .into_iter().map(|c| (c.id(), c)).collect();
@@ -117,7 +117,7 @@ impl LoginView {
                                 yield Message::Main(MainMessage::ServerEvent(event));
                             }
                         }
-                        Ok(LoginFlow::NeedsMfa(mfa)) => yield Message::OpenMfa(mfa),
+                        Ok(LoginFlow::NeedsMfa(mfa)) => yield Message::OpenMfa(mfa, password),
                         Err(e) => yield Message::Login(LoginMessage::Failed(e)),
                     }
                 });
@@ -170,8 +170,10 @@ impl LoginView {
                             ..Default::default()
                         })
                         .cursor_default()
-            },
-        )).spacing(2).width(Length::Fill))
+            }))
+            .spacing(2)
+            .width(Length::Fill),
+        )
         .padding(6)
         .width(Length::Fixed(150.0))
         .style(|_theme| container::Style {

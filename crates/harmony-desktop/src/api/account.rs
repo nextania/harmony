@@ -2,7 +2,11 @@
 
 use std::sync::LazyLock;
 
-use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
+use argon2::{Algorithm, Argon2, ParamsBuilder, Version};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD as BASE64};
+use opaque_ke::errors::InternalError;
+use opaque_ke::generic_array::{ArrayLength, GenericArray};
+use opaque_ke::ksf::Ksf;
 use opaque_ke::rand::rngs::OsRng;
 use opaque_ke::{
     CipherSuite, ClientLogin, ClientLoginFinishParameters, CredentialResponse, Ristretto255,
@@ -17,7 +21,22 @@ struct DefaultCipherSuite;
 impl CipherSuite for DefaultCipherSuite {
     type OprfCs = Ristretto255;
     type KeyExchange = TripleDh<Ristretto255, sha2::Sha512>;
-    type Ksf = opaque_ke::ksf::Identity;
+    type Ksf = ArgonKsf;
+}
+
+#[derive(Default)]
+struct ArgonKsf {
+    argon: Argon2<'static>,
+}
+
+impl Ksf for ArgonKsf {
+    fn hash<L: ArrayLength<u8>>(&self, input: GenericArray<u8, L>) -> Result<GenericArray<u8, L>, InternalError> {
+        let mut output = GenericArray::default();
+        self.argon
+            .hash_password_into(&input, &[0; argon2::RECOMMENDED_SALT_LEN], &mut output)
+            .map_err(|_| InternalError::KsfError)?;
+        Ok(output)
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -56,14 +75,16 @@ pub enum LoginResponse {
         mfa_enabled: bool,
         continue_token: Option<String>,
         token: Option<String>,
+        encrypted_key: Option<String>,
     },
     Mfa {
         token: String,
+        encrypted_key: String,
     },
 }
 
 pub enum LoginResult {
-    Success(String),
+    Success((String, String)),
     RequiresContinuation(LoginMfa),
 }
 
@@ -74,6 +95,17 @@ pub struct LoginMfa {
 }
 
 static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
+
+fn get_argon2_ksf() -> ArgonKsf {
+    let mut param_builder = ParamsBuilder::default();
+    param_builder.t_cost(3);
+    param_builder.m_cost(1 << 16);
+    param_builder.p_cost(4);
+
+    let params = param_builder.build().expect("The provided Argon2 parameters should be valid");
+    let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    return ArgonKsf { argon };
+}
 
 pub async fn login(
     base_url: &str,
@@ -131,6 +163,8 @@ pub async fn login(
     let credential_response =
         CredentialResponse::<DefaultCipherSuite>::deserialize(&server_message_bytes)
             .map_err(|_| RenderableError::IncorrectCredentials)?;
+    let ksf = get_argon2_ksf();
+    let finish_params = ClientLoginFinishParameters::new(None, Default::default(), Some(&ksf));
 
     let login_finish = login_start
         .state
@@ -138,7 +172,7 @@ pub async fn login(
             &mut rng,
             password.as_bytes(),
             credential_response,
-            ClientLoginFinishParameters::default(),
+            finish_params,
         )
         .map_err(|_| RenderableError::IncorrectCredentials)?;
 
@@ -173,8 +207,9 @@ pub async fn login(
         LoginResponse::FinishLogin {
             mfa_enabled: false,
             token: Some(token),
+            encrypted_key: Some(encrypted_key),
             ..
-        } => Ok(LoginResult::Success(token)),
+        } => Ok(LoginResult::Success((token, encrypted_key))),
         LoginResponse::FinishLogin {
             mfa_enabled: true,
             continue_token: Some(ct),
@@ -188,7 +223,7 @@ pub async fn login(
 }
 
 impl LoginMfa {
-    pub async fn code(&self, code: &str) -> Result<String, RenderableError> {
+    pub async fn code(&self, code: &str) -> Result<(String, String), RenderableError> {
         let payload = Login::Mfa {
             code: code.to_string(),
             continue_token: self.continue_token.clone(),
@@ -213,7 +248,7 @@ impl LoginMfa {
             .map_err(|e| RenderableError::UnknownError(e.to_string()))?;
 
         match mfa_response {
-            LoginResponse::Mfa { token } => Ok(token),
+            LoginResponse::Mfa { token, encrypted_key } => Ok((token, encrypted_key)),
             _ => Err(RenderableError::IncorrectCredentials),
         }
     }

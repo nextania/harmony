@@ -48,7 +48,8 @@ impl Keystore {
     }
 
     pub fn store_contact_key(&mut self, contact_id: &str, contact_key: ContactPrivateKey) {
-        self.negotiation_keys.insert(contact_id.to_string(), contact_key);
+        self.negotiation_keys
+            .insert(contact_id.to_string(), contact_key);
     }
 
     pub fn get_encryption(&self, contact_id: &str) -> Option<PersistentEncryption> {
@@ -62,14 +63,17 @@ impl Keystore {
     }
 
     pub fn store_outgoing_ss(&mut self, contact_id: &str, ss: &[u8; 32]) {
-        if let Some(contact_key) = self.negotiation_keys.get_mut(contact_id) &&
-        contact_key.outgoing_ss.is_none() {
+        if let Some(contact_key) = self.negotiation_keys.get_mut(contact_id)
+            && contact_key.outgoing_ss.is_none()
+        {
             contact_key.outgoing_ss = Some(*ss);
         }
     }
 
     pub fn get_outgoing_ss(&self, contact_id: &str) -> Option<[u8; 32]> {
-        self.negotiation_keys.get(contact_id).and_then(|contact_key| contact_key.outgoing_ss)
+        self.negotiation_keys
+            .get(contact_id)
+            .and_then(|contact_key| contact_key.outgoing_ss)
     }
 
     pub fn store_group_key(&mut self, channel_id: &str, key: &[u8; 32]) {

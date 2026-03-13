@@ -1,5 +1,5 @@
 use chacha20poly1305::{
-    ChaCha20Poly1305, KeyInit,
+    XChaCha20Poly1305, KeyInit,
     aead::{Aead, AeadCore, OsRng},
 };
 use hkdf::Hkdf;
@@ -132,26 +132,26 @@ impl PersistentEncryption {
     }
 
     pub fn encrypt_with_key(key: &[u8; 32], plaintext: &[u8]) -> Vec<u8> {
-        let cipher = ChaCha20Poly1305::new(key.into());
-        let nonce = ChaCha20Poly1305::generate_nonce(&mut OsRng);
+        let cipher = XChaCha20Poly1305::new(key.into());
+        let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
         let ciphertext = cipher
             .encrypt(&nonce, plaintext)
-            .expect("ChaCha20-Poly1305 encryption should not fail");
+            .expect("XChaCha20-Poly1305 encryption should not fail");
 
-        // [ nonce (12) | chacha_ct ]
-        let mut out = Vec::with_capacity(12 + ciphertext.len());
+        // [ nonce (24) | chacha_ct ]
+        let mut out = Vec::with_capacity(24 + ciphertext.len());
         out.extend_from_slice(&nonce);
         out.extend_from_slice(&ciphertext);
         out
     }
 
     pub fn decrypt_with_key(key: &[u8; 32], data: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        if data.len() < 12 {
+        if data.len() < 24 {
             return Err(CryptoError::InvalidCiphertext);
         }
-        let (nonce_bytes, chacha_ct) = data.split_at(12);
-        let nonce = chacha20poly1305::Nonce::from_slice(nonce_bytes);
-        let cipher = ChaCha20Poly1305::new(key.into());
+        let (nonce_bytes, chacha_ct) = data.split_at(24);
+        let nonce = chacha20poly1305::XNonce::from_slice(nonce_bytes);
+        let cipher = XChaCha20Poly1305::new(key.into());
         cipher
             .decrypt(nonce, chacha_ct)
             .map_err(|_| CryptoError::DecryptionFailed)

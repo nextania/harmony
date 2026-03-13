@@ -1,8 +1,12 @@
 use std::sync::Arc;
 
+use argon2::Argon2;
 use async_trait::async_trait;
-use chacha20poly1305::{ChaCha20Poly1305, KeyInit, aead::OsRng};
-use harmony_api::{AddContactStage, ClientOptions, EncryptionHint, Event, HarmonyClient, RelationshipState};
+use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
+use chacha20poly1305::{AeadCore, KeyInit, XChaCha20Poly1305, aead::{Aead, OsRng}};
+use harmony_api::{
+    AddContactStage, ClientOptions, EncryptionHint, Event, HarmonyClient, RelationshipState,
+};
 use reqwest::Client;
 use rkyv::{Archive, Deserialize, Serialize};
 use tokio::sync::{Mutex, mpsc};
@@ -10,7 +14,10 @@ use tokio::sync::{Mutex, mpsc};
 use crate::{
     MessageAuthor,
     api::{
-        ApiClient, ApiMessage, ApiMessageContent, CallParticipant, CallState, CallTokenInfo, CallTrackState, Channel, Contact, ContactAction, ContactStatus, CurrentUser, UserManager, UserProfile, UserStatus, channel_manager::ChannelManager, crypto::PersistentEncryption, keystore::Keystore, placeholder_profile
+        ApiClient, ApiMessage, ApiMessageContent, CallParticipant, CallState, CallTokenInfo,
+        CallTrackState, Channel, Contact, ContactAction, ContactStatus, CurrentUser, UserManager,
+        UserProfile, UserStatus, channel_manager::ChannelManager, crypto::PersistentEncryption,
+        keystore::Keystore, placeholder_profile,
     },
     errors::{RenderableError, RenderableResult},
 };
@@ -30,20 +37,59 @@ pub struct LiveApiClient {
     channels: Arc<ChannelManager>,
 }
 
+pub fn get_key_b(encrypted_key: &str, password: &str) -> RenderableResult<XChaCha20Poly1305> {
+    let encrypted_key_bytes = BASE64_URL_SAFE_NO_PAD.decode(encrypted_key)
+        .map_err(|e| RenderableError::CryptoError(format!("Failed to decode encrypted keys: {e}")))?;
+    if encrypted_key_bytes.len() != 88 {
+        return Err(RenderableError::CryptoError("Invalid encrypted keys length".into()));
+    }
+    let argon2 = Argon2::new(
+        argon2::Algorithm::Argon2id,
+        argon2::Version::V0x13,
+        // FIXME: the browser side uses some really weird defaults
+        argon2::Params::new(1024, 1, 1, None).unwrap(),
+    );
+    let salt = &encrypted_key_bytes[..16];
+    let mut password_key_a = [0u8; 32];
+    argon2.hash_password_into(password.as_bytes(), salt, &mut password_key_a).map_err(|e| RenderableError::CryptoError(format!("Failed to derive key from password: {e}")))?;
+    let cipher = XChaCha20Poly1305::new(&password_key_a.into());
+    let nonce = &encrypted_key_bytes[16..40];
+    let ciphertext = &encrypted_key_bytes[40..];
+    let decrypted = cipher.decrypt(nonce.into(), ciphertext)
+        .map_err(|e| RenderableError::CryptoError(format!("Failed to decrypt keys: {e}")))?;
+    if decrypted.len() != 32 {
+        return Err(RenderableError::CryptoError("Invalid decrypted key B length".into()));
+    }
+    let decrypted: [u8; 32] = decrypted.try_into().map_err(|_| RenderableError::CryptoError("Failed to convert decrypted key to array".into()))?;
+    Ok(XChaCha20Poly1305::new(&decrypted.into()))
+}
+
 impl LiveApiClient {
     pub async fn connect(
         url: &str,
         token: &str,
+        encrypted_key: &str,
+        password: &str,
     ) -> Result<(Arc<dyn ApiClient>, mpsc::UnboundedReceiver<Event>), RenderableError> {
         let (client, recv) = HarmonyClient::new(ClientOptions::new(url, token)).await?;
         let current = client.get_current_user().await?;
         let keystore = if let Some(ref encrypted_keys) = current.encrypted_keys {
-            // FIXME: decrypt with password-derived key, then deserialize
-            Keystore::from_bytes(encrypted_keys).unwrap_or_default()
+            let key_b = get_key_b(encrypted_key, password)?;
+            let nonce = &encrypted_keys[..24];
+            let ciphertext = &encrypted_keys[24..];
+            let decrypted_keys = key_b.decrypt(nonce.into(), ciphertext)
+                .map_err(|e| RenderableError::CryptoError(format!("Failed to decrypt keys with key B: {e}")))?;
+            Keystore::from_bytes(&decrypted_keys).unwrap_or_default()
         } else {
             let ks = Keystore::new();
+            // encrypt
+            let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
+            let cipher = get_key_b(encrypted_key, password)?;
+            let encrypted_key_a = cipher.encrypt(&nonce, ks.to_bytes().as_ref())
+                .map_err(|e| RenderableError::CryptoError(format!("Failed to encrypt keys: {e}")))?;
+            let combined = [nonce.as_slice(), encrypted_key_a.as_slice()].concat();
             let _ = client
-                .set_key_package(ks.to_bytes()) // TODO: encrypt with password-derived key
+                .set_key_package(combined)
                 .await;
             ks
         };
@@ -65,16 +111,17 @@ impl LiveApiClient {
         let _ = self.client.set_key_package(ks.to_bytes()).await;
     }
 
-    pub async fn decrypt_content(
-        &self,
-        msg: &harmony_api::Message,
-    ) -> RenderableResult<String> {
+    pub async fn decrypt_content(&self, msg: &harmony_api::Message) -> RenderableResult<String> {
         if msg.content.is_empty() {
-            return Err(RenderableError::UnknownError("Empty encrypted message payload".to_string()));
+            return Err(RenderableError::UnknownError(
+                "Empty encrypted message payload".to_string(),
+            ));
         }
         let channel = self.channels.get_channel(&msg.channel_id).await?;
         match channel {
-            harmony_api::Channel::GroupChannel { encryption_hint, .. } => {
+            harmony_api::Channel::GroupChannel {
+                encryption_hint, ..
+            } => {
                 if matches!(encryption_hint, EncryptionHint::Mls) {
                     todo!()
                 } else {
@@ -85,22 +132,24 @@ impl LiveApiClient {
                         ));
                     };
                     match PersistentEncryption::decrypt_with_key(&key, &msg.content) {
-                        Ok(plaintext) => return Ok(String::from_utf8_lossy(&plaintext).into_owned()),
+                        Ok(plaintext) => {
+                            return Ok(String::from_utf8_lossy(&plaintext).into_owned());
+                        }
                         Err(e) => return Err(RenderableError::CryptoError(e.to_string())),
                     }
                 }
-            },
+            }
             harmony_api::Channel::PrivateChannel { .. } => {
                 let Some(key_id) = &msg.key_id else {
                     return Err(RenderableError::CryptoError(
                         "Missing key ID for private message".to_string(),
-                    ))
+                    ));
                 };
                 let ks = self.keystore.lock().await;
                 let Some(key) = ks.get_direct_key(key_id) else {
                     return Err(RenderableError::CryptoError(
                         "Failed to derive key for contact".to_string(),
-                    ))
+                    ));
                 };
                 match PersistentEncryption::decrypt_with_key(&key, &msg.content) {
                     Ok(plaintext) => return Ok(String::from_utf8_lossy(&plaintext).into_owned()),
@@ -117,7 +166,9 @@ impl LiveApiClient {
     ) -> RenderableResult<Vec<u8>> {
         let channel = self.channels.get_channel(channel_id).await?;
         match channel {
-            harmony_api::Channel::GroupChannel { encryption_hint, .. } => {
+            harmony_api::Channel::GroupChannel {
+                encryption_hint, ..
+            } => {
                 if matches!(encryption_hint, EncryptionHint::Mls) {
                     todo!()
                 } else {
@@ -132,13 +183,13 @@ impl LiveApiClient {
                         plaintext.as_bytes(),
                     ));
                 }
-            },
+            }
             harmony_api::Channel::PrivateChannel { last_key_id, .. } => {
                 let ks = self.keystore.lock().await;
                 let Some(key) = ks.get_direct_key(&last_key_id) else {
                     return Err(RenderableError::CryptoError(
                         "Failed to derive key for contact".to_string(),
-                    ))
+                    ));
                 };
                 return Ok(PersistentEncryption::encrypt_with_key(
                     &key,
@@ -273,11 +324,7 @@ impl ApiClient for LiveApiClient {
         Ok(result)
     }
 
-    async fn send_message(
-        &self,
-        channel_id: &str,
-        content: &str,
-    ) -> RenderableResult<ApiMessage> {
+    async fn send_message(&self, channel_id: &str, content: &str) -> RenderableResult<ApiMessage> {
         let encrypted = self.encrypt_content(content, channel_id).await?;
         let msg = self.client.send_message(channel_id, encrypted).await?;
         let profile = self
@@ -403,10 +450,13 @@ impl ApiClient for LiveApiClient {
             ContactAction::Request { username } => {
                 let mut ks = self.keystore.lock().await;
                 let (public_key, private_key) = ks.generate();
-                let result = self.client.add_contact(AddContactStage::Request {
-                    username: username.clone(),
-                    public_key,
-                }).await?;
+                let result = self
+                    .client
+                    .add_contact(AddContactStage::Request {
+                        username: username.clone(),
+                        public_key,
+                    })
+                    .await?;
                 ks.store_contact_key(&result.profile.id, private_key);
                 result
             }
@@ -434,11 +484,13 @@ impl ApiClient for LiveApiClient {
                 let (ct, ss) = PersistentEncryption::encapsulate_to(&requester_pk);
                 ks.store_contact_key(&user_id, our_sk);
                 ks.store_outgoing_ss(&user_id, &ss);
-                self.client.add_contact(AddContactStage::Accept {
-                    user_id,
-                    public_key: our_pk,
-                    encapsulated: ct,
-                }).await?
+                self.client
+                    .add_contact(AddContactStage::Accept {
+                        user_id,
+                        public_key: our_pk,
+                        encapsulated: ct,
+                    })
+                    .await?
             }
             ContactAction::Finalize { user_id } => {
                 // We are the original requester, the acceptor has responded.
@@ -452,7 +504,7 @@ impl ApiClient for LiveApiClient {
                 let (acceptor_pk, encapsulated) = match &contact.state {
                     RelationshipState::PendingKeyExchange {
                         public_key: Some(pk),
-                        encapsulated: Some(encapsulated)
+                        encapsulated: Some(encapsulated),
                     } => (pk.clone(), encapsulated.clone()),
                     _ => {
                         return Err(RenderableError::UnknownError(
@@ -474,11 +526,14 @@ impl ApiClient for LiveApiClient {
                 ks.store_outgoing_ss(&user_id, &ss2);
 
                 let our_pk = enc.public_key();
-                let result = self.client.add_contact(AddContactStage::Finalize {
-                    user_id,
-                    public_key: our_pk,
-                    encapsulated: ct,
-                }).await?;
+                let result = self
+                    .client
+                    .add_contact(AddContactStage::Finalize {
+                        user_id,
+                        public_key: our_pk,
+                        encapsulated: ct,
+                    })
+                    .await?;
                 let RelationshipState::Established { ref key_id, .. } = result.state else {
                     return Err(RenderableError::UnknownError(
                         "Expected Established relationship state after finalizing contact".into(),
@@ -528,7 +583,11 @@ impl ApiClient for LiveApiClient {
         })
     }
 
-    async fn create_group_channel(&self, name: Option<&str>, description: Option<&str>) -> RenderableResult<Channel> {
+    async fn create_group_channel(
+        &self,
+        name: Option<&str>,
+        description: Option<&str>,
+    ) -> RenderableResult<Channel> {
         let metadata = GroupChannelMetadata {
             name: name.map(|s| s.to_string()),
             description: description.map(|s| s.to_string()),
@@ -536,7 +595,7 @@ impl ApiClient for LiveApiClient {
         let metadata_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&metadata)
             .expect("serialization should not fail")
             .into_vec();
-        let gen_key = ChaCha20Poly1305::generate_key(OsRng);
+        let gen_key = XChaCha20Poly1305::generate_key(OsRng);
         let mut key = [0u8; 32];
         key.copy_from_slice(&gen_key);
         let encrypted_metadata = PersistentEncryption::encrypt_with_key(&key, &metadata_bytes);
@@ -553,7 +612,12 @@ impl ApiClient for LiveApiClient {
         Ok(Channel::Group {
             id: channel_id,
             name: metadata.name,
-            participants: vec![self.users.get_user(&self.user_id).await.unwrap_or_else(|_| placeholder_profile(&self.user_id))],
+            participants: vec![
+                self.users
+                    .get_user(&self.user_id)
+                    .await
+                    .unwrap_or_else(|_| placeholder_profile(&self.user_id)),
+            ],
         })
     }
 
@@ -570,11 +634,7 @@ impl ApiClient for LiveApiClient {
         Ok(invite.code)
     }
 
-    async fn join_group(
-        &self,
-        invite_code: &str,
-        group_key: &[u8],
-    ) -> RenderableResult<()> {
+    async fn join_group(&self, invite_code: &str, group_key: &[u8]) -> RenderableResult<()> {
         let (_pending, channel_id) = self.client.accept_invite(&invite_code).await?;
         if group_key.len() != 32 {
             return Err(RenderableError::CryptoError(

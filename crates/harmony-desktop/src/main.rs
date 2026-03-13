@@ -203,7 +203,7 @@ pub enum Message {
     SplashFinished(Option<LoginResult>),
     Login(LoginMessage),
     LoginFinished(LoginResult),
-    OpenMfa(account::LoginMfa),
+    OpenMfa(account::LoginMfa, String),
     Mfa(MfaMessage),
     Main(MainMessage),
     ExternalLink(ExternalLinkMessage),
@@ -224,7 +224,7 @@ pub enum Message {
 
 pub static DEFAULT_BASE_URL_AS: &'static str = "https://account.nextania.com";
 // pub static DEFAULT_BASE_URL_HARMONY: &'static str = "wss://chat.nextania.com";
-pub static DEFAULT_BASE_URL_HARMONY: &'static str = "ws://localhost:9005";
+pub static DEFAULT_BASE_URL_HARMONY: &'static str = "ws://192.168.0.101:9005";
 
 impl App {
     fn new() -> (Self, Task<Message>) {
@@ -401,20 +401,15 @@ impl App {
                 #[cfg(not(target_os = "windows"))]
                 let open_done = open_task.discard();
 
-                return Task::batch([
-                    open_done,
-                    close_login,
-                    close_mfa,
-                    close_backend,
-                ]);
+                return Task::batch([open_done, close_login, close_mfa, close_backend]);
             }
-            Message::OpenMfa(mfa) => {
+            Message::OpenMfa(mfa, password) => {
                 let parent = self
                     .find_window_id(|v| matches!(v, AppWindowView::Login(_)))
                     .expect("Login window should exist when opening MFA");
                 return self.open_dialog(
                     parent,
-                    AppWindowView::Mfa(MfaView::new(mfa, self.backend_harmony.clone())),
+                    AppWindowView::Mfa(MfaView::new(mfa, self.backend_harmony.clone(), password)),
                     iced::Size::new(400.0, 200.0),
                 );
             }

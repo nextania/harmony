@@ -174,11 +174,7 @@ impl ApiClient for MockApiClient {
         })
     }
 
-    async fn send_message(
-        &self,
-        _channel_id: &str,
-        content: &str,
-    ) -> RenderableResult<ApiMessage> {
+    async fn send_message(&self, _channel_id: &str, content: &str) -> RenderableResult<ApiMessage> {
         let me_author = MessageAuthor::User {
             id: Self::ME_ID.into(),
             name: "User".into(),
@@ -341,23 +337,31 @@ impl ApiClient for MockApiClient {
         })
     }
 
-    async fn create_group_channel(&self, _name: Option<&str>, _description: Option<&str>) -> RenderableResult<Channel> {
-        Err(RenderableError::UnknownError("Not implemented in mock".into()))
+    async fn create_group_channel(
+        &self,
+        _name: Option<&str>,
+        _description: Option<&str>,
+    ) -> RenderableResult<Channel> {
+        Err(RenderableError::UnknownError(
+            "Not implemented in mock".into(),
+        ))
     }
 
     async fn get_group_key(&self, _channel_id: &str) -> RenderableResult<Option<Vec<u8>>> {
-        Err(RenderableError::UnknownError("Not implemented in mock".into()))
+        Err(RenderableError::UnknownError(
+            "Not implemented in mock".into(),
+        ))
     }
 
     async fn create_group_invite(&self, _channel_id: &str) -> RenderableResult<String> {
-        Err(RenderableError::UnknownError("Not implemented in mock".into()))
+        Err(RenderableError::UnknownError(
+            "Not implemented in mock".into(),
+        ))
     }
 
-    async fn join_group(
-        &self,
-        _invite_code: &str,
-        _group_key: &[u8],
-    ) -> RenderableResult<()> {
-        Err(RenderableError::UnknownError("Not implemented in mock".into()))
+    async fn join_group(&self, _invite_code: &str, _group_key: &[u8]) -> RenderableResult<()> {
+        Err(RenderableError::UnknownError(
+            "Not implemented in mock".into(),
+        ))
     }
 }

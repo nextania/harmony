@@ -298,11 +298,11 @@ impl ApiClient for MockApiClient {
     async fn add_contact(&self, action: ContactAction) -> RenderableResult<Contact> {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         match action {
-            ContactAction::Request { username } => Ok(Contact {
+            ContactAction::Request { user_id } => Ok(Contact {
                 profile: UserProfile {
-                    id: Ulid::new().to_string(),
-                    display_name: username.clone(),
-                    username,
+                    id: user_id.clone(),
+                    display_name: user_id.clone(),
+                    username: user_id.clone(),
                     avatar_color_start: color!(0x555555),
                     avatar_color_end: color!(0x888888),
                 },

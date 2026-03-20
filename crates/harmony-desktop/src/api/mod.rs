@@ -77,9 +77,9 @@ impl Channel {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContactStatus {
     Established,
-    PendingKeyExchange,
+    PendingRemote,
+    PendingLocal,
     None,
-    Requested,
     Blocked,
 }
 

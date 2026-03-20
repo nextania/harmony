@@ -106,7 +106,7 @@ impl LoginView {
                     let result = async {
                         match account::login(&backend_account, &email, &password).await? {
                             account::LoginResult::Success((token, encrypted_key)) => {
-                                let (client, stream) = LiveApiClient::connect(&backend_harmony, &token, &encrypted_key, &password).await?;
+                                let (client, stream) = LiveApiClient::connect(&backend_account, &backend_harmony, &token, &encrypted_key, &password).await?;
                                 let current_user = client.get_current_user().await?;
                                 let conversations = client.get_conversations().await?
                                     .into_iter().map(|c| (c.id(), c)).collect();

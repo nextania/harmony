@@ -24,16 +24,18 @@ pub struct MfaView {
     mfa: Option<account::LoginMfa>,
     code: String,
     error: Option<String>,
+    backend_account: String,
     backend_harmony: String,
     password: String,
 }
 
 impl MfaView {
-    pub fn new(mfa: account::LoginMfa, backend_harmony: String, password: String) -> Self {
+    pub fn new(mfa: account::LoginMfa, backend_account: String, backend_harmony: String, password: String) -> Self {
         Self {
             mfa: Some(mfa),
             code: String::new(),
             error: None,
+            backend_account,
             backend_harmony,
             password,
         }
@@ -54,12 +56,13 @@ impl MfaView {
                 if let Some(mfa) = self.mfa.as_ref() {
                     let mfa = mfa.clone();
                     let code = self.code.clone();
+                    let backend_account = self.backend_account.clone();
                     let backend_harmony = self.backend_harmony.clone();
                     let password = self.password.clone();
                     return Task::stream(stream! {
                         let result = async {
                             let (token, encrypted_key) = mfa.code(&code).await?;
-                            let (client, stream) = LiveApiClient::connect(&backend_harmony, &token, &encrypted_key, &password).await?;
+                            let (client, stream) = LiveApiClient::connect(&backend_account, &backend_harmony, &token, &encrypted_key, &password).await?;
                             let current_user = client.get_current_user().await?;
                             let conversations = client.get_conversations().await?
                                 .into_iter().map(|c| (c.id(), c)).collect();

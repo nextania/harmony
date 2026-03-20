@@ -78,7 +78,7 @@ impl UserManager {
         let resp = self
             .http
             .get(format!("{}/api/user/{}", self.base_url, user_id))
-            .bearer_auth(&self.token)
+            .header("Authorization", self.token.clone())
             .send()
             .await
             .map_err(|_| RenderableError::NetworkError)?;
@@ -104,7 +104,7 @@ impl UserManager {
                 "{}/api/user/username/{}",
                 self.base_url, username
             ))
-            .bearer_auth(&self.token)
+            .header("Authorization", self.token.clone())
             .send()
             .await
             .map_err(|_| RenderableError::NetworkError)?;
@@ -146,7 +146,7 @@ impl UserManager {
             let resp = self
                 .http
                 .post(format!("{}/api/user/batch", self.base_url))
-                .bearer_auth(&self.token)
+                .header("Authorization", self.token.clone())
                 .json(chunk)
                 .send()
                 .await

@@ -59,7 +59,7 @@ pub fn people_list(state: &MainView) -> Element<MainMessage> {
 
     if !state.contacts_loaded {
         contact_items = contact_items.push(
-            text("Loading contacts…")
+            text("Loading contacts...")
                 .size(14)
                 .color(TEXT_MUTED)
                 .font(DM_SANS),
@@ -73,7 +73,9 @@ pub fn people_list(state: &MainView) -> Element<MainMessage> {
         );
     } else {
         for contact in &state.contacts {
-            contact_items = contact_items.push(contact_row(contact));
+            if contact.status != ContactStatus::None {
+                contact_items = contact_items.push(contact_row(contact));
+            }
         }
     }
 
@@ -128,7 +130,7 @@ fn contact_row(contact: &Contact) -> Element<MainMessage> {
             DANGER_RED,
             MainMessage::RemoveContact(profile.id.clone()),
         ),
-        ContactStatus::PendingKeyExchange => icon_action_btn(
+        ContactStatus::PendingRemote => icon_action_btn(
             Icon::DismissRegular,
             TEXT_MUTED,
             MainMessage::RemoveContact(profile.id.clone()),
@@ -138,7 +140,7 @@ fn contact_row(contact: &Contact) -> Element<MainMessage> {
             TEXT_MUTED,
             MainMessage::RemoveContact(profile.id.clone()),
         ),
-        ContactStatus::Requested => row![
+        ContactStatus::PendingLocal => row![
             icon_action_btn(
                 Icon::CheckmarkRegular,
                 ACCENT_PURPLE,
@@ -150,7 +152,7 @@ fn contact_row(contact: &Contact) -> Element<MainMessage> {
                 MainMessage::RemoveContact(profile.id.clone()),
             ),
         ]
-        .spacing(2)
+        .spacing(2) 
         .into(),
         ContactStatus::Blocked => icon_action_btn(
             Icon::PersonProhibitedRegular,
@@ -180,10 +182,10 @@ fn contact_row(contact: &Contact) -> Element<MainMessage> {
 fn contact_status_badge(status: ContactStatus) -> Element<'static, MainMessage> {
     let (label, color) = match status {
         ContactStatus::Established => ("Friend", Color::from_rgb(0.13, 0.65, 0.35)),
-        ContactStatus::PendingKeyExchange => ("Key Exchange", Color::from_rgb(0.85, 0.45, 0.13)),
-        ContactStatus::None => ("Pending", Color::from_rgb(0.85, 0.65, 0.13)),
-        ContactStatus::Requested => ("Request", Color::from_rgb(0.55, 0.30, 0.90)),
+        ContactStatus::PendingLocal => ("Incoming request", Color::from_rgb(0.85, 0.45, 0.13)),
+        ContactStatus::PendingRemote => ("Request", Color::from_rgb(0.55, 0.30, 0.90)),
         ContactStatus::Blocked => ("Blocked", Color::from_rgb(0.75, 0.15, 0.15)),
+        ContactStatus::None => unreachable!(),
     };
     text(label).size(11).color(color).font(DM_SANS).into()
 }

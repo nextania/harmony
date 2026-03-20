@@ -35,6 +35,8 @@ pub struct LiveApiClient {
     user_id: String,
     users: Arc<UserManager>,
     channels: Arc<ChannelManager>,
+    encrypted_key: String,
+    password: String,
 }
 
 pub fn get_key_b(encrypted_key: &str, password: &str) -> RenderableResult<XChaCha20Poly1305> {
@@ -66,12 +68,13 @@ pub fn get_key_b(encrypted_key: &str, password: &str) -> RenderableResult<XChaCh
 
 impl LiveApiClient {
     pub async fn connect(
-        url: &str,
+        as_url: &str,
+        harmony_url: &str,
         token: &str,
         encrypted_key: &str,
         password: &str,
     ) -> Result<(Arc<dyn ApiClient>, mpsc::UnboundedReceiver<Event>), RenderableError> {
-        let (client, recv) = HarmonyClient::new(ClientOptions::new(url, token)).await?;
+        let (client, recv) = HarmonyClient::new(ClientOptions::new(harmony_url, token)).await?;
         let current = client.get_current_user().await?;
         let keystore = if let Some(ref encrypted_keys) = current.encrypted_keys {
             let key_b = get_key_b(encrypted_key, password)?;
@@ -88,12 +91,12 @@ impl LiveApiClient {
             let encrypted_key_a = cipher.encrypt(&nonce, ks.to_bytes().as_ref())
                 .map_err(|e| RenderableError::CryptoError(format!("Failed to encrypt keys: {e}")))?;
             let combined = [nonce.as_slice(), encrypted_key_a.as_slice()].concat();
-            let _ = client
+            client
                 .set_key_package(combined)
-                .await;
+                .await?;
             ks
         };
-        let users = UserManager::new(Client::new(), url, token);
+        let users = UserManager::new(Client::new(), as_url, token);
         let channels = ChannelManager::new(client.clone());
         let live = Self {
             client,
@@ -101,14 +104,22 @@ impl LiveApiClient {
             user_id: current.id.clone(),
             users,
             channels,
+            encrypted_key: encrypted_key.to_string(),
+            password: password.to_string(),
         };
 
         Ok((Arc::new(live), recv))
     }
 
-    async fn sync_keystore(&self) {
+    async fn sync_keystore(&self) -> RenderableResult<()> {
         let ks = self.keystore.lock().await;
-        let _ = self.client.set_key_package(ks.to_bytes()).await;
+        let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
+        let cipher = get_key_b(&self.encrypted_key, &self.password)?;
+        let encrypted_key_a = cipher.encrypt(&nonce, ks.to_bytes().as_ref())
+            .map_err(|e| RenderableError::CryptoError(format!("Failed to encrypt keys: {e}")))?;
+        let combined = [nonce.as_slice(), encrypted_key_a.as_slice()].concat();
+        self.client.set_key_package(combined).await?;
+        Ok(())
     }
 
     pub async fn decrypt_content(&self, msg: &harmony_api::Message) -> RenderableResult<String> {
@@ -223,8 +234,9 @@ fn map_relationship(r: &harmony_api::RelationshipState) -> ContactStatus {
     match r {
         RelationshipState::Established { .. } => ContactStatus::Established,
         RelationshipState::Blocked => ContactStatus::Blocked,
-        RelationshipState::Requested { .. } => ContactStatus::Requested,
-        RelationshipState::PendingKeyExchange { .. } => ContactStatus::PendingKeyExchange,
+        RelationshipState::Requested { public_key: None } => ContactStatus::PendingRemote,
+        RelationshipState::Requested { .. } => ContactStatus::PendingLocal,
+        RelationshipState::PendingKeyExchange { .. } => ContactStatus::PendingRemote,
         RelationshipState::None => ContactStatus::None,
     }
 }

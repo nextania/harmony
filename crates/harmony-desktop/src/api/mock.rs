@@ -290,7 +290,7 @@ impl ApiClient for MockApiClient {
                     avatar_color_start: color!(0x8b00ae),
                     avatar_color_end: color!(0x4400ae),
                 },
-                status: ContactStatus::Requested,
+                status: ContactStatus::PendingRemote,
             },
         ])
     }
@@ -306,11 +306,11 @@ impl ApiClient for MockApiClient {
                     avatar_color_start: color!(0x555555),
                     avatar_color_end: color!(0x888888),
                 },
-                status: ContactStatus::None,
+                status: ContactStatus::PendingRemote,
             }),
             ContactAction::Accept { user_id } => Ok(Contact {
                 profile: crate::api::placeholder_profile(&user_id),
-                status: ContactStatus::PendingKeyExchange,
+                status: ContactStatus::Established,
             }),
             ContactAction::Finalize { user_id } => Ok(Contact {
                 profile: crate::api::placeholder_profile(&user_id),

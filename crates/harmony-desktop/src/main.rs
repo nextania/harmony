@@ -409,7 +409,7 @@ impl App {
                     .expect("Login window should exist when opening MFA");
                 return self.open_dialog(
                     parent,
-                    AppWindowView::Mfa(MfaView::new(mfa, self.backend_harmony.clone(), password)),
+                    AppWindowView::Mfa(MfaView::new(mfa, self.backend_account.clone(), self.backend_harmony.clone(), password)),
                     iced::Size::new(400.0, 200.0),
                 );
             }

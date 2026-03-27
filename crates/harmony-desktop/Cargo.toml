@@ -28,7 +28,7 @@ rust-i18n = "3.1.5"
 scap = { git = "https://github.com/infiniwave/scap.git" }
 serde = { workspace = true }
 serde_json = "1.0.149"
-sha2 = "0.10.9"
+sha2 = "0.11.0"
 sqlx = "0.8.6"
 tokio = { version = "1", features = ["time"] }
 tracing = { workspace = true }

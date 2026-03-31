@@ -77,6 +77,7 @@ pub enum LoginResponse {
         token: Option<String>,
         encrypted_key: Option<String>,
     },
+    #[serde(rename_all = "camelCase")]
     Mfa {
         token: String,
         encrypted_key: String,

@@ -96,7 +96,7 @@ impl FragmentAssembler {
         let now = Instant::now();
         loop {
             let remove = if let Some(entry) = self.exp.peek_mut()
-                && entry.0.0 > now
+                && entry.0.0 <= now
             {
                 true
             } else {

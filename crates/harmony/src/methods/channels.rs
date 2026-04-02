@@ -81,8 +81,7 @@ pub async fn edit_channel(state: RpcState, data: RpcValue<EditChannelMethod>) ->
     if !channel.is_manager(&user.id) {
         return Err(Error::MissingPermission);
     }
-    channel.update_metadata(data.metadata).await?;
-    let updated = Channel::get(&data.channel_id).await?;
+    let updated = channel.update_metadata(data.metadata).await?;
     let member_ids = updated.member_ids();
     emit_to_ids(
         state.clients(),

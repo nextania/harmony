@@ -1,7 +1,7 @@
 use futures_util::StreamExt;
 use mongodb::{
     bson::{Binary, doc, spec::BinarySubtype},
-    options::FindOptions,
+    options::{FindOneAndUpdateOptions, FindOptions, ReturnDocument},
 };
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
@@ -299,21 +299,27 @@ impl Channel {
         Ok(())
     }
 
-    pub async fn update_metadata(&self, metadata: Vec<u8>) -> Result<()> {
+    pub async fn update_metadata(&self, metadata: Vec<u8>) -> Result<Channel> {
         let Channel::GroupChannel { id, .. } = self else {
             return Err(Error::MissingPermission);
         };
         let database = super::get_database();
-        database
+        let updated = database
             .collection::<Channel>("channels")
-            .update_one(
+            .find_one_and_update(
                 doc! { "id": id },
                 doc! {
                     "$set": { "metadata": Binary { subtype: BinarySubtype::Generic, bytes: metadata } }
                 },
             )
-            .await?;
-        Ok(())
+            .with_options(
+                FindOneAndUpdateOptions::builder()
+                    .return_document(ReturnDocument::After)
+                    .build(),
+            )
+            .await?
+            .ok_or(Error::NotFound)?;
+        Ok(updated)
     }
 
     pub async fn delete(&self) -> Result<()> {

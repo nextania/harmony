@@ -1,7 +1,9 @@
+use std::collections::HashSet;
+
 use rapid::socket::RpcClients;
 use serde::{Deserialize, Serialize};
 
-use crate::services::database::{channels::Channel, messages::Message, users::User};
+use crate::services::database::{channels::Channel, messages::Message};
 
 pub mod channels;
 pub mod invites;
@@ -113,18 +115,15 @@ pub struct UserVoiceStateChangedEvent {
 
 pub fn emit_to_id(clients: RpcClients, user_id: &str, event: Event) {
     clients.emit_by(event, |client| {
-        let i = client.get_user::<User>().map(|u| u.id.clone());
-        i == Some(user_id.to_owned())
+        client.user_id() == Some(user_id)
     });
 }
 
 pub fn emit_to_ids(clients: RpcClients, user_ids: &[String], event: Event) {
+    let id_set: HashSet<&str> = user_ids.iter().map(|s| s.as_str()).collect();
     clients.emit_by(event, |client| {
-        let i = client.get_user::<User>().map(|u| u.id.clone());
-        if let Some(user_id) = i {
-            user_ids.contains(&user_id)
-        } else {
-            false
-        }
+        client
+            .user_id()
+            .is_some_and(|uid| id_set.contains(uid))
     });
 }

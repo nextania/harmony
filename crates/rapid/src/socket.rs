@@ -122,18 +122,18 @@ impl RpcClient {
     }
 
     pub fn emit<T: Serialize + Send + Clone + 'static>(&self, data: T) {
+        let bytes = serialize(&RpcMessageS2C::Event {
+            event: to_value(&data).expect("Failed to serialize"),
+        })
+        .expect("Failed to serialize");
+        self.emit_raw(bytes);
+    }
+
+    fn emit_raw(&self, bytes: Vec<u8>) {
         let mut socket = self.socket.clone();
-        let data = data.clone();
         task::spawn(async move {
-            socket
-                .send(Message::Binary(
-                    serialize(&RpcMessageS2C::Event {
-                        event: to_value(&data).expect("Failed to serialize"),
-                    })
-                    .expect("Failed to serialize")
-                    .into(),
-                ))
-                .await
+            socket.send(Message::Binary(bytes.into())).await
+                .expect("Failed to send message");
         });
     }
 }
@@ -259,8 +259,12 @@ pub struct RpcClients(Arc<DashMap<String, RpcClient>>);
 
 impl RpcClients {
     pub fn emit_all<T: Serialize + Send + Clone + 'static>(&self, data: T) {
+        let bytes = serialize(&RpcMessageS2C::Event {
+            event: to_value(&data).expect("Failed to serialize"),
+        })
+        .expect("Failed to serialize");
         for client in self.0.iter() {
-            client.value().emit(data.clone());
+            client.value().emit_raw(bytes.clone());
         }
     }
 
@@ -269,8 +273,12 @@ impl RpcClients {
         data: T,
         filter: F,
     ) {
+        let bytes = serialize(&RpcMessageS2C::Event {
+            event: to_value(&data).expect("Failed to serialize"),
+        })
+        .expect("Failed to serialize");
         for client in self.0.iter().filter(|c| filter(c.value())) {
-            client.value().emit(data.clone());
+            client.value().emit_raw(bytes.clone());
         }
     }
 }
@@ -499,8 +507,11 @@ async fn start_client(
 
                 let serialized = serialize(&response).expect("Failed to serialize");
                 debug!("Sent: {:?}", response);
-                let mut client = clients.0.get_mut(&id.clone()).unwrap();
-                client.send(serialized).await;
+                if let Some(mut client) = clients.0.get_mut(&id) {
+                    client.send(serialized).await;
+                } else {
+                    debug!("Client {} disconnected before response could be sent", id);
+                }
             }
             Message::Close(_) => {
                 debug!("Received close");

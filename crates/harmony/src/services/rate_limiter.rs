@@ -4,7 +4,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use opentelemetry::{KeyValue, global, metrics::Counter};
 use rapid::rate_limit::RateLimiter;
-use redis::AsyncCommands;
+use redis::pipe;
 
 use super::redis::get_connection;
 
@@ -78,17 +78,29 @@ async fn check_and_record(key: &str, interval: Duration, max_requests: u64) -> b
     let mut conn = get_connection().await;
     let now = get_time_millis();
     let window_start = now - (interval.as_millis() as u64);
-    let _: Result<(), _> = conn.zrembyscore(key, 0u64, window_start).await;
-    let count: u64 = match conn.zcard(key).await {
-        Ok(c) => c,
+
+    let result: Result<((), u64), _> = pipe()
+        .atomic()
+        .zrembyscore(key, 0u64, window_start)
+        .zcard(key)
+        .query_async(&mut conn)
+        .await;
+
+    let count = match result {
+        Ok((_, c)) => c,
         Err(_) => return true, // fail open
     };
     if count >= max_requests {
         return false;
     }
-    let _: Result<(), _> = conn.zadd(key, now, now).await;
     let ttl_secs = interval.as_secs() + 5;
-    let _: Result<(), _> = conn.expire(key, ttl_secs as i64).await;
+
+    let _: Result<((), ()), _> = pipe()
+        .atomic()
+        .zadd(key, now, now)
+        .expire(key, ttl_secs as i64)
+        .query_async(&mut conn)
+        .await;
 
     true
 }

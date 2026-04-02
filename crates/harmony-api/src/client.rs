@@ -151,11 +151,7 @@ impl HarmonyClient {
         let response_value = timeout(self.options.timeout, rx)
             .await
             .map_err(|_| {
-                let pending_requests = self.pending_requests.clone();
-                let request_id = request_id.clone();
-                tokio::spawn(async move {
-                    pending_requests.remove(&request_id);
-                });
+                self.pending_requests.remove(&request_id);
                 HarmonyError::Internal("Request timeout".to_string())
             })?
             .or_else(|_| {
@@ -164,16 +160,24 @@ impl HarmonyClient {
                 ))
             })?;
 
-        let result: R = rmpv::ext::from_value(response_value.clone()).map_err(|e| {
-            let err_result: std::result::Result<ApiError, _> =
-                rmpv::ext::from_value(response_value);
-            match err_result {
-                Ok(api_error) => HarmonyError::Api(api_error),
-                Err(_) => HarmonyError::MessagePackExt(e),
-            }
-        })?;
+        let is_error = response_value
+            .as_map()
+            .map(|entries| {
+                entries.iter().any(|(k, _)| {
+                    k.as_str() == Some("error")
+                })
+            })
+            .unwrap_or(false);
 
-        Ok(result)
+        if is_error {
+            match rmpv::ext::from_value::<ApiError>(response_value) {
+                Ok(api_error) => return Err(HarmonyError::Api(api_error)),
+                Err(e) => return Err(HarmonyError::MessagePackExt(e)),
+            }
+        }
+
+        rmpv::ext::from_value::<R>(response_value)
+            .map_err(HarmonyError::MessagePackExt)
     }
 
     pub fn is_connected(&self) -> bool {

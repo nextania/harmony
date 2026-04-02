@@ -1,4 +1,6 @@
-use futures_util::StreamExt;
+use std::collections::HashMap;
+
+use futures_util::{StreamExt, TryStreamExt, future::try_join_all};
 use harmony_types::users::{AddContactStage, UserProfile};
 use mongodb::{
     bson::{self, doc},
@@ -336,55 +338,66 @@ impl User {
     }
 
     pub async fn get_established_contacts(&self) -> Result<Vec<User>> {
-        let users = super::get_database().collection::<User>("users");
-        let contacts = self.contacts.iter().map(|contact| async {
-            if matches!(contact.state, RelationshipState::Established { .. }) {
-                users
-                    .find_one(doc! {
-                        "id": &contact.id
-                    })
-                    .await
-                    .ok()?
-            } else {
-                None
-            }
-        });
-        let contacts: Vec<User> = futures_util::future::join_all(contacts)
-            .await
+        let established_ids: Vec<&str> = self
+            .contacts
             .iter()
-            .filter_map(|contact| contact.clone())
+            .filter(|c| matches!(c.state, RelationshipState::Established { .. }))
+            .map(|c| c.id.as_str())
             .collect();
+        if established_ids.is_empty() {
+            return Ok(vec![]);
+        }
+        let users = super::get_database().collection::<User>("users");
+        let contacts: Vec<User> = users
+            .find(doc! { "id": { "$in": &established_ids } })
+            .await?
+            .try_collect()
+            .await?;
+        if contacts.len() != established_ids.len() {
+            return Err(Error::NotFound);
+        }
         Ok(contacts)
     }
 
     pub async fn get_contacts(&self) -> Result<Vec<ContactExtended>> {
-        let users = super::get_database().collection::<User>("users");
-        let contacts = self.contacts.iter().map(|contact| async {
-            let user = users
-                .find_one(doc! {
-                    "id": &contact.id
-                })
-                .await
-                .ok()??;
-            let presence = get_presentable_presence(&user).await.ok()?;
-            Some(ContactExtended {
+        let contact_ids: Vec<&str> = self.contacts.iter().map(|c| c.id.as_str()).collect();
+        if contact_ids.is_empty() {
+            return Ok(vec![]);
+        }
+        let users_coll = super::get_database().collection::<User>("users");
+        let users: Vec<User> = users_coll
+            .find(doc! { "id": { "$in": &contact_ids } })
+            .await?
+            .try_collect()
+            .await?;
+        if users.len() != contact_ids.len() {
+            return Err(Error::NotFound);
+        }
+        let user_map: HashMap<&str, &User> =
+            users.iter().map(|u| (u.id.as_str(), u)).collect();
+
+        let contacts = try_join_all(self.contacts.iter().map(|contact| async {
+            let Some(user) = user_map.get(contact.id.as_str()) else {
+                return Err(Error::NotFound);
+            };
+            let presence = if matches!(contact.state, RelationshipState::Established { .. }) {
+                Some(get_presentable_presence(user).await?)
+            } else {
+                None
+            };
+            Ok(ContactExtended {
                 id: contact.id.clone(),
                 state: contact.state.clone(),
                 user: UserProfile {
                     id: user.id.clone(),
-                    presence: if matches!(contact.state, RelationshipState::Established { .. }) {
-                        Some(presence)
-                    } else {
-                        None
-                    },
+                    presence,
                 },
             })
-        });
-        let contacts: Vec<ContactExtended> = futures_util::future::join_all(contacts)
-            .await
-            .iter()
-            .filter_map(|contact| contact.clone())
-            .collect();
+        }))
+        .await?;
+        if contacts.len() != self.contacts.len() {
+            return Err(Error::NotFound);
+        }
         Ok(contacts)
     }
 

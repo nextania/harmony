@@ -36,7 +36,7 @@ pub enum Status {
     Idle,
     Busy,
     BusyNotify,
-    Invisible,
+    Offline,
 }
 
 impl From<harmony_api::Status> for Status {
@@ -46,7 +46,7 @@ impl From<harmony_api::Status> for Status {
             harmony_api::Status::Idle => Status::Idle,
             harmony_api::Status::Busy => Status::Busy,
             harmony_api::Status::BusyNotify => Status::BusyNotify,
-            harmony_api::Status::Offline => Status::Invisible,
+            harmony_api::Status::Offline => Status::Offline,
         }
     }
 }
@@ -81,12 +81,6 @@ impl From<harmony_api::UnifiedPublicKey> for UnifiedPublicKey {
     }
 }
 
-#[derive(Clone, Debug, uniffi::Record)]
-pub struct KeyExchangeData {
-    pub public_key: UnifiedPublicKey,
-    pub encapsulated: Vec<u8>,
-}
-
 #[derive(Clone, Debug, uniffi::Enum)]
 pub enum RelationshipState {
     None,
@@ -94,7 +88,8 @@ pub enum RelationshipState {
         public_key: Option<UnifiedPublicKey>,
     },
     PendingKeyExchange {
-        data: Option<KeyExchangeData>,
+        public_key: Option<UnifiedPublicKey>,
+        encapsulated: Option<Vec<u8>>,
     },
     Established {
         public_key: UnifiedPublicKey,
@@ -117,13 +112,8 @@ impl From<harmony_api::RelationshipState> for RelationshipState {
                 public_key,
                 encapsulated,
             } => RelationshipState::PendingKeyExchange {
-                data: match (public_key, encapsulated) {
-                    (Some(pk), Some(ct)) => Some(KeyExchangeData {
-                        public_key: pk.into(),
-                        encapsulated: ct,
-                    }),
-                    _ => None,
-                },
+                public_key: public_key.map(Into::into),
+                encapsulated,
             },
             harmony_api::RelationshipState::Established {
                 public_key,
@@ -274,6 +264,7 @@ pub struct Message {
     pub author_id: String,
     pub edited_at: Option<i64>,
     pub channel_id: String,
+    pub key_id: Option<String>,
 }
 
 impl From<harmony_api::Message> for Message {
@@ -284,6 +275,7 @@ impl From<harmony_api::Message> for Message {
             author_id: message.author_id,
             edited_at: message.edited_at,
             channel_id: message.channel_id,
+            key_id: message.key_id,
         }
     }
 }

@@ -181,10 +181,12 @@ async fn handle_session_loop(
     let mut assembler = FragmentAssembler::new(Duration::from_secs(1));
 
     loop {
-        let timeout_duration = if let Some(id) = GLOBAL_UNIQUE_SESSIONS
+        let current_session = GLOBAL_UNIQUE_SESSIONS
             .get(session_id)
             .map(|s| s.value().clone())
-            && let Some(session) = GLOBAL_SESSIONS.get(&id)
+            .and_then(|id| GLOBAL_SESSIONS.get(&id).map(|s| s.clone()));
+
+        let timeout_duration = if let Some(ref session) = current_session
         {
             let time_since_activity = now() - session.last_activity.load(Ordering::SeqCst);
             if time_since_activity > 60 {
@@ -206,10 +208,7 @@ async fn handle_session_loop(
             dg_result = connection.receive_datagram() => {
                 match dg_result {
                     Ok(dg) => {
-                        if let Some(id) = GLOBAL_UNIQUE_SESSIONS
-            .get(session_id)
-            .map(|s| s.value().clone()) &&
-            let Some(session) = GLOBAL_SESSIONS.get(&id) {
+                        if let Some(ref session) = current_session {
                             session.update_activity();
                             let fragment: WtFragmentedTrackData = match rkyv::api::high::from_bytes::<_, rkyv::rancor::Error>(&dg.payload()[..]) {
                                 Ok(f) => f,
@@ -234,10 +233,7 @@ async fn handle_session_loop(
             read_result = recv.read(&mut bytes) => {
                 match read_result {
                     Ok(Some(len)) => {
-                        if let Some(id) = GLOBAL_UNIQUE_SESSIONS
-            .get(session_id)
-            .map(|s| s.value().clone()) &&
-            let Some(session) = GLOBAL_SESSIONS.get(&id) {
+                        if let Some(ref session) = current_session {
                             session.update_activity();
                         }
                         buffer.extend_from_slice(&bytes[..len]);

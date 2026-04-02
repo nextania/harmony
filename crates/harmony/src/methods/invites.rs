@@ -72,8 +72,7 @@ pub async fn get_invite(state: RpcState, data: RpcValue<GetInviteMethod>) -> imp
             inviter_id: invite.creator,
             authorized: invite
                 .authorized_users
-                .unwrap_or_else(|| vec![user.id.clone()])
-                .contains(&user.id),
+                .map_or(true, |users| users.contains(&user.id)),
             member_count: members.len() as i32,
         },
     }))
@@ -102,8 +101,7 @@ pub async fn accept_invite(
     if invite
         .authorized_users
         .as_ref()
-        .unwrap_or(&vec![user.id.clone()])
-        .contains(&user.id)
+        .map_or(true, |users| users.contains(&user.id))
     {
         let channel = Channel::get(&invite.channel_id).await?;
         let pending = if let Channel::GroupChannel {

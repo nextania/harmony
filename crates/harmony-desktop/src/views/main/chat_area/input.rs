@@ -34,7 +34,6 @@ pub fn chat_frame(state: &MainView) -> Element<MainMessage> {
             .size(24)
             .font(FLUENT_ICONS),
     )
-    .on_press(MainMessage::JoinCall)
     .style(styles::icon_accent)
     .padding(0)
     .cursor_default();

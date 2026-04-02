@@ -220,7 +220,7 @@ impl MlsClient {
         } else {
             // foreign commit
             let mls_message_in =
-                MlsMessageIn::tls_deserialize(&mut commit_data.to_vec().as_slice())
+                MlsMessageIn::tls_deserialize(&mut &commit_data[..])
                     .context("Failed to deserialize commit MlsMessageIn")?;
             let protocol_message = mls_message_in
                 .try_into_protocol_message()
@@ -254,7 +254,7 @@ impl MlsClient {
             bail!("Already in an MLS group, cannot join from welcome");
         }
 
-        let mls_message_in = MlsMessageIn::tls_deserialize(&mut welcome_data.to_vec().as_slice())
+        let mls_message_in = MlsMessageIn::tls_deserialize(&mut &welcome_data[..])
             .context("Failed to deserialize welcome MlsMessageIn")?;
         let welcome = match mls_message_in.extract() {
             MlsMessageBodyIn::Welcome(w) => w,

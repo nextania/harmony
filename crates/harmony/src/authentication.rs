@@ -21,12 +21,10 @@ use crate::{
 pub async fn authenticate(
     token: String,
 ) -> rapid::errors::Result<(String, Box<dyn Any + Send + Sync>)> {
-    // println!("Public key: {:?}", self.public_key);
-    println!("Token: {:?}", token);
-    // let as_user = validate_token(&token).await?;
-    let user = User::get(&token).await;
+    let as_user = validate_token(&token).await?;
+    let user = User::get(&as_user.id).await;
     let user = if let Err(Error::NotFound) = user {
-        User::create(token)
+        User::create(as_user.id)
             .await
             .map_err(|_| rapid::errors::Error::InternalError)?
     } else {

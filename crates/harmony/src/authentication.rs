@@ -22,9 +22,15 @@ pub async fn authenticate(
     token: String,
 ) -> rapid::errors::Result<(String, Box<dyn Any + Send + Sync>)> {
     let as_user = validate_token(&token).await?;
-    let user = User::get(&as_user.id).await;
+    if !as_user.active {
+        return Err(rapid::errors::Error::InvalidToken);
+    }
+    let Some(id) = as_user.user_id else {
+        return Err(rapid::errors::Error::InternalError);
+    };
+    let user = User::get(&id).await;
     let user = if let Err(Error::NotFound) = user {
-        User::create(as_user.id)
+        User::create(id)
             .await
             .map_err(|_| rapid::errors::Error::InternalError)?
     } else {
@@ -35,15 +41,19 @@ pub async fn authenticate(
 static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AsUser {
-    pub id: String,
+    pub active: bool,
+    pub user_id: Option<String>,
+    pub session_id: Option<String>,
+    pub expires_at: Option<u64>,
 }
 
 pub async fn validate_token(token: &str) -> rapid::errors::Result<AsUser> {
     let resp = CLIENT
-        .get(format!("{}/api/introspect", AS_URI.as_str()))
+        .post(format!("{}/api/introspect", AS_URI.as_str()))
         .header("Authorization", AS_TOKEN.as_str())
-        .body(json!({ "token": token }).to_string())
+        .json(&json!({ "token": token }))
         .send()
         .await
         .map_err(|_| rapid::errors::Error::InternalError)?;

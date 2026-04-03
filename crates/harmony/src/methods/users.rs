@@ -13,6 +13,7 @@ use crate::{
 
 pub async fn add_contact(state: RpcState, data: RpcValue<AddContactMethod>) -> impl RpcResponder {
     let user = check_authenticated(&state)?;
+    let user = User::get(&user.id).await?; // refresh user to get latest contact states
     let data = data.into_inner();
     let result = user.add_contact(data.stage).await?;
     emit_to_id(
@@ -34,6 +35,7 @@ pub async fn remove_contact(
     data: RpcValue<RemoveContactMethod>,
 ) -> impl RpcResponder {
     let user = check_authenticated(&state)?;
+    let user = User::get(&user.id).await?; // refresh user to get latest contact states
     let data = data.into_inner();
     let friend = User::get(&data.id).await?;
     user.remove_contact(&friend.id).await?;
@@ -53,6 +55,7 @@ pub async fn get_contacts(
     _data: RpcValue<GetContactsMethod>,
 ) -> impl RpcResponder {
     let user = check_authenticated(&state)?;
+    let user = User::get(&user.id).await?; // refresh user to get latest contact states
     let contacts = user.get_contacts().await?;
     Ok::<_, Error>(RpcValue(GetContactsResponse { contacts }))
 }
@@ -64,6 +67,7 @@ pub async fn get_current_user(
     _data: RpcValue<GetCurrentUserMethod>,
 ) -> impl RpcResponder {
     let user = check_authenticated(&state)?;
+    let user = User::get(&user.id).await?; // refresh user to get latest contact states
     Ok::<_, Error>(RpcValue(CurrentUserResponse {
         id: user.id.clone(),
         encrypted_keys: user

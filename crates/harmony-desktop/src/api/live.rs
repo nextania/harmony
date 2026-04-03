@@ -584,6 +584,19 @@ impl ApiClient for LiveApiClient {
         })
     }
 
+    async fn create_private_channel(&self, user_id: &str) -> RenderableResult<Channel> {
+        let api_channel = self.client.create_private_channel(user_id).await?;
+        let profile = self
+            .users
+            .get_user(user_id)
+            .await
+            .map_err(|_| RenderableError::NetworkError)?;
+        Ok(Channel::Private {
+            id: api_channel.id().to_string(),
+            other: profile,
+        })
+    }
+
     async fn create_group_channel(
         &self,
         name: Option<&str>,

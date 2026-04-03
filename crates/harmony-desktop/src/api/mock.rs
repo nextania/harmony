@@ -337,6 +337,12 @@ impl ApiClient for MockApiClient {
         })
     }
 
+    async fn create_private_channel(&self, _user_id: &str) -> RenderableResult<Channel> {
+        Err(RenderableError::UnknownError(
+            "Not implemented in mock".into(),
+        ))
+    }
+
     async fn create_group_channel(
         &self,
         _name: Option<&str>,

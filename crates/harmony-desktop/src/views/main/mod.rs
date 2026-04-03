@@ -98,6 +98,8 @@ pub enum MainMessage {
     ContactBlocked(String),
     UnblockContact(String),
     ContactUnblocked(Contact),
+    OpenPrivateChannel(String),
+    PrivateChannelOpened(crate::errors::RenderableResult<crate::api::Channel>),
 }
 
 pub struct MainView {
@@ -770,6 +772,37 @@ impl MainView {
                     c.status = ContactStatus::Established;
                 }
             }
+            MainMessage::OpenPrivateChannel(user_id) => {
+                let existing_id = self.conversations.iter().find_map(|(id, ch)| {
+                    if let crate::api::Channel::Private { other, .. } = ch {
+                        if other.id == user_id {
+                            return Some(id.clone());
+                        }
+                    }
+                    None
+                });
+                if let Some(id) = existing_id {
+                    self.active_tab = SidebarTab::Messages;
+                    return Task::done(Message::Main(MainMessage::ChatSelected(id)));
+                } else {
+                    let client = self.api.clone();
+                    return Task::perform(
+                        async move { client.create_private_channel(&user_id).await },
+                        |result| Message::Main(MainMessage::PrivateChannelOpened(result)),
+                    );
+                }
+            }
+            MainMessage::PrivateChannelOpened(result) => match result {
+                Ok(channel) => {
+                    let id = channel.id();
+                    self.conversations.insert(id.clone(), channel);
+                    self.active_tab = SidebarTab::Messages;
+                    return Task::done(Message::Main(MainMessage::ChatSelected(id)));
+                }
+                Err(e) => {
+                    return Task::done(Message::Main(MainMessage::ApiError(e)));
+                }
+            },
         }
         Task::none()
     }

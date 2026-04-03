@@ -125,11 +125,20 @@ fn contact_row(contact: &Contact) -> Element<MainMessage> {
     let name_col = column![name, status_label].spacing(2);
 
     let actions: Element<MainMessage> = match contact.status {
-        ContactStatus::Established => icon_action_btn(
-            Icon::DeleteRegular,
-            DANGER_RED,
-            MainMessage::RemoveContact(profile.id.clone()),
-        ),
+        ContactStatus::Established => row![
+            icon_action_btn(
+                Icon::ChatRegular,
+                TEXT_PRIMARY,
+                MainMessage::OpenPrivateChannel(profile.id.clone()),
+            ),
+            icon_action_btn(
+                Icon::DeleteRegular,
+                DANGER_RED,
+                MainMessage::RemoveContact(profile.id.clone()),
+            ),
+        ]
+        .spacing(2)
+        .into(),
         ContactStatus::PendingRemote => icon_action_btn(
             Icon::DismissRegular,
             TEXT_MUTED,

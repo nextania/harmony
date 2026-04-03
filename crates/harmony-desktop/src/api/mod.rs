@@ -151,6 +151,7 @@ pub trait ApiClient: Send + Sync {
     async fn remove_contact(&self, user_id: &str) -> RenderableResult<()>;
     async fn block_contact(&self, user_id: &str) -> RenderableResult<()>;
     async fn unblock_contact(&self, user_id: &str) -> RenderableResult<Contact>;
+    async fn create_private_channel(&self, user_id: &str) -> RenderableResult<Channel>;
     async fn get_user_profile(&self, user_id: &str) -> RenderableResult<UserProfile> {
         Ok(placeholder_profile(user_id))
     }

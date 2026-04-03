@@ -18,7 +18,7 @@ use crate::{
 
 pub async fn get_channel(state: RpcState, data: RpcValue<GetChannelMethod>) -> impl RpcResponder {
     let data = data.into_inner();
-    let user = check_authenticated(&state)?;
+    let user = check_authenticated(&state).await?;
     let channel = Channel::get(&data.id).await?;
     if !channel.is_member(&user.id) {
         return Err(Error::NotInChannel);
@@ -29,7 +29,7 @@ pub async fn get_channel(state: RpcState, data: RpcValue<GetChannelMethod>) -> i
 }
 
 pub async fn get_channels(state: RpcState, _: RpcValue<GetChannelsMethod>) -> impl RpcResponder {
-    let user = check_authenticated(&state)?;
+    let user = check_authenticated(&state).await?;
     let channels = user.get_channels().await?;
     Ok::<_, Error>(RpcValue(GetChannelsResponse {
         channels: channels.into_iter().map(|c| c.into()).collect(),
@@ -40,7 +40,7 @@ pub async fn create_channel(
     state: RpcState,
     data: RpcValue<CreateChannelMethod>,
 ) -> impl RpcResponder {
-    let user = check_authenticated(&state)?;
+    let user = check_authenticated(&state).await?;
     let data = data.into_inner();
     let channel = match data.channel {
         ChannelInformation::PrivateChannel { target_id } => {
@@ -75,7 +75,7 @@ pub async fn create_channel(
 }
 
 pub async fn edit_channel(state: RpcState, data: RpcValue<EditChannelMethod>) -> impl RpcResponder {
-    let user = check_authenticated(&state)?;
+    let user = check_authenticated(&state).await?;
     let data = data.into_inner();
     let channel = Channel::get(&data.channel_id).await?;
     if !channel.is_manager(&user.id) {
@@ -99,7 +99,7 @@ pub async fn delete_channel(
     state: RpcState,
     data: RpcValue<DeleteChannelMethod>,
 ) -> impl RpcResponder {
-    let user = check_authenticated(&state)?;
+    let user = check_authenticated(&state).await?;
     let data = data.into_inner();
     let channel = Channel::get(&data.channel_id).await?;
     if !channel.is_manager(&user.id) {
@@ -123,7 +123,7 @@ pub async fn leave_channel(
     state: RpcState,
     data: RpcValue<LeaveChannelMethod>,
 ) -> impl RpcResponder {
-    let user = check_authenticated(&state)?;
+    let user = check_authenticated(&state).await?;
     let data = data.into_inner();
     let channel = Channel::get(&data.channel_id).await?;
     match &channel {

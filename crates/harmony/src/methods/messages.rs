@@ -16,7 +16,7 @@ use crate::{
 };
 
 pub async fn get_messages(state: RpcState, data: RpcValue<GetMessagesMethod>) -> impl RpcResponder {
-    let user = check_authenticated(&state)?;
+    let user = check_authenticated(&state).await?;
     let data = data.into_inner();
     let channel = Channel::get(&data.channel_id).await?;
     if !channel.is_member(&user.id) {
@@ -43,7 +43,7 @@ pub async fn get_messages(state: RpcState, data: RpcValue<GetMessagesMethod>) ->
 }
 
 pub async fn send_message(state: RpcState, data: RpcValue<SendMessageMethod>) -> impl RpcResponder {
-    let user = check_authenticated(&state)?;
+    let user = check_authenticated(&state).await?;
     let data = data.into_inner();
     if data.content.len() > 65536 {
         return Err(Error::MessageTooLong);
@@ -100,7 +100,7 @@ pub async fn send_message(state: RpcState, data: RpcValue<SendMessageMethod>) ->
 }
 
 pub async fn edit_message(state: RpcState, data: RpcValue<EditMessageMethod>) -> impl RpcResponder {
-    let user = check_authenticated(&state)?;
+    let user = check_authenticated(&state).await?;
     let data = data.into_inner();
     if data.content.len() > 65536 {
         return Err(Error::MessageTooLong);
@@ -132,7 +132,7 @@ pub async fn delete_message(
     state: RpcState,
     data: RpcValue<DeleteMessageMethod>,
 ) -> impl RpcResponder {
-    let user = check_authenticated(&state)?;
+    let user = check_authenticated(&state).await?;
     let data = data.into_inner();
     let message = Message::get(&data.message_id).await?;
     let channel = Channel::get(&message.channel_id).await?;

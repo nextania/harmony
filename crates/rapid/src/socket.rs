@@ -1,4 +1,4 @@
-use std::{any::Any, future::Future, pin::Pin, sync::Arc};
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use async_tungstenite::{accept_async, tokio::TokioAdapter, tungstenite::Message};
 use dashmap::DashMap;
@@ -96,7 +96,6 @@ fn rpc_rate_limited() -> &'static Counter<u64> {
 pub struct RpcClient {
     id: String,
     socket: UnboundedSender<Message>,
-    user: Option<Arc<Box<dyn Any + Send + Sync>>>,
     user_id: Option<String>,
     heartbeat_tx: UnboundedSender<()>,
 }
@@ -107,10 +106,6 @@ impl RpcClient {
             .send(Message::Binary(data.into()))
             .await
             .expect("Failed to send message");
-    }
-
-    pub fn get_user<T: 'static>(&self) -> Option<&T> {
-        self.user.as_ref().and_then(|u| u.downcast_ref())
     }
 
     pub fn unique_id(&self) -> &str {
@@ -188,7 +183,7 @@ impl<T: for<'a> Deserialize<'a>> RpcRequest for RpcValue<T> {
 
 pub type AuthenticateFn = Box<dyn CloneableAuthenticateFn>;
 pub trait CloneableAuthenticateFn:
-    Fn(String) -> BoxFuture<'static, Result<(String, Box<dyn Any + Send + Sync>), Error>> + Send + Sync
+    Fn(String) -> BoxFuture<'static, Result<String, Error>> + Send + Sync
 {
     fn clone_box<'a>(&self) -> Box<dyn 'a + CloneableAuthenticateFn>
     where
@@ -196,7 +191,7 @@ pub trait CloneableAuthenticateFn:
 }
 impl<F> CloneableAuthenticateFn for F
 where
-    F: Fn(String) -> BoxFuture<'static, Result<(String, Box<dyn Any + Send + Sync>), Error>>
+    F: Fn(String) -> BoxFuture<'static, Result<String, Error>>
         + Clone
         + Send
         + Sync,
@@ -306,7 +301,7 @@ impl RpcState {
     }
 
     pub fn is_authenticated(&self) -> bool {
-        self.client().user.is_some()
+        self.client().user_id.is_some()
     }
 
     pub fn user_id(&self) -> Option<String> {
@@ -461,7 +456,6 @@ async fn start_client(
     let client = RpcClient {
         id: id.clone(),
         socket: s,
-        user: None,
         user_id: None,
         heartbeat_tx: tx,
     };
@@ -543,9 +537,8 @@ pub async fn handle_packet(
         match r {
             RpcMessageC2S::Identify { token } => authenticate(token.clone())
                 .await
-                .map(|(uid, user)| {
+                .map(|uid| {
                     let mut client = clients.0.get_mut(user_id).unwrap();
-                    client.user = Some(Arc::new(user));
                     client.user_id = Some(uid);
                     RpcMessageS2C::Identify {}
                 })

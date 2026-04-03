@@ -1,7 +1,5 @@
-use std::{
-    any::Any,
-    sync::{Arc, LazyLock},
-};
+use std::
+    sync::LazyLock;
 
 use rapid::socket::RpcState;
 use serde::Deserialize;
@@ -20,7 +18,7 @@ use crate::{
 // (e.g. AS)
 pub async fn authenticate(
     token: String,
-) -> rapid::errors::Result<(String, Box<dyn Any + Send + Sync>)> {
+) -> rapid::errors::Result<String> {
     let as_user = validate_token(&token).await?;
     if !as_user.active {
         return Err(rapid::errors::Error::InvalidToken);
@@ -36,7 +34,7 @@ pub async fn authenticate(
     } else {
         user.map_err(|_| rapid::errors::Error::InternalError)?
     };
-    Ok((user.id.clone(), Box::new(user)))
+    Ok(user.id)
 }
 static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
 
@@ -67,11 +65,8 @@ pub async fn validate_token(token: &str) -> rapid::errors::Result<AsUser> {
     Ok(as_user)
 }
 
-pub fn check_authenticated(state: &RpcState) -> Result<Arc<User>> {
-    state
-        .client()
-        .get_user::<User>()
-        .cloned()
-        .ok_or(Error::NotAuthenticated)
-        .map(|user| user.into())
+pub async fn check_authenticated(state: &RpcState) -> Result<User> {
+    let client = state.client();
+    let id = client.user_id().ok_or(Error::NotAuthenticated)?;
+    User::get(&id).await
 }

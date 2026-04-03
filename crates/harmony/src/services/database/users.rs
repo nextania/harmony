@@ -75,7 +75,7 @@ impl User {
         }
     }
 
-    pub async fn get(id: &String) -> Result<User> {
+    pub async fn get(id: &str) -> Result<User> {
         let users = super::get_database().collection::<User>("users");
         let user = users
             .find_one(doc! {
@@ -110,7 +110,7 @@ impl User {
         let users = super::get_database().collection::<User>("users");
         match stage {
             AddContactStage::Request {
-                id,
+                id, 
                 public_key,
             } => {
                 let target = User::get(&id).await?;
@@ -251,6 +251,7 @@ impl User {
                 public_key,
                 encapsulated,
             } => {
+                println!("Contacts before finalize: {:?}", self.contacts);
                 let contact = self
                     .contacts
                     .iter()

@@ -20,7 +20,7 @@ pub async fn create_invite(
     data: RpcValue<CreateInviteMethod>,
 ) -> impl RpcResponder {
     let data = data.into_inner();
-    let user = check_authenticated(&state)?;
+    let user = check_authenticated(&state).await?;
     let invite = Invite::create(
         data.channel_id.clone(),
         user.id.clone(),
@@ -39,7 +39,7 @@ pub async fn delete_invite(
     data: RpcValue<DeleteInviteMethod>,
 ) -> impl RpcResponder {
     let data = data.into_inner();
-    let user = check_authenticated(&state)?;
+    let user = check_authenticated(&state).await?;
     let invite = Invite::get(&data.id).await?;
     let channel = Channel::get(&invite.channel_id).await?;
     if !channel.is_manager(&user.id) {
@@ -52,7 +52,7 @@ pub async fn delete_invite(
 
 pub async fn get_invite(state: RpcState, data: RpcValue<GetInviteMethod>) -> impl RpcResponder {
     let data = data.into_inner();
-    let user = check_authenticated(&state)?;
+    let user = check_authenticated(&state).await?;
     let invite = Invite::get(&data.code).await?;
     let channel = Channel::get(&invite.channel_id).await?;
     //ban?
@@ -80,7 +80,7 @@ pub async fn get_invite(state: RpcState, data: RpcValue<GetInviteMethod>) -> imp
 
 pub async fn get_invites(state: RpcState, data: RpcValue<GetInvitesMethod>) -> impl RpcResponder {
     let data = data.into_inner();
-    let user = check_authenticated(&state)?;
+    let user = check_authenticated(&state).await?;
     let channel = Channel::get(&data.channel_id).await?;
     if !channel.is_manager(&user.id) {
         return Err(Error::MissingPermission);
@@ -96,7 +96,7 @@ pub async fn accept_invite(
     data: RpcValue<AcceptInviteMethod>,
 ) -> impl RpcResponder {
     let data = data.into_inner();
-    let user = check_authenticated(&state)?;
+    let user = check_authenticated(&state).await?;
     let invite = Invite::get(&data.code).await?;
     if invite
         .authorized_users

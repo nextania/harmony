@@ -937,6 +937,49 @@ impl MainView {
                     );
                 }
             }
+            Event::ContactStateChanged { user_id, state } => {
+                if matches!(state, harmony_api::RelationshipState::None) {
+                    self.contacts.retain(|c| c.profile.id != user_id);
+                } else if matches!(
+                    &state,
+                    harmony_api::RelationshipState::PendingKeyExchange {
+                        public_key: Some(_),
+                        encapsulated: Some(_),
+                    }
+                ) {
+                    let client = self.api.clone();
+                    let uid = user_id.clone();
+                    return Task::perform(
+                        async move {
+                            client
+                                .add_contact(ContactAction::Finalize { user_id: uid })
+                                .await
+                        },
+                        |result| match result {
+                            Ok(contact) => Message::Main(MainMessage::ContactAccepted(contact)),
+                            Err(e) => Message::Main(MainMessage::ApiError(e)),
+                        },
+                    );
+                } else {
+                    let new_status = crate::api::live::map_relationship(&state);
+                    if let Some(c) = self.contacts.iter_mut().find(|c| c.profile.id == user_id) {
+                        c.status = new_status;
+                    } else {
+                        let client = self.api.clone();
+                        let uid = user_id.clone();
+                        return Task::perform(
+                            async move { client.get_user_profile(&uid).await },
+                            move |result| match result {
+                                Ok(profile) => Message::Main(MainMessage::ContactAdded(Contact {
+                                    profile,
+                                    status: new_status,
+                                })),
+                                Err(e) => Message::Main(MainMessage::ApiError(e)),
+                            },
+                        );
+                    }
+                }
+            }
             _ => {}
         }
         Task::none()

@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use rapid::socket::RpcClients;
 use serde::{Deserialize, Serialize};
 
-use crate::services::database::{channels::Channel, messages::Message};
+use crate::services::database::{channels::Channel, messages::Message, users::RelationshipState};
 
 pub mod channels;
 pub mod invites;
@@ -20,8 +20,11 @@ pub enum Event {
     MessageEdited(MessageEditedEvent),
     MessageDeleted(MessageDeletedEvent),
     // Contacts
-    RemoveContact(String),
-    AddContact(String),
+    #[serde(rename_all = "camelCase")]
+    ContactStateChanged {
+        user_id: String,
+        state: RelationshipState,
+    },
     // Channels
     ChannelUpdated(ChannelUpdatedEvent),
     ChannelDeleted(ChannelDeletedEvent),

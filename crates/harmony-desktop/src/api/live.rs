@@ -230,7 +230,7 @@ impl LiveApiClient {
     }
 }
 
-fn map_relationship(r: &harmony_api::RelationshipState) -> ContactStatus {
+pub fn map_relationship(r: &harmony_api::RelationshipState) -> ContactStatus {
     match r {
         RelationshipState::Established { .. } => ContactStatus::Established,
         RelationshipState::Blocked => ContactStatus::Blocked,
@@ -486,7 +486,7 @@ impl ApiClient for LiveApiClient {
                     .find(|c| c.id == user_id)
                     .ok_or_else(|| RenderableError::UnknownError("Contact not found".into()))?;
                 let requester_pk = match &contact.state {
-                    RelationshipState::PendingKeyExchange {
+                    RelationshipState::Requested {
                         public_key: Some(pk),
                         ..
                     } => pk.clone(),

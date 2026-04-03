@@ -468,11 +468,9 @@ pub enum Event {
         message_id: String,
         channel_id: String,
     },
-    RemoveContact {
+    ContactStateChanged {
         user_id: String,
-    },
-    AddContact {
-        user_id: String,
+        state: RelationshipState,
     },
     ChannelUpdated {
         channel: Channel,
@@ -532,8 +530,12 @@ impl From<harmony_api::Event> for Event {
                 message_id: e.message_id,
                 channel_id: e.channel_id,
             },
-            harmony_api::Event::RemoveContact(id) => Event::RemoveContact { user_id: id },
-            harmony_api::Event::AddContact(id) => Event::AddContact { user_id: id },
+            harmony_api::Event::ContactStateChanged { user_id, state } => {
+                Event::ContactStateChanged {
+                    user_id,
+                    state: state.into(),
+                }
+            }
             harmony_api::Event::ChannelUpdated(e) => Event::ChannelUpdated {
                 channel: e.channel.into(),
             },

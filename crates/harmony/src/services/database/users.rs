@@ -19,6 +19,13 @@ pub use harmony_types::users::{
     Contact, ContactExtended, Encapsulated, Presence, RelationshipState, Status, UnifiedPublicKey,
 };
 
+pub struct AddContactResult {
+    pub profile: UserProfile,
+    pub self_state: RelationshipState,
+    pub other_id: String,
+    pub other_state: RelationshipState,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct KeyPackage {
     // encrypted local keystore blob (encrypted by a key derived from the user's password)
@@ -99,7 +106,7 @@ impl User {
     pub async fn add_contact(
         &self,
         stage: AddContactStage,
-    ) -> Result<(UserProfile, RelationshipState)> {
+    ) -> Result<AddContactResult> {
         let users = super::get_database().collection::<User>("users");
         match stage {
             AddContactStage::Request {
@@ -165,18 +172,20 @@ impl User {
                     users
                         .update_one(
                             doc! { "id": contact_id },
-                            doc! { "$push": { "contacts": bson::to_bson(&Contact { id: self.id.clone(), state: target_state })? } },
+                            doc! { "$push": { "contacts": bson::to_bson(&Contact { id: self.id.clone(), state: target_state.clone() })? } },
                         )
                         .await?;
                 }
 
-                Ok((
-                    UserProfile {
+                Ok(AddContactResult {
+                    profile: UserProfile {
                         id: target.id.clone(),
                         presence: None,
                     },
                     self_state,
-                ))
+                    other_id: target.id.clone(),
+                    other_state: target_state,
+                })
             }
             AddContactStage::Accept {
                 user_id,
@@ -227,13 +236,15 @@ impl User {
                     ))
                     .await?;
 
-                Ok((
-                    UserProfile {
+                Ok(AddContactResult {
+                    profile: UserProfile {
                         id: user_id.clone(),
                         presence: None,
                     },
                     self_state,
-                ))
+                    other_id: user_id.clone(),
+                    other_state: requester_state,
+                })
             }
             AddContactStage::Finalize {
                 user_id,
@@ -296,15 +307,17 @@ impl User {
                     channel.update_key_id(&key_id).await?;
                 }
 
-                Ok((
-                    UserProfile {
+                Ok(AddContactResult {
+                    profile: UserProfile {
                         id: user_id.clone(),
                         presence: Some(
                             get_presentable_presence(&User::get(&user_id).await?).await?,
                         ),
                     },
                     self_state,
-                ))
+                    other_id: user_id.clone(),
+                    other_state: acceptor_state,
+                })
             }
         }
     }

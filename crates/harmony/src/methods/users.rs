@@ -4,15 +4,28 @@ use harmony_types::users::{
 };
 use rapid::socket::{RpcResponder, RpcState, RpcValue};
 
-use crate::{authentication::check_authenticated, errors::Error, services::database::users::User};
+use crate::{
+    authentication::check_authenticated,
+    errors::Error,
+    methods::{Event, emit_to_id},
+    services::database::users::{RelationshipState, User},
+};
 
 pub async fn add_contact(state: RpcState, data: RpcValue<AddContactMethod>) -> impl RpcResponder {
     let user = check_authenticated(&state)?;
     let data = data.into_inner();
-    let (profile, new_state) = user.add_contact(data.stage).await?;
+    let result = user.add_contact(data.stage).await?;
+    emit_to_id(
+        state.clients(),
+        &result.other_id,
+        Event::ContactStateChanged {
+            user_id: user.id.clone(),
+            state: result.other_state,
+        },
+    );
     Ok::<_, Error>(RpcValue(AddContactResponse {
-        profile,
-        state: new_state,
+        profile: result.profile,
+        state: result.self_state,
     }))
 }
 
@@ -24,6 +37,14 @@ pub async fn remove_contact(
     let data = data.into_inner();
     let friend = User::get(&data.id).await?;
     user.remove_contact(&friend.id).await?;
+    emit_to_id(
+        state.clients(),
+        &friend.id,
+        Event::ContactStateChanged {
+            user_id: user.id.clone(),
+            state: RelationshipState::None,
+        },
+    );
     Ok::<_, Error>(RpcValue(RemoveContactResponse {}))
 }
 

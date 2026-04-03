@@ -3,7 +3,7 @@
 use rmpv::Value;
 use serde::{Deserialize, Serialize};
 
-use crate::{Channel, Message};
+use crate::{Channel, Message, RelationshipState};
 
 /// Events that can be received from the server
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -33,10 +33,12 @@ pub enum Event {
     /// Message was deleted
     MessageDeleted(MessageDeletedEvent),
 
-    /// Contact removed
-    RemoveContact(String),
-    /// Contact added
-    AddContact(String),
+    /// Contact relationship state changed
+    #[serde(rename_all = "camelCase")]
+    ContactStateChanged {
+        user_id: String,
+        state: RelationshipState,
+    },
 
     /// Channel metadata was updated
     ChannelUpdated(ChannelUpdatedEvent),

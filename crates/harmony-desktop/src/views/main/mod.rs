@@ -940,19 +940,16 @@ impl MainView {
             Event::ContactStateChanged { user_id, state } => {
                 if matches!(state, harmony_api::RelationshipState::None) {
                     self.contacts.retain(|c| c.profile.id != user_id);
-                } else if matches!(
-                    &state,
-                    harmony_api::RelationshipState::PendingKeyExchange {
-                        public_key: Some(_),
-                        encapsulated: Some(_),
-                    }
-                ) {
+                } else if let harmony_api::RelationshipState::PendingKeyExchange {
+                    public_key: Some(public_key),
+                    encapsulated: Some(encapsulated),
+                } = state {
                     let client = self.api.clone();
                     let uid = user_id.clone();
                     return Task::perform(
                         async move {
                             client
-                                .add_contact(ContactAction::Finalize { user_id: uid })
+                                .add_contact(ContactAction::Finalize { user_id: uid, public_key, encapsulated })
                                 .await
                         },
                         |result| match result {

@@ -6,6 +6,7 @@ pub mod live;
 pub mod mock;
 pub mod user_manager;
 
+use harmony_api::UnifiedPublicKey;
 pub use user_manager::UserManager;
 
 use async_trait::async_trait;
@@ -119,7 +120,7 @@ pub struct CallTokenInfo {
 pub enum ContactAction {
     Request { user_id: String },
     Accept { user_id: String },
-    Finalize { user_id: String },
+    Finalize { user_id: String, public_key: UnifiedPublicKey, encapsulated: Vec<u8> },
 }
 
 // An ApiClient directly maps API methods to renderables

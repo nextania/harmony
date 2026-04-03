@@ -511,27 +511,9 @@ impl ApiClient for LiveApiClient {
                     })
                     .await?
             }
-            ContactAction::Finalize { user_id } => {
+            ContactAction::Finalize { user_id, public_key: acceptor_pk, encapsulated  } => {
                 // We are the original requester, the acceptor has responded.
-                // Look up the acceptor's pk from our PendingKeyExchange state.
-                let contacts = self.client.get_contacts().await?;
-                let contact = contacts
-                    .iter()
-                    .find(|c| c.id == user_id)
-                    .ok_or_else(|| RenderableError::UnknownError("Contact not found".into()))?;
-
-                let (acceptor_pk, encapsulated) = match &contact.state {
-                    RelationshipState::PendingKeyExchange {
-                        public_key: Some(pk),
-                        encapsulated: Some(encapsulated),
-                    } => (pk.clone(), encapsulated.clone()),
-                    _ => {
-                        return Err(RenderableError::UnknownError(
-                            "Cannot finalize: not in PendingKeyExchange state".into(),
-                        ));
-                    }
-                };
-
+                
                 // decapsulate the acceptor's response to get the shared secret
                 let mut ks = self.keystore.lock().await;
                 let enc = ks

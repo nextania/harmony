@@ -406,6 +406,7 @@ impl ApiClient for LiveApiClient {
             .zip(profiles.into_iter())
             .map(|(m, profile)| CallParticipant {
                 profile,
+                session_id: m.session_id.clone(),
                 tracks: CallTrackState {
                     audio: !m.muted,
                     video: false,

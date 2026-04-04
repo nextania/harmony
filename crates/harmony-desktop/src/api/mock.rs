@@ -223,6 +223,7 @@ impl ApiClient for MockApiClient {
                         avatar_color_start: color!(0x00b536),
                         avatar_color_end: color!(0xffce2c),
                     },
+                    session_id: "0".into(),
                     tracks: CallTrackState {
                         audio: true,
                         video: false,

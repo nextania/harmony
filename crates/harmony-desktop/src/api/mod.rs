@@ -100,6 +100,7 @@ pub struct CallTrackState {
 #[derive(Debug, Clone)]
 pub struct CallParticipant {
     pub profile: UserProfile,
+    pub session_id: String,
     pub tracks: CallTrackState,
 }
 

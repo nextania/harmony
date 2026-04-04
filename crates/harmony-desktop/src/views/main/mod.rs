@@ -69,8 +69,8 @@ pub enum MainMessage {
     ToggleMic,
     ToggleCamera,
     ToggleScreenShare,
-    CallStateLoaded(Option<CallState>),
-    PulseConnected(Arc<PulseClient>),
+    CallStateLoaded(String, Option<CallState>),
+    PulseConnected(Arc<PulseClient>, String),
     PulseDisconnected,
     PulseEvent(PulseEvent),
     ToggleChatList,
@@ -116,6 +116,7 @@ pub struct MainView {
     pub chat_list_visible: bool,
     pub avatar_menu_open: bool,
     pub current_call: Option<String>,
+    pub current_call_id: Option<String>,
     pub current_call_state: Option<CallState>,
     pub pulse_client: Option<Arc<PulseClient>>,
 
@@ -151,6 +152,7 @@ impl MainView {
             chat_list_visible: true,
             avatar_menu_open: false,
             current_call: None,
+            current_call_id: None,
             current_call_state: None,
             pulse_client: None,
             current_conversation_messages: Vec::new(),
@@ -187,9 +189,11 @@ impl MainView {
                     if let Some(conv_id) = self.current_conversation.clone() {
                         let client = self.api.clone();
                         return Task::perform(
-                            async move { client.get_call(&conv_id).await },
+                            async move {
+                                client.get_call(&conv_id).await.map(|state| (conv_id, state))
+                            },
                             |result| match result {
-                                Ok(state) => Message::Main(MainMessage::CallStateLoaded(state)),
+                                Ok((channel_id, state)) => Message::Main(MainMessage::CallStateLoaded(channel_id, state)),
                                 Err(e) => Message::Main(MainMessage::ApiError(e)),
                             },
                         );
@@ -202,14 +206,18 @@ impl MainView {
                 }
                 self.current_conversation = Some(i.clone());
                 self.current_conversation_messages = vec![];
-                self.current_call_state = None;
+                if self.current_call.is_none() {
+                    self.current_call_state = None;
+                }
 
                 let call_client = self.api.clone();
                 let call_channel_id = i.clone();
                 let call_task = Task::perform(
-                    async move { call_client.get_call(&call_channel_id).await },
+                    async move {
+                        call_client.get_call(&call_channel_id).await.map(|state| (call_channel_id, state))
+                    },
                     |result| match result {
-                        Ok(state) => Message::Main(MainMessage::CallStateLoaded(state)),
+                        Ok((channel_id, state)) => Message::Main(MainMessage::CallStateLoaded(channel_id, state)),
                         Err(e) => Message::Main(MainMessage::ApiError(e)),
                     },
                 );
@@ -405,6 +413,7 @@ impl MainView {
                 }
             }
             MainMessage::ServerEvent(event) => {
+                tracing::info!("Received server event: {:?}", event);
                 return self.handle_server_event(event);
             }
             MainMessage::JoinCall => {
@@ -423,7 +432,7 @@ impl MainView {
                                 server_url: token_info.server_address,
                                 session_id: token_info.session_id,
                                 session_token: token_info.token,
-                                call_id: token_info.call_id,
+                                call_id: token_info.call_id.clone(),
                             },
                         )
                         .await
@@ -438,9 +447,10 @@ impl MainView {
                                 return;
                             }
                         };
-                        yield Message::Main(MainMessage::PulseConnected(Arc::new(pulse_client)));
+                        let pulse_call_id = token_info.call_id.clone();
+                        yield Message::Main(MainMessage::PulseConnected(Arc::new(pulse_client), pulse_call_id));
                         let call_state = client.get_call(&conv_id).await.ok().flatten();
-                        yield Message::Main(MainMessage::CallStateLoaded(call_state));
+                        yield Message::Main(MainMessage::CallStateLoaded(conv_id, call_state));
                         while let Some(event) = event_rx.recv().await {
                             yield Message::Main(MainMessage::PulseEvent(event));
                         }
@@ -463,12 +473,13 @@ impl MainView {
                                 return;
                             }
                         };
+                        tracing::info!("Token info: {:?}", token_info);
                         let (pulse_client, mut event_rx) = match PulseClient::connect(
                             PulseClientOptions {
                                 server_url: token_info.server_address,
                                 session_id: token_info.session_id,
                                 session_token: token_info.token,
-                                call_id: token_info.call_id,
+                                call_id: token_info.call_id.clone(),
                             },
                         )
                         .await
@@ -483,9 +494,11 @@ impl MainView {
                                 return;
                             }
                         };
-                        yield Message::Main(MainMessage::PulseConnected(Arc::new(pulse_client)));
+                        let pulse_call_id = token_info.call_id.clone();
+                        yield Message::Main(MainMessage::PulseConnected(Arc::new(pulse_client), pulse_call_id));
                         let call_state = client.get_call(&conv_id).await.ok().flatten();
-                        yield Message::Main(MainMessage::CallStateLoaded(call_state));
+                        tracing::info!("Loaded call state: {:?}", call_state);
+                        yield Message::Main(MainMessage::CallStateLoaded(conv_id, call_state));
                         while let Some(event) = event_rx.recv().await {
                             yield Message::Main(MainMessage::PulseEvent(event));
                         }
@@ -506,6 +519,7 @@ impl MainView {
                     }
                 }
                 self.current_call = None;
+                self.current_call_id = None;
             }
             MainMessage::ToggleMic => {
                 if let Some(ref mut call) = self.current_call_state {
@@ -516,7 +530,7 @@ impl MainView {
                     {
                         let new_audio = !p.tracks.audio;
                         p.tracks.audio = new_audio;
-                        if let Some(conv_id) = self.current_conversation.clone() {
+                        if let Some(conv_id) = self.current_call.clone() {
                             let client = self.api.clone();
                             let pulse = self.pulse_client.clone();
                             let muted = !new_audio;
@@ -620,12 +634,16 @@ impl MainView {
                     }
                 }
             }
-            MainMessage::CallStateLoaded(state) => {
-                self.current_call_state = state;
+            MainMessage::CallStateLoaded(channel_id, state) => {
+                // Only update call state if not in an active call, or if this is for the active call's channel
+                if self.current_call.is_none() || self.current_call.as_deref() == Some(&channel_id) {
+                    self.current_call_state = state;
+                }
             }
-            MainMessage::PulseConnected(pulse_client) => {
+            MainMessage::PulseConnected(pulse_client, call_id) => {
                 self.pulse_client = Some(pulse_client);
                 self.current_call = self.current_conversation.clone();
+                self.current_call_id = Some(call_id);
             }
             MainMessage::PulseDisconnected => {
                 self.pulse_client = None;
@@ -638,14 +656,17 @@ impl MainView {
                         }
                     }
                     self.current_call = None;
+                    self.current_call_id = None;
                 }
             }
             MainMessage::PulseEvent(event) => {
+                tracing::info!("Received Pulse event: {:?}", event);
                 match event {
                     PulseEvent::Disconnected { reconnect } => {
                         if reconnect.is_none() {
                             self.pulse_client = None;
                             self.current_call = None;
+                            self.current_call_id = None;
                         }
                     }
                     PulseEvent::TrackAvailable(track) => {
@@ -667,8 +688,8 @@ impl MainView {
                             );
                         }
                     }
-                    PulseEvent::TrackUnavailable(_id) => {
-                        // TODO: do something
+                    PulseEvent::TrackUnavailable(id) => {
+                        tracing::info!("Track unavailable: {id}");
                     }
                     _ => {}
                 }
@@ -954,15 +975,15 @@ impl MainView {
             Event::UserJoinedCall {
                 call_id,
                 user_id,
-                session_id: _,
+                session_id,
                 muted,
                 deafened: _,
             } => {
-                // If the call is for the current conversation, update participants
-                if self.current_conversation.as_deref() == Some(&call_id) {
+                if self.current_call_id.as_deref() == Some(&call_id) {
                     let profile = placeholder_profile(&user_id);
                     let participant = CallParticipant {
                         profile,
+                        session_id,
                         tracks: CallTrackState {
                             audio: !muted,
                             video: false,
@@ -982,39 +1003,29 @@ impl MainView {
             }
             Event::UserLeftCall {
                 call_id,
-                session_id: _,
+                session_id,
             } => {
-                if self.current_conversation.as_deref() == Some(&call_id) {
-                    if let Some(ref _call) = self.current_call_state {
-                        // TODO: don't reload everything
-                        let client = self.api.clone();
-                        let channel_id = call_id.clone();
-                        return Task::perform(
-                            async move { client.get_call(&channel_id).await },
-                            |result| match result {
-                                Ok(state) => Message::Main(MainMessage::CallStateLoaded(state)),
-                                Err(e) => Message::Main(MainMessage::ApiError(e)),
-                            },
-                        );
+                if self.current_call_id.as_deref() == Some(&call_id) {
+                    if let Some(ref mut call) = self.current_call_state {
+                        call.participants.retain(|p| p.session_id != session_id);
+                        if call.participants.is_empty() {
+                            self.current_call_state = None;
+                        }
                     }
                 }
             }
             Event::UserVoiceStateChanged {
                 call_id,
-                session_id: _,
-                muted: _,
+                session_id,
+                muted,
                 deafened: _,
             } => {
-                if self.current_conversation.as_deref() == Some(&call_id) {
-                    let client = self.api.clone();
-                    let channel_id = call_id.clone();
-                    return Task::perform(
-                        async move { client.get_call(&channel_id).await },
-                        |result| match result {
-                            Ok(state) => Message::Main(MainMessage::CallStateLoaded(state)),
-                            Err(e) => Message::Main(MainMessage::ApiError(e)),
-                        },
-                    );
+                if self.current_call_id.as_deref() == Some(&call_id) {
+                    if let Some(ref mut call) = self.current_call_state {
+                        if let Some(p) = call.participants.iter_mut().find(|p| p.session_id == session_id) {
+                            p.tracks.audio = !muted;
+                        }
+                    }
                 }
             }
             Event::ContactStateChanged { user_id, state } => {

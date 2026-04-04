@@ -81,7 +81,7 @@ pub async fn listen() -> anyhow::Result<()> {
                         error!("Session error: {:?}", e);
                     }
                 });
-            },
+            }
             Err(e) => {
                 error!("Failed to accept incoming connection: {:?}", e);
                 continue;
@@ -192,8 +192,7 @@ async fn handle_session_loop(
             .map(|s| s.value().clone())
             .and_then(|id| GLOBAL_SESSIONS.get(&id).map(|s| s.clone()));
 
-        let timeout_duration = if let Some(ref session) = current_session
-        {
+        let timeout_duration = if let Some(ref session) = current_session {
             let time_since_activity = now() - session.last_activity.load(Ordering::SeqCst);
             if time_since_activity > 60 {
                 warn!("Session {} timed out due to inactivity", session.id);

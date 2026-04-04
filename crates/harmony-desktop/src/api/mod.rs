@@ -14,7 +14,10 @@ use std::sync::Arc;
 
 use argon2::Argon2;
 use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
-use chacha20poly1305::{AeadCore, KeyInit, XChaCha20Poly1305, aead::{Aead, OsRng}};
+use chacha20poly1305::{
+    AeadCore, KeyInit, XChaCha20Poly1305,
+    aead::{Aead, OsRng},
+};
 use harmony_api::{
     AddContactStage, ClientOptions, EncryptionHint, Event, HarmonyClient, RelationshipState,
 };
@@ -24,10 +27,7 @@ use tokio::sync::{Mutex, mpsc};
 
 use crate::{
     MessageAuthor,
-    api::{
-        channel_manager::ChannelManager, crypto::PersistentEncryption,
-        keystore::Keystore,
-    },
+    api::{channel_manager::ChannelManager, crypto::PersistentEncryption, keystore::Keystore},
     errors::{RenderableError, RenderableResult},
 };
 
@@ -140,10 +140,23 @@ pub struct CallTokenInfo {
 
 #[derive(Debug, Clone)]
 pub enum ContactAction {
-    Request { user_id: String },
-    Accept { user_id: String },
-    Finalize { user_id: String, public_key: UnifiedPublicKey, encapsulated: Vec<u8> },
-    HandleEstablished { user_id: String, public_key: UnifiedPublicKey, encapsulated: Vec<u8>, key_id: String },
+    Request {
+        user_id: String,
+    },
+    Accept {
+        user_id: String,
+    },
+    Finalize {
+        user_id: String,
+        public_key: UnifiedPublicKey,
+        encapsulated: Vec<u8>,
+    },
+    HandleEstablished {
+        user_id: String,
+        public_key: UnifiedPublicKey,
+        encapsulated: Vec<u8>,
+        key_id: String,
+    },
 }
 pub fn placeholder_profile(user_id: &str) -> UserProfile {
     use sha2::{Digest, Sha256};
@@ -176,10 +189,13 @@ pub struct ApiClient {
 }
 
 pub fn get_key_b(encrypted_key: &str, password: &str) -> RenderableResult<XChaCha20Poly1305> {
-    let encrypted_key_bytes = BASE64_URL_SAFE_NO_PAD.decode(encrypted_key)
-        .map_err(|e| RenderableError::CryptoError(format!("Failed to decode encrypted keys: {e}")))?;
+    let encrypted_key_bytes = BASE64_URL_SAFE_NO_PAD.decode(encrypted_key).map_err(|e| {
+        RenderableError::CryptoError(format!("Failed to decode encrypted keys: {e}"))
+    })?;
     if encrypted_key_bytes.len() != 88 {
-        return Err(RenderableError::CryptoError("Invalid encrypted keys length".into()));
+        return Err(RenderableError::CryptoError(
+            "Invalid encrypted keys length".into(),
+        ));
     }
     let argon2 = Argon2::new(
         argon2::Algorithm::Argon2id,
@@ -189,16 +205,25 @@ pub fn get_key_b(encrypted_key: &str, password: &str) -> RenderableResult<XChaCh
     );
     let salt = &encrypted_key_bytes[..16];
     let mut password_key_a = [0u8; 32];
-    argon2.hash_password_into(password.as_bytes(), salt, &mut password_key_a).map_err(|e| RenderableError::CryptoError(format!("Failed to derive key from password: {e}")))?;
+    argon2
+        .hash_password_into(password.as_bytes(), salt, &mut password_key_a)
+        .map_err(|e| {
+            RenderableError::CryptoError(format!("Failed to derive key from password: {e}"))
+        })?;
     let cipher = XChaCha20Poly1305::new(&password_key_a.into());
     let nonce = &encrypted_key_bytes[16..40];
     let ciphertext = &encrypted_key_bytes[40..];
-    let decrypted = cipher.decrypt(nonce.into(), ciphertext)
+    let decrypted = cipher
+        .decrypt(nonce.into(), ciphertext)
         .map_err(|e| RenderableError::CryptoError(format!("Failed to decrypt keys: {e}")))?;
     if decrypted.len() != 32 {
-        return Err(RenderableError::CryptoError("Invalid decrypted key B length".into()));
+        return Err(RenderableError::CryptoError(
+            "Invalid decrypted key B length".into(),
+        ));
     }
-    let decrypted: [u8; 32] = decrypted.try_into().map_err(|_| RenderableError::CryptoError("Failed to convert decrypted key to array".into()))?;
+    let decrypted: [u8; 32] = decrypted.try_into().map_err(|_| {
+        RenderableError::CryptoError("Failed to convert decrypted key to array".into())
+    })?;
     Ok(XChaCha20Poly1305::new(&decrypted.into()))
 }
 
@@ -216,20 +241,22 @@ impl ApiClient {
             let key_b = get_key_b(encrypted_key, password)?;
             let nonce = &encrypted_keys[..24];
             let ciphertext = &encrypted_keys[24..];
-            let decrypted_keys = key_b.decrypt(nonce.into(), ciphertext)
-                .map_err(|e| RenderableError::CryptoError(format!("Failed to decrypt keys with key B: {e}")))?;
+            let decrypted_keys = key_b.decrypt(nonce.into(), ciphertext).map_err(|e| {
+                RenderableError::CryptoError(format!("Failed to decrypt keys with key B: {e}"))
+            })?;
             Keystore::from_bytes(&decrypted_keys).unwrap_or_default()
         } else {
             let ks = Keystore::new();
             // encrypt
             let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
             let cipher = get_key_b(encrypted_key, password)?;
-            let encrypted_key_a = cipher.encrypt(&nonce, ks.to_bytes().as_ref())
-                .map_err(|e| RenderableError::CryptoError(format!("Failed to encrypt keys: {e}")))?;
+            let encrypted_key_a = cipher
+                .encrypt(&nonce, ks.to_bytes().as_ref())
+                .map_err(|e| {
+                    RenderableError::CryptoError(format!("Failed to encrypt keys: {e}"))
+                })?;
             let combined = [nonce.as_slice(), encrypted_key_a.as_slice()].concat();
-            client
-                .set_key_package(combined)
-                .await?;
+            client.set_key_package(combined).await?;
             ks
         };
         let users = UserManager::new(Client::new(), as_url, token);
@@ -251,7 +278,8 @@ impl ApiClient {
         let ks = self.keystore.lock().await;
         let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
         let cipher = get_key_b(&self.encrypted_key, &self.password)?;
-        let encrypted_key_a = cipher.encrypt(&nonce, ks.to_bytes().as_ref())
+        let encrypted_key_a = cipher
+            .encrypt(&nonce, ks.to_bytes().as_ref())
             .map_err(|e| RenderableError::CryptoError(format!("Failed to encrypt keys: {e}")))?;
         let combined = [nonce.as_slice(), encrypted_key_a.as_slice()].concat();
         self.client.set_key_package(combined).await?;
@@ -372,14 +400,20 @@ impl ApiClient {
             .map_err(|_| RenderableError::NetworkError)
     }
 
-    pub async fn get_user_profile_by_username(&self, username: &str) -> RenderableResult<UserProfile> {
+    pub async fn get_user_profile_by_username(
+        &self,
+        username: &str,
+    ) -> RenderableResult<UserProfile> {
         self.users
             .get_user_by_username(username)
             .await
             .map_err(|_| RenderableError::NetworkError)
     }
 
-    pub async fn get_user_profiles(&self, user_ids: Vec<String>) -> RenderableResult<Vec<UserProfile>> {
+    pub async fn get_user_profiles(
+        &self,
+        user_ids: Vec<String>,
+    ) -> RenderableResult<Vec<UserProfile>> {
         self.users
             .get_users(user_ids.clone())
             .await
@@ -465,7 +499,11 @@ impl ApiClient {
         Ok(result)
     }
 
-    pub async fn send_message(&self, channel_id: &str, content: &str) -> RenderableResult<ApiMessage> {
+    pub async fn send_message(
+        &self,
+        channel_id: &str,
+        content: &str,
+    ) -> RenderableResult<ApiMessage> {
         let encrypted = self.encrypt_content(content, channel_id).await?;
         let msg = self.client.send_message(channel_id, encrypted).await?;
         let profile = self
@@ -631,9 +669,13 @@ impl ApiClient {
                     })
                     .await?
             }
-            ContactAction::Finalize { user_id, public_key: acceptor_pk, encapsulated  } => {
+            ContactAction::Finalize {
+                user_id,
+                public_key: acceptor_pk,
+                encapsulated,
+            } => {
                 // We are the original requester, the acceptor has responded.
-                
+
                 // decapsulate the acceptor's response to get the shared secret
                 let mut ks = self.keystore.lock().await;
                 let enc = ks
@@ -664,7 +706,12 @@ impl ApiClient {
                 ks.store_direct_key(key_id, key);
                 result
             }
-            ContactAction::HandleEstablished { user_id, public_key: requester_pk, encapsulated, key_id } => {
+            ContactAction::HandleEstablished {
+                user_id,
+                public_key: requester_pk,
+                encapsulated,
+                key_id,
+            } => {
                 let mut ks = self.keystore.lock().await;
                 let enc = ks
                     .get_encryption(&user_id)
@@ -694,7 +741,7 @@ impl ApiClient {
         };
 
         // sync keystore to server after any state change
-        self.sync_keystore().await;
+        self.sync_keystore().await?;
 
         if let Ok(profile) = self.users.get_user(&new_state.profile.id).await {
             return Ok(Contact {
@@ -769,7 +816,7 @@ impl ApiClient {
             let mut ks = self.keystore.lock().await;
             ks.store_group_key(&channel_id, &key);
         }
-        self.sync_keystore().await;
+        self.sync_keystore().await?;
         Ok(Channel::Group {
             id: channel_id,
             name: metadata.name,
@@ -808,7 +855,7 @@ impl ApiClient {
             let mut ks = self.keystore.lock().await;
             ks.store_group_key(&channel_id, &key);
         }
-        self.sync_keystore().await;
+        self.sync_keystore().await?;
         Ok(())
     }
 }

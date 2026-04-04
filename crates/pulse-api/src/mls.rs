@@ -219,9 +219,8 @@ impl MlsClient {
             Ok(())
         } else {
             // foreign commit
-            let mls_message_in =
-                MlsMessageIn::tls_deserialize(&mut &commit_data[..])
-                    .context("Failed to deserialize commit MlsMessageIn")?;
+            let mls_message_in = MlsMessageIn::tls_deserialize(&mut &commit_data[..])
+                .context("Failed to deserialize commit MlsMessageIn")?;
             let protocol_message = mls_message_in
                 .try_into_protocol_message()
                 .map_err(|_| anyhow::anyhow!("Expected a protocol message for commit"))?;

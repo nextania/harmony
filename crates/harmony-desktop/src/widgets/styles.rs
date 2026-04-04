@@ -108,7 +108,7 @@ pub fn icon_accent(_theme: &iced::Theme, status: button::Status) -> button::Styl
     }
 }
 
-/// For call control buttons 
+/// For call control buttons
 pub fn call_ctrl(bg: Color) -> impl Fn(&iced::Theme, button::Status) -> button::Style {
     move |_theme, _status| button::Style {
         background: Some(iced::Background::Color(bg)),

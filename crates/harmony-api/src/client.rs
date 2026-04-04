@@ -162,11 +162,7 @@ impl HarmonyClient {
 
         let is_error = response_value
             .as_map()
-            .map(|entries| {
-                entries.iter().any(|(k, _)| {
-                    k.as_str() == Some("error")
-                })
-            })
+            .map(|entries| entries.iter().any(|(k, _)| k.as_str() == Some("error")))
             .unwrap_or(false);
 
         if is_error {
@@ -176,8 +172,7 @@ impl HarmonyClient {
             }
         }
 
-        rmpv::ext::from_value::<R>(response_value)
-            .map_err(HarmonyError::MessagePackExt)
+        rmpv::ext::from_value::<R>(response_value).map_err(HarmonyError::MessagePackExt)
     }
 
     pub fn is_connected(&self) -> bool {

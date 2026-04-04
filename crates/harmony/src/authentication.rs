@@ -1,5 +1,4 @@
-use std::
-    sync::LazyLock;
+use std::sync::LazyLock;
 
 use rapid::socket::RpcState;
 use serde::Deserialize;
@@ -16,9 +15,7 @@ use crate::{
 // Important: This only accepts a token and will not sign a token.
 // The token is to be obtained from a separate login server
 // (e.g. AS)
-pub async fn authenticate(
-    token: String,
-) -> rapid::errors::Result<String> {
+pub async fn authenticate(token: String) -> rapid::errors::Result<String> {
     let as_user = validate_token(&token).await?;
     if !as_user.active {
         return Err(rapid::errors::Error::InvalidToken);

@@ -13,7 +13,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::{
     Message,
-    api::{account, ApiClient},
+    api::{ApiClient, account},
     errors::RenderableError,
     icons::{FLUENT_ICONS, Icon},
     preferences::Locale,

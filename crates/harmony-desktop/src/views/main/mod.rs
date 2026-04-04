@@ -11,12 +11,13 @@ use pulse_api::{PulseClient, PulseClientOptions, PulseEvent};
 use ulid::Ulid;
 
 use crate::{
-    ChatMessage, Message, MessageContent, format_message_time,
+    ChatMessage, Message, MessageContent,
     api::{
         ApiClient, ApiMessageContent, CallParticipant, CallState, CallTrackState, Contact,
         ContactAction, ContactStatus, placeholder_profile,
     },
     errors::RenderableError,
+    format_message_time,
     icons::{FLUENT_ICONS, Icon},
     theme::{BG_APP, DM_SANS, TEXT_MUTED},
     views::main::{
@@ -190,10 +191,15 @@ impl MainView {
                         let client = self.api.clone();
                         return Task::perform(
                             async move {
-                                client.get_call(&conv_id).await.map(|state| (conv_id, state))
+                                client
+                                    .get_call(&conv_id)
+                                    .await
+                                    .map(|state| (conv_id, state))
                             },
                             |result| match result {
-                                Ok((channel_id, state)) => Message::Main(MainMessage::CallStateLoaded(channel_id, state)),
+                                Ok((channel_id, state)) => {
+                                    Message::Main(MainMessage::CallStateLoaded(channel_id, state))
+                                }
                                 Err(e) => Message::Main(MainMessage::ApiError(e)),
                             },
                         );
@@ -214,10 +220,15 @@ impl MainView {
                 let call_channel_id = i.clone();
                 let call_task = Task::perform(
                     async move {
-                        call_client.get_call(&call_channel_id).await.map(|state| (call_channel_id, state))
+                        call_client
+                            .get_call(&call_channel_id)
+                            .await
+                            .map(|state| (call_channel_id, state))
                     },
                     |result| match result {
-                        Ok((channel_id, state)) => Message::Main(MainMessage::CallStateLoaded(channel_id, state)),
+                        Ok((channel_id, state)) => {
+                            Message::Main(MainMessage::CallStateLoaded(channel_id, state))
+                        }
                         Err(e) => Message::Main(MainMessage::ApiError(e)),
                     },
                 );
@@ -244,7 +255,9 @@ impl MainView {
                                         time,
                                         formatted_time: format_message_time(time),
                                         content: match api_msg.content {
-                                            ApiMessageContent::Text(text) => MessageContent::Text(text),
+                                            ApiMessageContent::Text(text) => {
+                                                MessageContent::Text(text)
+                                            }
                                             ApiMessageContent::CallCard { channel, duration } => {
                                                 MessageContent::CallCard { channel, duration }
                                             }
@@ -294,9 +307,7 @@ impl MainView {
                                                 .as_millis()
                                                 as i64
                                         })
-                                        .unwrap_or_else(|_| {
-                                            chrono::Utc::now().timestamp_millis()
-                                        });
+                                        .unwrap_or_else(|_| chrono::Utc::now().timestamp_millis());
                                     let chat_msg = ChatMessage {
                                         id: api_msg.id.clone(),
                                         user: api_msg.author.clone(),
@@ -636,7 +647,8 @@ impl MainView {
             }
             MainMessage::CallStateLoaded(channel_id, state) => {
                 // Only update call state if not in an active call, or if this is for the active call's channel
-                if self.current_call.is_none() || self.current_call.as_deref() == Some(&channel_id) {
+                if self.current_call.is_none() || self.current_call.as_deref() == Some(&channel_id)
+                {
                     self.current_call_state = state;
                 }
             }
@@ -1022,7 +1034,11 @@ impl MainView {
             } => {
                 if self.current_call_id.as_deref() == Some(&call_id) {
                     if let Some(ref mut call) = self.current_call_state {
-                        if let Some(p) = call.participants.iter_mut().find(|p| p.session_id == session_id) {
+                        if let Some(p) = call
+                            .participants
+                            .iter_mut()
+                            .find(|p| p.session_id == session_id)
+                        {
                             p.tracks.audio = !muted;
                         }
                     }
@@ -1034,13 +1050,18 @@ impl MainView {
                 } else if let harmony_api::RelationshipState::PendingKeyExchange {
                     public_key: Some(public_key),
                     encapsulated: Some(encapsulated),
-                } = state {
+                } = state
+                {
                     let client = self.api.clone();
                     let uid = user_id.clone();
                     return Task::perform(
                         async move {
                             client
-                                .add_contact(ContactAction::Finalize { user_id: uid, public_key, encapsulated })
+                                .add_contact(ContactAction::Finalize {
+                                    user_id: uid,
+                                    public_key,
+                                    encapsulated,
+                                })
                                 .await
                         },
                         |result| match result {
@@ -1052,7 +1073,8 @@ impl MainView {
                     public_key,
                     encapsulated,
                     key_id,
-                } = state {
+                } = state
+                {
                     let client = self.api.clone();
                     let uid = user_id.clone();
                     return Task::perform(

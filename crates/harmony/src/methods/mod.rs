@@ -117,16 +117,12 @@ pub struct UserVoiceStateChangedEvent {
 }
 
 pub fn emit_to_id(clients: RpcClients, user_id: &str, event: Event) {
-    clients.emit_by(event, |client| {
-        client.user_id() == Some(user_id)
-    });
+    clients.emit_by(event, |client| client.user_id() == Some(user_id));
 }
 
 pub fn emit_to_ids(clients: RpcClients, user_ids: &[String], event: Event) {
     let id_set: HashSet<&str> = user_ids.iter().map(|s| s.as_str()).collect();
     clients.emit_by(event, |client| {
-        client
-            .user_id()
-            .is_some_and(|uid| id_set.contains(uid))
+        client.user_id().is_some_and(|uid| id_set.contains(uid))
     });
 }

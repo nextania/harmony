@@ -20,10 +20,8 @@ pub async fn create_call_token(
 ) -> impl RpcResponder {
     let user = check_authenticated(&state).await?; // TODO: check rate limit, permissions req'd
     let data = data.into_inner();
-    let (call, channel) = tokio::try_join!(
-        ActiveCall::get_in_channel(&data.id),
-        Channel::get(&data.id)
-    )?;
+    let (call, channel) =
+        tokio::try_join!(ActiveCall::get_in_channel(&data.id), Channel::get(&data.id))?;
     let Some(mut call) = call else {
         return Err(Error::NotFound);
     };
@@ -59,10 +57,8 @@ pub async fn start_call(state: RpcState, data: RpcValue<StartCallMethod>) -> imp
 pub async fn end_call(state: RpcState, data: RpcValue<EndCallMethod>) -> impl RpcResponder {
     let user = check_authenticated(&state).await?;
     let data = data.into_inner();
-    let (call, channel) = tokio::try_join!(
-        ActiveCall::get_in_channel(&data.id),
-        Channel::get(&data.id)
-    )?;
+    let (call, channel) =
+        tokio::try_join!(ActiveCall::get_in_channel(&data.id), Channel::get(&data.id))?;
     let Some(call) = call else {
         return Err(Error::NotFound);
     };
@@ -82,10 +78,8 @@ pub async fn update_voice_state(
 ) -> impl RpcResponder {
     let user = check_authenticated(&state).await?;
     let data = data.into_inner();
-    let (call, channel) = tokio::try_join!(
-        ActiveCall::get_in_channel(&data.id),
-        Channel::get(&data.id)
-    )?;
+    let (call, channel) =
+        tokio::try_join!(ActiveCall::get_in_channel(&data.id), Channel::get(&data.id))?;
     let Some(mut call) = call else {
         return Err(Error::NotFound);
     };
@@ -160,10 +154,8 @@ pub async fn get_call_members(
     let user = check_authenticated(&state).await?;
     let data = data.into_inner();
 
-    let (call, channel) = tokio::try_join!(
-        ActiveCall::get_in_channel(&data.id),
-        Channel::get(&data.id)
-    )?;
+    let (call, channel) =
+        tokio::try_join!(ActiveCall::get_in_channel(&data.id), Channel::get(&data.id))?;
     let Some(call) = call else {
         return Err(Error::NotFound);
     };

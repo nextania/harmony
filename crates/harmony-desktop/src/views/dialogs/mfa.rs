@@ -1,12 +1,12 @@
 use async_stream::stream;
 use iced::{
-    Border, Element, Font, Length, Padding, Task, Theme, alignment, color,
+    Border, Element, Font, Length, Padding, Task, Theme, alignment,
     widget::{Space, button, column, container, text, text_input},
 };
 
 use crate::{
     Message,
-    api::{account, ApiClient},
+    api::{ApiClient, account},
     errors::RenderableError,
     theme::{ACCENT_PURPLE, BG_APP, BG_LOGIN_INPUT, DM_SANS, SUBTLE_GREY, TEXT_WHITE},
     views::main::MainMessage,
@@ -30,7 +30,12 @@ pub struct MfaView {
 }
 
 impl MfaView {
-    pub fn new(mfa: account::LoginMfa, backend_account: String, backend_harmony: String, password: String) -> Self {
+    pub fn new(
+        mfa: account::LoginMfa,
+        backend_account: String,
+        backend_harmony: String,
+        password: String,
+    ) -> Self {
         Self {
             mfa: Some(mfa),
             code: String::new(),

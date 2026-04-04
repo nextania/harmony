@@ -23,8 +23,7 @@ impl ChannelManager {
             return Ok(channel);
         }
         let channel = self.client.get_channel(channel_id).await?;
-        self.cache
-            .insert(channel_id.to_string(), channel.clone());
+        self.cache.insert(channel_id.to_string(), channel.clone());
         Ok(channel)
     }
 }

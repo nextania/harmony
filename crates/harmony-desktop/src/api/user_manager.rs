@@ -89,13 +89,13 @@ impl UserManager {
 
         Ok(profile)
     }
-    pub async fn get_user_by_username(&self, username: &str) -> Result<UserProfile, RenderableError> {
+    pub async fn get_user_by_username(
+        &self,
+        username: &str,
+    ) -> Result<UserProfile, RenderableError> {
         let resp = self
             .http
-            .get(format!(
-                "{}/api/user/username/{}",
-                self.base_url, username
-            ))
+            .get(format!("{}/api/user/username/{}", self.base_url, username))
             .header("Authorization", self.token.clone())
             .send()
             .await

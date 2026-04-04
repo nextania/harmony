@@ -104,12 +104,11 @@ impl BackendView {
             .width(Length::Fill);
 
         let save_btn = button(
-                text("Save")
-                    .size(12)
-                    .color(TEXT_WHITE)
-                    .font(DM_SANS)
-                    .align_x(alignment::Horizontal::Center),
-
+            text("Save")
+                .size(12)
+                .color(TEXT_WHITE)
+                .font(DM_SANS)
+                .align_x(alignment::Horizontal::Center),
         )
         .on_press(BackendMessage::Save)
         .padding(Padding::from([4, 8]))
@@ -117,13 +116,11 @@ impl BackendView {
         .cursor_default();
 
         let cancel_btn = button(
-            
-                text("Cancel")
-                    .size(12)
-                    .color(TEXT_WHITE)
-                    .font(DM_SANS)
-                    .align_x(alignment::Horizontal::Center),
-
+            text("Cancel")
+                .size(12)
+                .color(TEXT_WHITE)
+                .font(DM_SANS)
+                .align_x(alignment::Horizontal::Center),
         )
         .on_press(BackendMessage::Close)
         .padding(Padding::from([4, 8]))

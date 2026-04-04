@@ -161,7 +161,7 @@ fn contact_row(contact: &Contact) -> Element<MainMessage> {
                 MainMessage::RemoveContact(profile.id.clone()),
             ),
         ]
-        .spacing(2) 
+        .spacing(2)
         .into(),
         ContactStatus::Blocked => icon_action_btn(
             Icon::PersonProhibitedRegular,

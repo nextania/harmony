@@ -127,7 +127,9 @@ impl RpcClient {
     fn emit_raw(&self, bytes: Vec<u8>) {
         let mut socket = self.socket.clone();
         task::spawn(async move {
-            socket.send(Message::Binary(bytes.into())).await
+            socket
+                .send(Message::Binary(bytes.into()))
+                .await
                 .expect("Failed to send message");
         });
     }
@@ -191,10 +193,7 @@ pub trait CloneableAuthenticateFn:
 }
 impl<F> CloneableAuthenticateFn for F
 where
-    F: Fn(String) -> BoxFuture<'static, Result<String, Error>>
-        + Clone
-        + Send
-        + Sync,
+    F: Fn(String) -> BoxFuture<'static, Result<String, Error>> + Clone + Send + Sync,
 {
     fn clone_box<'a>(&self) -> Box<dyn 'a + CloneableAuthenticateFn>
     where

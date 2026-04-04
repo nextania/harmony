@@ -30,7 +30,10 @@ struct ArgonKsf {
 }
 
 impl Ksf for ArgonKsf {
-    fn hash<L: ArrayLength<u8>>(&self, input: GenericArray<u8, L>) -> Result<GenericArray<u8, L>, InternalError> {
+    fn hash<L: ArrayLength<u8>>(
+        &self,
+        input: GenericArray<u8, L>,
+    ) -> Result<GenericArray<u8, L>, InternalError> {
         let mut output = GenericArray::default();
         self.argon
             .hash_password_into(&input, &[0; argon2::RECOMMENDED_SALT_LEN], &mut output)
@@ -103,7 +106,9 @@ fn get_argon2_ksf() -> ArgonKsf {
     param_builder.m_cost(1 << 16);
     param_builder.p_cost(4);
 
-    let params = param_builder.build().expect("The provided Argon2 parameters should be valid");
+    let params = param_builder
+        .build()
+        .expect("The provided Argon2 parameters should be valid");
     let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
     return ArgonKsf { argon };
 }
@@ -249,7 +254,10 @@ impl LoginMfa {
             .map_err(|e| RenderableError::UnknownError(e.to_string()))?;
 
         match mfa_response {
-            LoginResponse::Mfa { token, encrypted_key } => Ok((token, encrypted_key)),
+            LoginResponse::Mfa {
+                token,
+                encrypted_key,
+            } => Ok((token, encrypted_key)),
             _ => Err(RenderableError::IncorrectCredentials),
         }
     }

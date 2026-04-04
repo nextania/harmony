@@ -103,16 +103,10 @@ impl User {
         Ok(user)
     }
 
-    pub async fn add_contact(
-        &self,
-        stage: AddContactStage,
-    ) -> Result<AddContactResult> {
+    pub async fn add_contact(&self, stage: AddContactStage) -> Result<AddContactResult> {
         let users = super::get_database().collection::<User>("users");
         match stage {
-            AddContactStage::Request {
-                id, 
-                public_key,
-            } => {
+            AddContactStage::Request { id, public_key } => {
                 let target = User::get(&id).await?;
                 let contact_id = &target.id;
                 let existing = self.contacts.iter().find(|a| &a.id == contact_id);
@@ -300,7 +294,7 @@ impl User {
                     ))
                     .await?;
 
-                // if there is already a channel between the users, 
+                // if there is already a channel between the users,
                 // this means that there was previously a relationship that was removed
                 // then update the last_key_id for that channel with the new key_id
                 let channel = Channel::get_between(&self.id, &user_id).await?;
@@ -387,8 +381,7 @@ impl User {
         if users.len() != contact_ids.len() {
             return Err(Error::NotFound);
         }
-        let user_map: HashMap<&str, &User> =
-            users.iter().map(|u| (u.id.as_str(), u)).collect();
+        let user_map: HashMap<&str, &User> = users.iter().map(|u| (u.id.as_str(), u)).collect();
 
         let contacts = try_join_all(self.contacts.iter().map(|contact| async {
             let Some(user) = user_map.get(contact.id.as_str()) else {

@@ -1,15 +1,12 @@
 use iced::{
     Border, Element, Length, Padding, Task,
     border::Radius,
-    color,
     widget::{Space, button, column, container, row, text},
 };
 
 use crate::{Message, widgets::styles};
 use crate::{
-    theme::{
-        ACCENT_PURPLE, BG_APP, BG_SELECTED, BG_SUNKEN, BORDER, DM_SANS, TEXT_MUTED, TEXT_WHITE,
-    },
+    theme::{BG_APP, BG_SUNKEN, BORDER, DM_SANS, TEXT_MUTED},
     widgets::button::ButtonExt,
 };
 

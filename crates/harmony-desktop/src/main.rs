@@ -106,9 +106,25 @@ pub enum MessageContent {
 
 #[derive(Debug, Clone)]
 pub struct ChatMessage {
+    pub id: String,
     pub user: MessageAuthor,
     pub time: i64,
+    pub formatted_time: String,
     pub content: MessageContent,
+}
+
+pub fn format_message_time(timestamp_millis: i64) -> String {
+    use chrono::{DateTime, Local, Utc};
+    DateTime::<Utc>::from_timestamp_millis(timestamp_millis)
+        .map(|dt| {
+            let local = dt.with_timezone(&Local);
+            if local.date_naive() < Local::now().date_naive() {
+                local.format("%d/%m/%Y, %H:%M").to_string()
+            } else {
+                local.format("%H:%M").to_string()
+            }
+        })
+        .unwrap_or_else(|| "Invalid time".to_string())
 }
 
 #[derive(Debug, Clone)]

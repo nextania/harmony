@@ -11,7 +11,7 @@ use pulse_api::{PulseClient, PulseClientOptions, PulseEvent};
 use ulid::Ulid;
 
 use crate::{
-    ChatMessage, Message, MessageContent,
+    ChatMessage, Message, MessageContent, format_message_time,
     api::{
         ApiClient, ApiMessageContent, CallParticipant, CallState, CallTrackState, Contact,
         ContactAction, ContactStatus, placeholder_profile,
@@ -221,21 +221,26 @@ impl MainView {
                             let raw = client.get_messages(&i).await?;
                             let messages = raw
                                 .into_iter()
-                                .map(|api_msg| ChatMessage {
-                                    user: api_msg.author.clone(),
-                                    time: Ulid::from_string(&api_msg.id)
+                                .map(|api_msg| {
+                                    let time = Ulid::from_string(&api_msg.id)
                                         .expect("Invalid ULID")
                                         .datetime()
                                         .duration_since(UNIX_EPOCH)
                                         .expect("Time went backwards")
                                         .as_millis()
-                                        as i64,
-                                    content: match api_msg.content {
-                                        ApiMessageContent::Text(text) => MessageContent::Text(text),
-                                        ApiMessageContent::CallCard { channel, duration } => {
-                                            MessageContent::CallCard { channel, duration }
-                                        }
-                                    },
+                                        as i64;
+                                    ChatMessage {
+                                        id: api_msg.id.clone(),
+                                        user: api_msg.author.clone(),
+                                        time,
+                                        formatted_time: format_message_time(time),
+                                        content: match api_msg.content {
+                                            ApiMessageContent::Text(text) => MessageContent::Text(text),
+                                            ApiMessageContent::CallCard { channel, duration } => {
+                                                MessageContent::CallCard { channel, duration }
+                                            }
+                                        },
+                                    }
                                 })
                                 .collect();
                             Ok((i, messages))
@@ -272,19 +277,22 @@ impl MainView {
                             async move { client.send_message(&channel_id, &content).await },
                             move |result| match result {
                                 Ok(api_msg) => {
+                                    let time = Ulid::from_string(&api_msg.id)
+                                        .map(|u| {
+                                            u.datetime()
+                                                .duration_since(UNIX_EPOCH)
+                                                .unwrap_or_default()
+                                                .as_millis()
+                                                as i64
+                                        })
+                                        .unwrap_or_else(|_| {
+                                            chrono::Utc::now().timestamp_millis()
+                                        });
                                     let chat_msg = ChatMessage {
+                                        id: api_msg.id.clone(),
                                         user: api_msg.author.clone(),
-                                        time: Ulid::from_string(&api_msg.id)
-                                            .map(|u| {
-                                                u.datetime()
-                                                    .duration_since(UNIX_EPOCH)
-                                                    .unwrap_or_default()
-                                                    .as_millis()
-                                                    as i64
-                                            })
-                                            .unwrap_or_else(|_| {
-                                                chrono::Utc::now().timestamp_millis()
-                                            }),
+                                        time,
+                                        formatted_time: format_message_time(time),
                                         content: match api_msg.content {
                                             ApiMessageContent::Text(t) => MessageContent::Text(t),
                                             ApiMessageContent::CallCard { channel, duration } => {
@@ -302,9 +310,12 @@ impl MainView {
             }
             MainMessage::MessageSent(msg) => {
                 if let Some(conv_id) = &self.current_conversation {
-                    self.conversation_messages
-                        .get_mut(conv_id)
-                        .map(|msgs| msgs.push(msg.clone()));
+                    if let Some(msgs) = self.conversation_messages.get_mut(conv_id) {
+                        msgs.push(msg.clone());
+                    } else {
+                        self.conversation_messages
+                            .put(conv_id.clone(), vec![msg.clone()]);
+                    }
                     self.current_conversation_messages.push(msg);
                 }
             }
@@ -317,17 +328,20 @@ impl MainView {
                         async move { client.edit_message(&mid, &channel_id, &new_content).await },
                         move |result| match result {
                             Ok(api_msg) => {
+                                let time = Ulid::from_string(&api_msg.id)
+                                    .map(|u| {
+                                        u.datetime()
+                                            .duration_since(UNIX_EPOCH)
+                                            .unwrap_or_default()
+                                            .as_millis()
+                                            as i64
+                                    })
+                                    .unwrap_or_else(|_| chrono::Utc::now().timestamp_millis());
                                 let chat_msg = ChatMessage {
+                                    id: api_msg.id.clone(),
                                     user: api_msg.author.clone(),
-                                    time: Ulid::from_string(&api_msg.id)
-                                        .map(|u| {
-                                            u.datetime()
-                                                .duration_since(UNIX_EPOCH)
-                                                .unwrap_or_default()
-                                                .as_millis()
-                                                as i64
-                                        })
-                                        .unwrap_or_else(|_| chrono::Utc::now().timestamp_millis()),
+                                    time,
+                                    formatted_time: format_message_time(time),
                                     content: match api_msg.content {
                                         ApiMessageContent::Text(t) => MessageContent::Text(t),
                                         ApiMessageContent::CallCard { channel, duration } => {
@@ -359,8 +373,14 @@ impl MainView {
                     );
                 }
             }
-            MainMessage::MessageDeleted(_message_id, _channel_id) => {
-                // TODO: remove from cache by message ID once ChatMessage has an id field
+            MainMessage::MessageDeleted(message_id, channel_id) => {
+                if let Some(msgs) = self.conversation_messages.get_mut(&channel_id) {
+                    msgs.retain(|m| m.id != message_id);
+                }
+                if self.current_conversation.as_ref() == Some(&channel_id) {
+                    self.current_conversation_messages
+                        .retain(|m| m.id != message_id);
+                }
             }
             MainMessage::ServerEvent(event) => {
                 return self.handle_server_event(event);
@@ -831,8 +851,10 @@ impl MainView {
                     .unwrap_or_else(|_| chrono::Utc::now().timestamp_millis());
 
                 let chat_msg = ChatMessage {
+                    id: msg.id.clone(),
                     user: author,
                     time,
+                    formatted_time: format_message_time(time),
                     content: MessageContent::Text(text),
                 };
 

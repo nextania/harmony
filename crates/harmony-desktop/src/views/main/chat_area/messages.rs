@@ -1,4 +1,4 @@
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Utc};
 use iced::{
     Border, Color, Element, Font, Length, Padding, Shadow, Vector, alignment,
     widget::{Column, Space, button, column, container, row, scrollable, text},
@@ -178,17 +178,7 @@ pub fn main_chat(state: &MainView) -> Element<MainMessage> {
                 });
             // HH:MM format for message timestamps
             // if timestamp was before today, show the date as well
-            let time_formatted = DateTime::<Utc>::from_timestamp_millis(msg.time)
-                .map(|dt| {
-                    let local = dt.with_timezone(&Local);
-                    if local.date_naive() < Local::now().date_naive() {
-                        local.format("%d/%m/%Y, %H:%M").to_string()
-                    } else {
-                        local.format("%H:%M").to_string()
-                    }
-                })
-                .unwrap_or("Invalid time".to_string());
-            let time_label = text(time_formatted)
+            let time_label = text(&msg.formatted_time)
                 .size(12)
                 .color(TEXT_MUTED)
                 .font(DM_SANS);

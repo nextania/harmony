@@ -6,7 +6,7 @@ use iced::{
 
 use crate::{
     Message,
-    api::{account, live::LiveApiClient},
+    api::{account, ApiClient},
     errors::RenderableError,
     theme::{ACCENT_PURPLE, BG_APP, BG_LOGIN_INPUT, DM_SANS, SUBTLE_GREY, TEXT_WHITE},
     views::main::MainMessage,
@@ -62,7 +62,7 @@ impl MfaView {
                     return Task::stream(stream! {
                         let result = async {
                             let (token, encrypted_key) = mfa.code(&code).await?;
-                            let (client, stream) = LiveApiClient::connect(&backend_account, &backend_harmony, &token, &encrypted_key, &password).await?;
+                            let (client, stream) = ApiClient::connect(&backend_account, &backend_harmony, &token, &encrypted_key, &password).await?;
                             let current_user = client.get_current_user().await?;
                             let conversations = client.get_conversations().await?
                                 .into_iter().map(|c| (c.id(), c)).collect();

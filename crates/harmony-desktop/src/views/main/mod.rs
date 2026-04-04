@@ -106,7 +106,7 @@ pub enum MainMessage {
 pub struct MainView {
     active_tab: SidebarTab,
     chat_mode: ChatMode,
-    api: Arc<dyn ApiClient>,
+    api: Arc<ApiClient>,
     pub chat_input: String,
     pub search_input: String,
     pub conversations: HashMap<String, crate::api::Channel>,
@@ -135,7 +135,7 @@ pub struct MainView {
 
 impl MainView {
     pub fn new(
-        api: Arc<dyn ApiClient>,
+        api: Arc<ApiClient>,
         current_user: crate::api::CurrentUser,
         conversations: HashMap<String, crate::api::Channel>,
     ) -> Self {
@@ -878,7 +878,7 @@ impl MainView {
                 let api = self.api.clone();
                 return Task::perform(
                     async move {
-                        let api_msg = api.decrypt_message(&msg).await?;
+                        let api_msg = api.map_message(&msg).await?;
                         let time = Ulid::from_string(&api_msg.id)
                             .map(|u| {
                                 u.datetime()
@@ -1072,7 +1072,7 @@ impl MainView {
                         },
                     );
                 } else {
-                    let new_status = crate::api::live::map_relationship(&state);
+                    let new_status = crate::api::map_relationship(&state);
                     if let Some(c) = self.contacts.iter_mut().find(|c| c.profile.id == user_id) {
                         c.status = new_status;
                     } else {

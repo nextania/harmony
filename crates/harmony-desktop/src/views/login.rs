@@ -13,7 +13,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::{
     Message,
-    api::{account, live::LiveApiClient},
+    api::{account, ApiClient},
     errors::RenderableError,
     icons::{FLUENT_ICONS, Icon},
     preferences::Locale,
@@ -25,12 +25,12 @@ use crate::{
     widgets::{button::ButtonExt, styles},
 };
 
-use crate::api::{ApiClient, Channel, CurrentUser};
+use crate::api::{Channel, CurrentUser};
 use std::{collections::HashMap, sync::Arc};
 
 enum LoginFlow {
     Done(
-        Arc<dyn ApiClient>,
+        Arc<ApiClient>,
         CurrentUser,
         HashMap<String, Channel>,
         UnboundedReceiver<Event>,
@@ -106,7 +106,7 @@ impl LoginView {
                     let result = async {
                         match account::login(&backend_account, &email, &password).await? {
                             account::LoginResult::Success((token, encrypted_key)) => {
-                                let (client, stream) = LiveApiClient::connect(&backend_account, &backend_harmony, &token, &encrypted_key, &password).await?;
+                                let (client, stream) = ApiClient::connect(&backend_account, &backend_harmony, &token, &encrypted_key, &password).await?;
                                 let current_user = client.get_current_user().await?;
                                 let conversations = client.get_conversations().await?
                                     .into_iter().map(|c| (c.id(), c)).collect();

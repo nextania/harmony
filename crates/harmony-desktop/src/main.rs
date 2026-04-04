@@ -204,14 +204,14 @@ impl AppWindow {
 
 struct App {
     windows: BTreeMap<window::Id, AppWindow>,
-    api: Option<Arc<dyn ApiClient>>,
+    api: Option<Arc<ApiClient>>,
     backend_account: String,
     backend_harmony: String,
 }
 
 pub type EventReceiver = UnboundedReceiver<harmony_api::Event>;
 
-pub type LoginResult = (Arc<dyn ApiClient>, CurrentUser, HashMap<String, Channel>);
+pub type LoginResult = (Arc<ApiClient>, CurrentUser, HashMap<String, Channel>);
 
 #[derive(Clone)]
 pub enum Message {

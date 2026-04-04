@@ -73,14 +73,20 @@ pub async fn listen() -> anyhow::Result<()> {
     let server = Endpoint::<Server>::server(config)?;
 
     loop {
-        let incoming = server.accept().await;
-        let session_request = incoming.await?;
-
-        tokio::spawn(async move {
-            if let Err(e) = handle_session(session_request).await {
-                error!("Session error: {:?}", e);
+        let incoming = server.accept().await.await;
+        match incoming {
+            Ok(session_request) => {
+                tokio::spawn(async move {
+                    if let Err(e) = handle_session(session_request).await {
+                        error!("Session error: {:?}", e);
+                    }
+                });
+            },
+            Err(e) => {
+                error!("Failed to accept incoming connection: {:?}", e);
+                continue;
             }
-        });
+        };
     }
 }
 

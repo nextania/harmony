@@ -23,6 +23,7 @@ pub enum RpcMessageS2C {
     },
 }
 
+// TODO: use one enum
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", content = "data", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum Event {
@@ -49,17 +50,6 @@ pub enum Event {
     /// A member left a channel
     MemberLeft(MemberLeftEvent),
 
-    /// Connection was established
-    Connected,
-    /// Connection was lost
-    Disconnected,
-    /// Reconnection attempt started
-    Reconnecting { attempt: u32, max_attempts: u32 },
-    /// Reconnection successful
-    Reconnected,
-    /// Reconnection failed permanently
-    ReconnectionFailed { attempts: u32 },
-
     /// A user joined a call
     #[serde(rename_all = "camelCase")]
     UserJoinedCall {
@@ -80,6 +70,17 @@ pub enum Event {
         muted: bool,
         deafened: bool,
     },
+
+    /// Connection was established
+    Connected,
+    /// Connection was lost
+    Disconnected,
+    /// Reconnection attempt started
+    Reconnecting { attempt: u32, max_attempts: u32 },
+    /// Reconnection successful
+    Reconnected,
+    /// Reconnection failed permanently
+    ReconnectionFailed { attempts: u32 },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

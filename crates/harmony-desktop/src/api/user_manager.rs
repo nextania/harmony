@@ -1,12 +1,10 @@
-use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use iced::Color;
-use lru::LruCache;
+use quick_cache::sync::Cache;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tokio::sync::Mutex;
 
 use crate::{api::UserProfile, errors::RenderableError};
 
@@ -51,7 +49,7 @@ impl From<PublicUser> for UserProfile {
 const CACHE_CAPACITY: usize = 512;
 
 pub struct UserManager {
-    cache: Mutex<LruCache<String, UserProfile>>,
+    cache: Cache<String, UserProfile>,
     http: Client,
     base_url: String,
     token: String,
@@ -60,7 +58,7 @@ pub struct UserManager {
 impl UserManager {
     pub fn new(http: Client, base_url: impl Into<String>, token: impl Into<String>) -> Arc<Self> {
         Arc::new(Self {
-            cache: Mutex::new(LruCache::new(NonZeroUsize::new(CACHE_CAPACITY).unwrap())),
+            cache: Cache::new(CACHE_CAPACITY),
             http,
             base_url: base_url.into(),
             token: token.into(),
@@ -68,11 +66,8 @@ impl UserManager {
     }
 
     pub async fn get_user(&self, user_id: &str) -> Result<UserProfile, RenderableError> {
-        {
-            let mut cache = self.cache.lock().await;
-            if let Some(profile) = cache.get(user_id) {
-                return Ok(profile.clone());
-            }
+        if let Some(profile) = self.cache.get(user_id) {
+            return Ok(profile.clone());
         }
 
         let resp = self
@@ -90,10 +85,7 @@ impl UserManager {
 
         let profile = UserProfile::from(public_user);
 
-        {
-            let mut cache = self.cache.lock().await;
-            cache.put(profile.id.clone(), profile.clone());
-        }
+        self.cache.insert(profile.id.clone(), profile.clone());
 
         Ok(profile)
     }
@@ -116,10 +108,7 @@ impl UserManager {
 
         let profile = UserProfile::from(public_user);
 
-        {
-            let mut cache = self.cache.lock().await;
-            cache.put(profile.id.clone(), profile.clone());
-        }
+        self.cache.insert(profile.id.clone(), profile.clone());
 
         Ok(profile)
     }
@@ -131,14 +120,11 @@ impl UserManager {
         let mut fetched: Vec<(String, UserProfile)> = Vec::new();
         let mut missing: Vec<String> = Vec::new();
 
-        {
-            let mut cache = self.cache.lock().await;
-            for id in &user_ids {
-                if let Some(profile) = cache.get(id) {
-                    fetched.push((id.clone(), profile.clone()));
-                } else {
-                    missing.push(id.clone());
-                }
+        for id in &user_ids {
+            if let Some(profile) = self.cache.get(id) {
+                fetched.push((id.clone(), profile.clone()));
+            } else {
+                missing.push(id.clone());
             }
         }
 
@@ -157,10 +143,9 @@ impl UserManager {
                 .await
                 .map_err(|e| RenderableError::UnknownError(e.to_string()))?;
 
-            let mut cache = self.cache.lock().await;
             for user in users {
                 let profile = UserProfile::from(user);
-                cache.put(profile.id.clone(), profile.clone());
+                self.cache.insert(profile.id.clone(), profile.clone());
                 fetched.push((profile.id.clone(), profile));
             }
         }

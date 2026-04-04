@@ -691,4 +691,8 @@ impl ApiClient for LiveApiClient {
         self.sync_keystore().await;
         Ok(())
     }
+
+    async fn decrypt_message(&self, msg: &harmony_api::Message) -> RenderableResult<ApiMessage> {
+        self.map_message(msg).await
+    }
 }

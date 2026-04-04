@@ -79,6 +79,7 @@ pub enum MainMessage {
     AvatarMenuAction(AvatarAction),
     OpenSettings,
     MessagesLoaded(String, Vec<ChatMessage>),
+    NewMessageDecrypted(String, ChatMessage),
     ApiError(RenderableError),
     DismissError,
     ToggleEmojiPicker,
@@ -317,6 +318,14 @@ impl MainView {
                             .put(conv_id.clone(), vec![msg.clone()]);
                     }
                     self.current_conversation_messages.push(msg);
+                }
+            }
+            MainMessage::NewMessageDecrypted(channel_id, chat_msg) => {
+                if let Some(msgs) = self.conversation_messages.get_mut(&channel_id) {
+                    msgs.push(chat_msg.clone());
+                }
+                if self.current_conversation.as_ref() == Some(&channel_id) {
+                    self.current_conversation_messages.push(chat_msg);
                 }
             }
             MainMessage::EditMessage(message_id, new_content) => {
@@ -832,38 +841,41 @@ impl MainView {
             Event::NewMessage(e) => {
                 let channel_id = e.channel_id.clone();
                 let msg = e.message;
-                let profile = placeholder_profile(&msg.author_id);
-                let author = crate::MessageAuthor::User {
-                    id: msg.author_id.clone(),
-                    name: profile.display_name.clone(),
-                    avatar_color_start: profile.avatar_color_start,
-                    avatar_color_end: profile.avatar_color_end,
-                };
-                // TODO: decrypt content and determine message type
-                let text = String::new();
-                let time = Ulid::from_string(&msg.id)
-                    .map(|u| {
-                        u.datetime()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_millis() as i64
-                    })
-                    .unwrap_or_else(|_| chrono::Utc::now().timestamp_millis());
-
-                let chat_msg = ChatMessage {
-                    id: msg.id.clone(),
-                    user: author,
-                    time,
-                    formatted_time: format_message_time(time),
-                    content: MessageContent::Text(text),
-                };
-
-                if let Some(msgs) = self.conversation_messages.get_mut(&channel_id) {
-                    msgs.push(chat_msg.clone());
-                }
-                if self.current_conversation.as_ref() == Some(&channel_id) {
-                    self.current_conversation_messages.push(chat_msg);
-                }
+                let api = self.api.clone();
+                return Task::perform(
+                    async move {
+                        let api_msg = api.decrypt_message(&msg).await?;
+                        let time = Ulid::from_string(&api_msg.id)
+                            .map(|u| {
+                                u.datetime()
+                                    .duration_since(UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_millis() as i64
+                            })
+                            .unwrap_or_else(|_| chrono::Utc::now().timestamp_millis());
+                        Ok((
+                            channel_id,
+                            ChatMessage {
+                                id: api_msg.id.clone(),
+                                user: api_msg.author,
+                                time,
+                                formatted_time: format_message_time(time),
+                                content: match api_msg.content {
+                                    ApiMessageContent::Text(t) => MessageContent::Text(t),
+                                    ApiMessageContent::CallCard { channel, duration } => {
+                                        MessageContent::CallCard { channel, duration }
+                                    }
+                                },
+                            },
+                        ))
+                    },
+                    |result: crate::errors::RenderableResult<_>| match result {
+                        Ok((channel_id, chat_msg)) => {
+                            Message::Main(MainMessage::NewMessageDecrypted(channel_id, chat_msg))
+                        }
+                        Err(e) => Message::Main(MainMessage::ApiError(e)),
+                    },
+                );
             }
             Event::MessageEdited(_e) => {
                 // TODO:

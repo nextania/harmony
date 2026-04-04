@@ -174,6 +174,21 @@ pub trait ApiClient: Send + Sync {
     async fn get_group_key(&self, channel_id: &str) -> RenderableResult<Option<Vec<u8>>>;
     async fn create_group_invite(&self, channel_id: &str) -> RenderableResult<String>;
     async fn join_group(&self, invite_code: &str, group_key: &[u8]) -> RenderableResult<()>;
+    async fn decrypt_message(&self, msg: &harmony_api::Message) -> RenderableResult<ApiMessage> {
+        let profile = placeholder_profile(&msg.author_id);
+        Ok(ApiMessage {
+            id: msg.id.clone(),
+            author: MessageAuthor::User {
+                id: msg.author_id.clone(),
+                name: profile.display_name,
+                avatar_color_start: profile.avatar_color_start,
+                avatar_color_end: profile.avatar_color_end,
+            },
+            content: ApiMessageContent::Text(
+                String::from_utf8_lossy(&msg.content).into_owned(),
+            ),
+        })
+    }
 }
 
 pub fn placeholder_profile(user_id: &str) -> UserProfile {

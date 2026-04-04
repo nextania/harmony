@@ -333,7 +333,7 @@ impl ApiClient for LiveApiClient {
     async fn get_messages(&self, channel_id: &str) -> RenderableResult<Vec<ApiMessage>> {
         let messages = self
             .client
-            .get_messages(channel_id, Some(50), Some(true), None, None)
+            .get_messages(channel_id, Some(50), None, None, None)
             .await?;
 
         let mut result = Vec::with_capacity(messages.len());
@@ -395,9 +395,6 @@ impl ApiClient for LiveApiClient {
 
     async fn get_call(&self, channel_id: &str) -> RenderableResult<Option<CallState>> {
         let members = self.client.get_call_members(channel_id).await?;
-        if members.is_empty() {
-            return Ok(None);
-        }
         let member_ids: Vec<String> = members.iter().map(|m| m.user_id.clone()).collect();
         let profiles = self
             .users

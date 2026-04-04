@@ -990,6 +990,29 @@ impl MainView {
                             Err(e) => Message::Main(MainMessage::ApiError(e)),
                         },
                     );
+                } else if let harmony_api::RelationshipState::Established {
+                    public_key,
+                    encapsulated,
+                    key_id,
+                } = state {
+                    let client = self.api.clone();
+                    let uid = user_id.clone();
+                    return Task::perform(
+                        async move {
+                            client
+                                .add_contact(ContactAction::HandleEstablished {
+                                    user_id: uid,
+                                    public_key,
+                                    encapsulated,
+                                    key_id,
+                                })
+                                .await
+                        },
+                        |result| match result {
+                            Ok(contact) => Message::Main(MainMessage::ContactAccepted(contact)),
+                            Err(e) => Message::Main(MainMessage::ApiError(e)),
+                        },
+                    );
                 } else {
                     let new_status = crate::api::live::map_relationship(&state);
                     if let Some(c) = self.contacts.iter_mut().find(|c| c.profile.id == user_id) {

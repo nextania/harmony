@@ -121,6 +121,7 @@ pub enum ContactAction {
     Request { user_id: String },
     Accept { user_id: String },
     Finalize { user_id: String, public_key: UnifiedPublicKey, encapsulated: Vec<u8> },
+    HandleEstablished { user_id: String, public_key: UnifiedPublicKey, encapsulated: Vec<u8>, key_id: String },
 }
 
 // An ApiClient directly maps API methods to renderables

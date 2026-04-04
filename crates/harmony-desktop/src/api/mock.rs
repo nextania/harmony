@@ -316,6 +316,10 @@ impl ApiClient for MockApiClient {
                 profile: crate::api::placeholder_profile(&user_id),
                 status: ContactStatus::Established,
             }),
+            ContactAction::HandleEstablished { user_id, .. } => Ok(Contact {
+                profile: crate::api::placeholder_profile(&user_id),
+                status: ContactStatus::Established,
+            }),
         }
     }
 

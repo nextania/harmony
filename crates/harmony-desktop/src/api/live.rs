@@ -544,6 +544,33 @@ impl ApiClient for LiveApiClient {
                 ks.store_direct_key(key_id, key);
                 result
             }
+            ContactAction::HandleEstablished { user_id, public_key: requester_pk, encapsulated, key_id } => {
+                let mut ks = self.keystore.lock().await;
+                let enc = ks
+                    .get_encryption(&user_id)
+                    .ok_or(RenderableError::CryptoError(
+                        "Failed to get encryption for contact".to_string(),
+                    ))?;
+                let ss2 = enc.decapsulate(&encapsulated);
+                let ss1 = ks
+                    .get_outgoing_ss(&user_id)
+                    .ok_or(RenderableError::CryptoError(
+                        "Failed to get outgoing shared secret for contact".to_string(),
+                    ))?;
+                let key = enc.derive_channel_key(&requester_pk, &ss1, &ss2);
+                ks.store_direct_key(&key_id, key);
+                drop(ks);
+                self.sync_keystore().await?;
+                let profile = self
+                    .users
+                    .get_user(&user_id)
+                    .await
+                    .unwrap_or_else(|_| placeholder_profile(&user_id));
+                return Ok(Contact {
+                    profile,
+                    status: ContactStatus::Established,
+                });
+            }
         };
 
         // sync keystore to server after any state change

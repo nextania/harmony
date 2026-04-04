@@ -365,8 +365,21 @@ impl MainView {
                     );
                 }
             }
-            MainMessage::MessageEdited(_message_id, _updated_msg) => {
-                // TODO: update in cache and current view
+            MainMessage::MessageEdited(message_id, updated_msg) => {
+                if let Some(conv_id) = &self.current_conversation {
+                    if let Some(msgs) = self.conversation_messages.get_mut(conv_id) {
+                        if let Some(m) = msgs.iter_mut().find(|m| m.id == message_id) {
+                            *m = updated_msg.clone();
+                        }
+                    }
+                    if let Some(m) = self
+                        .current_conversation_messages
+                        .iter_mut()
+                        .find(|m| m.id == message_id)
+                    {
+                        *m = updated_msg;
+                    }
+                }
             }
             MainMessage::DeleteMessage(message_id) => {
                 if let Some(conv_id) = &self.current_conversation {

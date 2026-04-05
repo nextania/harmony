@@ -7,7 +7,7 @@ use iced::{
     widget::{Space, button, column, container, row, text},
 };
 use lru::LruCache;
-use pulse_api::{PulseClient, PulseClientOptions, PulseEvent};
+use pulse_api::{MediaHint, PulseClient, PulseClientOptions, PulseEvent};
 use ulid::Ulid;
 
 use crate::{
@@ -24,6 +24,7 @@ use crate::{
         chat_area::chat_area, chat_list::chat_list, people_list::people_list, sidebar::sidebar,
     },
 };
+use crate::media::{audio::AudioPipeline, codec};
 
 pub mod chat_area;
 pub mod chat_list;
@@ -75,6 +76,9 @@ pub enum MainMessage {
     PulseConnected(Arc<PulseClient>, String),
     PulseDisconnected,
     PulseEvent(PulseEvent),
+    AudioTrackSubscribed(String),
+    AudioPacket(String, Vec<u8>),
+    MicEnabled,
     ToggleChatList,
     ToggleAvatarMenu,
     AvatarMenuDismiss,
@@ -121,6 +125,7 @@ pub struct MainView {
     pub current_call_id: Option<String>,
     pub current_call_state: Option<CallState>,
     pub pulse_client: Option<Arc<PulseClient>>,
+    pub audio: AudioPipeline,
 
     pub current_conversation_messages: Vec<ChatMessage>,
 
@@ -157,6 +162,7 @@ impl MainView {
             current_call_id: None,
             current_call_state: None,
             pulse_client: None,
+            audio: AudioPipeline::new().expect("audio pipeline init"),
             current_conversation_messages: Vec::new(),
             emoji_picker_open: false,
             emoji_picker_category: emojis::Group::SmileysAndEmotion,
@@ -523,6 +529,8 @@ impl MainView {
                     pulse.disconnect();
                 }
                 self.pulse_client = None;
+                self.audio.stop_playback();
+                self.audio.stop_capture();
                 if let Some(ref mut call) = self.current_call_state {
                     call.participants
                         .retain(|p| p.profile.id != self.current_user.profile.id);
@@ -538,10 +546,14 @@ impl MainView {
                     if let Some(p) = call
                         .participants
                         .iter_mut()
+                        // FIXME: use session_id
                         .find(|p| p.profile.id == self.current_user.profile.id)
                     {
                         let new_audio = !p.tracks.audio;
                         p.tracks.audio = new_audio;
+                        if !new_audio {
+                            self.audio.stop_capture();
+                        }
                         if let Some(conv_id) = self.current_call.clone() {
                             let client = self.api.clone();
                             let pulse = self.pulse_client.clone();
@@ -553,20 +565,26 @@ impl MainView {
                                         .await?;
                                     if let Some(pulse) = pulse {
                                         if new_audio {
-                                            let _ = pulse
+                                            pulse
                                                 .produce_track(
                                                     "audio".to_string(),
-                                                    pulse_api::MediaHint::Audio,
+                                                    MediaHint::Audio,
                                                 )
-                                                .await;
+                                                .await
+                                                .map_err(|e| {
+                                                    RenderableError::UnknownError(format!(
+                                                        "Failed to produce audio track: {e}"
+                                                    ))
+                                                })?;
                                         } else {
                                             let _ = pulse.stop_producing("audio".to_string()).await;
                                         }
                                     }
-                                    Ok::<(), RenderableError>(())
+                                    Ok::<bool, RenderableError>(new_audio)
                                 },
                                 |result| match result {
-                                    Ok(()) => Message::Main(MainMessage::DismissError),
+                                    Ok(true) => Message::Main(MainMessage::MicEnabled),
+                                    Ok(false) => Message::Main(MainMessage::DismissError),
                                     Err(e) => Message::Main(MainMessage::ApiError(e)),
                                 },
                             );
@@ -675,6 +693,8 @@ impl MainView {
             }
             MainMessage::PulseDisconnected => {
                 self.pulse_client = None;
+                self.audio.stop_playback();
+                self.audio.stop_capture();
                 if self.current_call.is_some() {
                     if let Some(ref mut call) = self.current_call_state {
                         call.participants
@@ -693,6 +713,8 @@ impl MainView {
                     PulseEvent::Disconnected { reconnect } => {
                         if reconnect.is_none() {
                             self.pulse_client = None;
+                            self.audio.stop_playback();
+                            self.audio.stop_capture();
                             self.current_call = None;
                             self.current_call_id = None;
                         }
@@ -700,26 +722,99 @@ impl MainView {
                     PulseEvent::TrackAvailable(track) => {
                         if let Some(ref pulse) = self.pulse_client {
                             let pulse = pulse.clone();
-                            return Task::perform(
-                                async move { pulse.consume_track(&track).await },
-                                |result| match result {
-                                    Ok(_rx) => {
-                                        // TODO: feed into media playback pipeline
-                                        Message::Main(MainMessage::DismissError)
-                                    }
-                                    Err(e) => Message::Main(MainMessage::ApiError(
-                                        RenderableError::UnknownError(format!(
-                                            "Failed to consume track: {e}"
-                                        )),
-                                    )),
-                                },
+                            let is_audio = matches!(
+                                &track.media_hint,
+                                MediaHint::Audio | MediaHint::ScreenAudio
                             );
+                            if is_audio {
+                                return Task::stream(stream! {
+                                    let track_id = track.id.clone();
+                                    let mut rx = match pulse.consume_track(&track).await {
+                                        Ok(rx) => rx,
+                                        Err(e) => {
+                                            yield Message::Main(MainMessage::ApiError(
+                                                RenderableError::UnknownError(format!(
+                                                    "Failed to consume audio track: {e}"
+                                                )),
+                                            ));
+                                            return;
+                                        }
+                                    };
+                                    yield Message::Main(MainMessage::AudioTrackSubscribed(
+                                        track_id.clone(),
+                                    ));
+                                    while let Some(packet) = rx.recv().await {
+                                        if let Some((_codec, data)) =
+                                            codec::strip_codec_byte(&packet)
+                                        {
+                                            yield Message::Main(MainMessage::AudioPacket(
+                                                track_id.clone(),
+                                                data.to_vec(),
+                                            ));
+                                        }
+                                    }
+                                });
+                            } else {
+                                return Task::perform(
+                                    async move { pulse.consume_track(&track).await },
+                                    |result| match result {
+                                        Ok(_rx) => {
+                                            // TODO: feed into video pipeline
+                                            Message::Main(MainMessage::DismissError)
+                                        }
+                                        Err(e) => Message::Main(MainMessage::ApiError(
+                                            RenderableError::UnknownError(format!(
+                                                "Failed to consume track: {e}"
+                                            )),
+                                        )),
+                                    },
+                                );
+                            }
                         }
                     }
                     PulseEvent::TrackUnavailable(id) => {
+                        self.audio.remove_track(&id);
                         tracing::info!("Track unavailable: {id}");
                     }
                     _ => {}
+                }
+            }
+            MainMessage::AudioTrackSubscribed(track_id) => {
+                if let Err(e) = self.audio.add_track(track_id) {
+                    tracing::warn!("audio add_track: {e:#}");
+                }
+                if let Err(e) = self.audio.start_playback() {
+                    tracing::warn!("audio start_playback: {e:#}");
+                }
+            }
+            MainMessage::AudioPacket(track_id, data) => {
+                if let Err(e) = self.audio.feed_packet(&track_id, &data) {
+                    tracing::warn!("audio feed_packet ({track_id}): {e:#}");
+                }
+            }
+            MainMessage::MicEnabled => {
+                if self.pulse_client.is_some() {
+                    match self.audio.start_capture() {
+                        Ok(Some(rx)) => {
+                            let pulse = self.pulse_client.clone();
+                            return Task::stream(stream! {
+                                let Some(pulse) = pulse else { return; };
+                                let mut rx = rx;
+                                while let Some(packet) = rx.recv().await {
+                                    if let Err(e) = pulse.send_media("audio", &packet) {
+                                        tracing::warn!("mic send_media: {e:#}");
+                                    }
+                                }
+                                yield Message::Main(MainMessage::DismissError);
+                            });
+                        }
+                        Ok(None) => {} // already capturing
+                        Err(e) => {
+                            self.error = Some(RenderableError::UnknownError(format!(
+                                "Microphone error: {e}"
+                            )));
+                        }
+                    }
                 }
             }
             MainMessage::ToggleEmojiPicker => self.emoji_picker_open = !self.emoji_picker_open,

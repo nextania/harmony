@@ -585,7 +585,7 @@ impl ApiClient {
     pub async fn create_call_token(&self, channel_id: &str) -> RenderableResult<CallTokenInfo> {
         let resp = self
             .client
-            .create_call_token(channel_id, false, false)
+            .create_call_token(channel_id, true, false)
             .await?;
         Ok(CallTokenInfo {
             session_id: resp.id,

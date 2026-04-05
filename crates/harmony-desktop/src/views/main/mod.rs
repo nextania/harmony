@@ -71,6 +71,7 @@ pub enum MainMessage {
     ToggleCamera,
     ToggleScreenShare,
     CallStateLoaded(String, Option<CallState>),
+    CallParticipantJoined(CallParticipant),
     PulseConnected(Arc<PulseClient>, String),
     PulseDisconnected,
     PulseEvent(PulseEvent),
@@ -652,6 +653,21 @@ impl MainView {
                     self.current_call_state = state;
                 }
             }
+            MainMessage::CallParticipantJoined(participant) => {
+                if let Some(ref mut call) = self.current_call_state {
+                    if !call
+                        .participants
+                        .iter()
+                        .any(|p| p.profile.id == participant.profile.id)
+                    {
+                        call.participants.push(participant);
+                    }
+                } else {
+                    self.current_call_state = Some(CallState {
+                        participants: vec![participant],
+                    });
+                }
+            }
             MainMessage::PulseConnected(pulse_client, call_id) => {
                 self.pulse_client = Some(pulse_client);
                 self.current_call = self.current_conversation.clone();
@@ -992,25 +1008,28 @@ impl MainView {
                 deafened: _,
             } => {
                 if self.current_call_id.as_deref() == Some(&call_id) {
-                    let profile = placeholder_profile(&user_id);
-                    let participant = CallParticipant {
-                        profile,
-                        session_id,
-                        tracks: CallTrackState {
-                            audio: !muted,
-                            video: false,
-                            screen: false,
+                    let client = self.api.clone();
+                    let uid = user_id.clone();
+                    return Task::perform(
+                        async move {
+                            let profile = client.get_user_profile(&uid).await?;
+                            Ok::<CallParticipant, RenderableError>(CallParticipant {
+                                profile,
+                                session_id,
+                                tracks: CallTrackState {
+                                    audio: !muted,
+                                    video: false,
+                                    screen: false,
+                                },
+                            })
                         },
-                    };
-                    if let Some(ref mut call) = self.current_call_state {
-                        if !call.participants.iter().any(|p| p.profile.id == user_id) {
-                            call.participants.push(participant);
-                        }
-                    } else {
-                        self.current_call_state = Some(CallState {
-                            participants: vec![participant],
-                        });
-                    }
+                        |result| match result {
+                            Ok(participant) => {
+                                Message::Main(MainMessage::CallParticipantJoined(participant))
+                            }
+                            Err(e) => Message::Main(MainMessage::ApiError(e)),
+                        },
+                    );
                 }
             }
             Event::UserLeftCall {

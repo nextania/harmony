@@ -12,7 +12,7 @@ chacha20poly1305 = "0.10"
 chrono = "0.4.43"
 cpal = "0.17.3"
 emojis = "0.8.0"
-hkdf = "0.12"
+hkdf = "0.13"
 harmony-api = { path = "../harmony-api" }
 iced = { version = "0.14.0", features = ["canvas", "advanced", "tokio", "svg", "image"] }
 iced_aw = "0.13.0"
@@ -28,13 +28,13 @@ rust-i18n = "3.1.5"
 scap = { git = "https://github.com/infiniwave/scap.git" }
 serde = { workspace = true }
 serde_json = "1.0.149"
-sha2 = "0.10.9"
+sha2 = "0.11.0"
 sqlx = "0.8.6"
 tokio = { version = "1", features = ["time"] }
 tracing = { workspace = true }
-tray-icon = "0.21.3"
+tray-icon = "0.22.0"
 ulid = "1.2.1"
-vk-video = "0.2.0"
+vk-video = "0.3.0"
 wgpu = "28.0.0"
 x25519-dalek = "2.0.1"
 yuv = "0.8.11"

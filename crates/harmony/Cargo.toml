@@ -15,7 +15,7 @@ dashmap = "6.0.0"
 lazy_static = "1.4.0"
 
 chrono = "0.4.26"
-rand = "0.10.0"
+rand = "0.10.1"
 num_cpus = "1.16.0"
 ulid = "1.0.0"
 

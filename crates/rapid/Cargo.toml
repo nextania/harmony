@@ -15,7 +15,7 @@ rmp-serde = "1.1.2"
 rmpv = { git = "https://github.com/infiniwave/msgpack-rust.git", features = ["with-serde"] }
 
 dashmap = "6.0.0"
-rand = "0.10.0"
+rand = "0.10.1"
 uuid = "1.17.0"
 thiserror = "2.0.18"
 tracing = { workspace = true }

@@ -1,11 +1,15 @@
 pub mod limiter;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::mpsc as sync_mpsc;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Stream, StreamConfig};
+use ringbuf::traits::{Consumer, Producer, Split};
+use ringbuf::{HeapCons, HeapProd, HeapRb};
 use tokio::sync::mpsc;
 
 use crate::media::audio::limiter::Limiter;
@@ -16,35 +20,46 @@ const CHANNELS: u16 = 2;
 const FRAME_SIZE: usize = 960;
 const MAX_PACKET: usize = 4000;
 
+enum TrackCommand {
+    Add {
+        id: String,
+        consumer: HeapCons<f32>,
+        volume: Arc<AtomicU32>,
+    },
+    Remove {
+        id: String,
+    },
+}
+
 struct TrackPlayback {
     decoder: opus::Decoder,
-    ring_buf: VecDeque<f32>,
-    volume: f32,
+    producer: HeapProd<f32>,
+    volume: Arc<AtomicU32>,
 }
 
 impl TrackPlayback {
-    fn new() -> Result<Self> {
+    fn new() -> Result<(Self, HeapCons<f32>)> {
         let decoder =
             opus::Decoder::new(SAMPLE_RATE, opus::Channels::Stereo).context("opus decoder init")?;
-        Ok(Self {
+        let (producer, consumer) = HeapRb::new(SAMPLE_RATE as usize).split();
+        Ok((Self {
             decoder,
-            ring_buf: VecDeque::with_capacity(SAMPLE_RATE as usize),
-            volume: 1.0,
-        })
+            producer,
+            volume: Arc::new(AtomicU32::new(1.0f32.to_bits())),
+        }, consumer))
+    }
+
+    fn reset(&mut self) -> HeapCons<f32> {
+        let (producer, consumer) = HeapRb::new(SAMPLE_RATE as usize).split();
+        self.producer = producer;
+        consumer
     }
 }
-
-type MixBuf = Arc<Mutex<VecDeque<f32>>>;
-
-fn new_mix_buf() -> MixBuf {
-    Arc::new(Mutex::new(VecDeque::with_capacity(SAMPLE_RATE as usize)))
-}
-
 pub struct AudioPipeline {
     tracks: HashMap<String, TrackPlayback>,
-    mix_buf: MixBuf,
-    limiter: Limiter,
+    pending_consumers: HashMap<String, HeapCons<f32>>,
     playback_stream: Option<Stream>,
+    track_cmd_tx: Option<sync_mpsc::Sender<TrackCommand>>,
 
     capture_stream: Option<Stream>,
     capture_tx: Option<mpsc::UnboundedSender<Vec<u8>>>,
@@ -54,9 +69,9 @@ impl AudioPipeline {
     pub fn new() -> Result<Self> {
         Ok(Self {
             tracks: HashMap::new(),
-            mix_buf: new_mix_buf(),
-            limiter: Limiter::new(),
+            pending_consumers: HashMap::new(),
             playback_stream: None,
+            track_cmd_tx: None,
             capture_stream: None,
             capture_tx: None,
         })
@@ -66,22 +81,42 @@ impl AudioPipeline {
         if self.tracks.contains_key(&track_id) {
             return Ok(());
         }
-        self.tracks.insert(track_id, TrackPlayback::new()?);
+        let (track, consumer) = TrackPlayback::new()?;
+        if let Some(tx) = &self.track_cmd_tx {
+            let _ = tx.send(TrackCommand::Add {
+                id: track_id.clone(),
+                consumer,
+                volume: Arc::clone(&track.volume),
+            });
+        } else {
+            self.pending_consumers.insert(track_id.clone(), consumer);
+        }
+        self.tracks.insert(track_id, track);
         Ok(())
     }
 
     pub fn remove_track(&mut self, track_id: &str) {
         self.tracks.remove(track_id);
+        self.pending_consumers.remove(track_id);
+        if let Some(tx) = &self.track_cmd_tx {
+            let _ = tx.send(TrackCommand::Remove {
+                id: track_id.to_owned(),
+            });
+        }
     }
 
     pub fn set_volume(&mut self, track_id: &str, volume: f32) {
         if let Some(track) = self.tracks.get_mut(track_id) {
-            track.volume = volume.clamp(0.0, 1.0);
+            track
+                .volume
+                .store(volume.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
         }
     }
 
     pub fn get_volume(&self, track_id: &str) -> Option<f32> {
-        self.tracks.get(track_id).map(|t| t.volume)
+        self.tracks
+            .get(track_id)
+            .map(|t| f32::from_bits(t.volume.load(Ordering::Relaxed)))
     }
 
     pub fn list_tracks(&self) -> Vec<String> {
@@ -104,16 +139,45 @@ impl AudioPipeline {
             buffer_size: cpal::BufferSize::Default,
         };
 
-        let mix = Arc::clone(&self.mix_buf);
+        let (cmd_tx, cmd_rx) = sync_mpsc::channel::<TrackCommand>();
+
+        // TODO: ?
+        let mut cb_tracks: HashMap<String, (HeapCons<f32>, Arc<AtomicU32>)> = HashMap::new();
+        for (id, consumer) in self.pending_consumers.drain() {
+            let volume = Arc::clone(&self.tracks[&id].volume);
+            cb_tracks.insert(id, (consumer, volume));
+        }
+
+        let mut limiter = Limiter::new();
+        let mut read_buf: Vec<f32> = Vec::new();
 
         let stream = device
             .build_output_stream(
                 &config,
                 move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                    let mut buf = mix.lock().unwrap();
-                    for sample in data.iter_mut() {
-                        *sample = buf.pop_front().unwrap_or(0.0);
+                    while let Ok(cmd) = cmd_rx.try_recv() {
+                        match cmd {
+                            TrackCommand::Add { id, consumer, volume } => {
+                                cb_tracks.insert(id, (consumer, volume));
+                            }
+                            TrackCommand::Remove { id } => {
+                                cb_tracks.remove(&id);
+                            }
+                        }
                     }
+
+                    data.fill(0.0);
+
+                    read_buf.resize(data.len(), 0.0);
+                    for (consumer, volume) in cb_tracks.values_mut() {
+                        let vol = f32::from_bits(volume.load(Ordering::Relaxed));
+                        let n = consumer.pop_slice(&mut read_buf[..data.len()]);
+                        for i in 0..n {
+                            data[i] += read_buf[i] * vol;
+                        }
+                    }
+
+                    limiter.process(data);
                 },
                 |err| {
                     tracing::error!("audio output stream error: {err}");
@@ -124,11 +188,18 @@ impl AudioPipeline {
 
         stream.play().context("failed to start audio playback")?;
         self.playback_stream = Some(stream);
+        self.track_cmd_tx = Some(cmd_tx);
         Ok(())
     }
 
     pub fn stop_playback(&mut self) {
         self.playback_stream = None;
+        self.track_cmd_tx = None;
+        let consumers: Vec<(String, HeapCons<f32>)> = self.tracks
+            .iter_mut()
+            .map(|(id, track)| (id.clone(), track.reset()))
+            .collect();
+        self.pending_consumers.extend(consumers);
     }
 
     pub fn feed_packet(&mut self, track_id: &str, data: &[u8]) -> Result<()> {
@@ -141,43 +212,9 @@ impl AudioPipeline {
             .map_err(|e| anyhow::anyhow!("opus decode error: {e}"))?;
 
         let total_samples = decoded * CHANNELS as usize;
-        track.ring_buf.extend(&pcm[..total_samples]);
-
-        self.mix_and_limit();
+        track.producer.push_slice(&pcm[..total_samples]);
 
         Ok(())
-    }
-
-    fn mix_and_limit(&mut self) {
-        let max_available = self
-            .tracks
-            .values()
-            .map(|t| t.ring_buf.len())
-            .max()
-            .unwrap_or(0);
-
-        if max_available == 0 {
-            return;
-        }
-
-        let frame_samples = (max_available / CHANNELS as usize) * CHANNELS as usize;
-        if frame_samples == 0 {
-            return;
-        }
-
-        let mut mixed = vec![0.0f32; frame_samples];
-        for track in self.tracks.values_mut() {
-            let avail = track.ring_buf.len().min(frame_samples);
-            for i in 0..avail {
-                mixed[i] += track.ring_buf[i] * track.volume;
-            }
-            track.ring_buf.drain(..avail);
-        }
-
-        self.limiter.process(&mut mixed);
-
-        let mut buf = self.mix_buf.lock().unwrap();
-        buf.extend(mixed);
     }
 
     pub fn start_capture(&mut self) -> Result<Option<mpsc::UnboundedReceiver<Vec<u8>>>> {
@@ -201,7 +238,7 @@ impl AudioPipeline {
 
         let sample_buf: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::with_capacity(FRAME_SIZE)));
         let encoder = Arc::new(Mutex::new(
-            opus::Encoder::new(SAMPLE_RATE, opus::Channels::Stereo, opus::Application::Voip)
+            opus::Encoder::new(SAMPLE_RATE, opus::Channels::Stereo, opus::Application::Audio)
                 .context("opus encoder init")?,
         ));
 

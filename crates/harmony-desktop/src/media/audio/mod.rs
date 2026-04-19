@@ -3,12 +3,12 @@ pub mod limiter;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc as sync_mpsc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Stream, StreamConfig};
-use ringbuf::traits::{Consumer, Producer, Split};
+use ringbuf::traits::{Consumer, Observer, Producer, RingBuffer, Split};
 use ringbuf::{HeapCons, HeapProd, HeapRb};
 use tokio::sync::mpsc;
 
@@ -236,24 +236,21 @@ impl AudioPipeline {
         let (tx, rx) = mpsc::unbounded_channel();
         self.capture_tx = Some(tx.clone());
 
-        let sample_buf: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::with_capacity(FRAME_SIZE)));
-        let encoder = Arc::new(Mutex::new(
+        let mut sample_buf = HeapRb::new(FRAME_SIZE * CHANNELS as usize * 10);
+        let mut encoder = 
             opus::Encoder::new(SAMPLE_RATE, opus::Channels::Stereo, opus::Application::Audio)
-                .context("opus encoder init")?,
-        ));
+                .context("opus encoder init")?;
 
         let stream = device
             .build_input_stream(
                 &config,
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    let mut buf = sample_buf.lock().unwrap();
-                    buf.extend_from_slice(data);
-
-                    while buf.len() >= FRAME_SIZE {
-                        let frame: Vec<f32> = buf.drain(..FRAME_SIZE).collect();
+                    sample_buf.push_slice_overwrite(data);
+                    let mut frame = [0f32; FRAME_SIZE * CHANNELS as usize];
+                    while sample_buf.occupied_len() >= FRAME_SIZE * CHANNELS as usize {
+                        sample_buf.pop_slice(&mut frame);
                         let mut out = vec![0u8; MAX_PACKET];
-                        let mut enc = encoder.lock().unwrap();
-                        match enc.encode_float(&frame, &mut out) {
+                        match encoder.encode_float(&frame, &mut out) {
                             Ok(len) => {
                                 out.truncate(len);
                                 let packet = codec::prepend_codec_byte(codec::AUDIO_OPUS, &out);

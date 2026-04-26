@@ -16,7 +16,7 @@ hkdf = "0.12"
 harmony-api = { path = "../harmony-api" }
 iced = { version = "0.14.0", features = ["canvas", "advanced", "tokio", "svg", "image"] }
 iced_aw = "0.13.0"
-keyring = { version = "3.6.3", features = ["windows-native", "apple-native", "sync-secret-service"] }
+keyring = { version = "4.0.0", features = ["windows-native", "apple-native", "sync-secret-service"] }
 lru = "0.16.3"
 opaque-ke = "4.0.1"
 open = "5.3.3"
@@ -24,7 +24,7 @@ opus = "0.3.1"
 pulse-api = { path = "../pulse-api" }
 reqwest = { version = "0.13.2", features = ["json"] }
 rkyv = "0.8.15"
-rust-i18n = "3.1.5"
+rust-i18n = "4.0.0"
 scap = { git = "https://github.com/infiniwave/scap.git" }
 serde = { workspace = true }
 serde_json = "1.0.149"
@@ -35,7 +35,7 @@ tracing = { workspace = true }
 tray-icon = "0.21.3"
 ulid = "1.2.1"
 vk-video = "0.2.0"
-wgpu = "28.0.0"
+wgpu = "29.0.0"
 x25519-dalek = "2.0.1"
 yuv = "0.8.11"
 async-stream = "0.3.6"

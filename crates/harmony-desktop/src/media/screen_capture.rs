@@ -1,20 +1,20 @@
 use std::num::NonZeroU32;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use anyhow::{Context, Result};
-use scap::Target;
+use anyhow::{ensure, Context, Result};
 use scap::capturer::{Capturer, Options, Resolution};
-use scap::frame::{Frame, FrameType, VideoFrame};
+use scap::frame::{Frame, FrameType, VideoFrame, YUVFrame};
+use scap::Target;
 use tokio::sync::mpsc;
 use vk_video::parameters::{RateControl, VideoParameters};
 use vk_video::{BytesEncoder, RawFrameData, VulkanDevice, VulkanInstance};
 
 use crate::media::{
     codec,
-    video::{Frame as DecodedFrame, hardware::nv12_to_rgba},
+    video::{hardware::nv12_to_rgba, Frame as DecodedFrame},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -120,6 +120,7 @@ pub fn start_screen_capture(
         capturer.start_capture();
 
         let mut encoder: Option<BytesEncoder> = None;
+        let mut encoder_size: Option<(u32, u32)> = None;
 
         while !stop_thread.load(Ordering::Relaxed) {
             let frame = match capturer.get_next_frame() {
@@ -130,31 +131,20 @@ pub fn start_screen_capture(
                 }
             };
 
-            let (width, height, nv12) = match frame {
-                Frame::Video(VideoFrame::YUVFrame(yuv)) => {
-                    let width = (yuv.width.max(1)) as u32;
-                    let height = (yuv.height.max(1)) as u32;
-                    let mut nv12 =
-                        Vec::with_capacity(yuv.luminance_bytes.len() + yuv.chrominance_bytes.len());
-                    nv12.extend_from_slice(&yuv.luminance_bytes);
-                    nv12.extend_from_slice(&yuv.chrominance_bytes);
-                    (width, height, nv12)
-                }
-                Frame::Video(VideoFrame::BGRA(bgra)) => {
-                    let width = (bgra.width.max(1)) as u32;
-                    let height = (bgra.height.max(1)) as u32;
-                    let nv12 = bgra_to_nv12(width, height, &bgra.data);
-                    (width, height, nv12)
-                }
-                _ => {
-                    tracing::warn!("screen capture returned unsupported frame type; dropping");
+            let (width, height, nv12) = match frame_to_nv12(frame) {
+                Ok(frame) => frame,
+                Err(e) => {
+                    tracing::warn!("screen capture frame conversion failed; dropping frame: {e:#}");
                     continue;
                 }
             };
 
-            if encoder.is_none() {
+            if encoder.is_none() || encoder_size != Some((width, height)) {
                 match create_encoder(width, height, &config) {
-                    Ok(enc) => encoder = Some(enc),
+                    Ok(enc) => {
+                        encoder = Some(enc);
+                        encoder_size = Some((width, height));
+                    }
                     Err(e) => {
                         tracing::error!("failed to initialize screen encoder: {e:#}");
                         break;
@@ -263,34 +253,7 @@ fn capture_thumbnail(target: &Target) -> Result<DecodedFrame> {
         .context("thumbnail capture frame failed")?;
     capturer.stop_capture();
 
-    let (width, height, thumb) = match frame {
-        Frame::Video(VideoFrame::BGRA(f)) => (
-            f.width as u32,
-            f.height as u32,
-            bgra_to_rgba(f.width as u32, f.height as u32, &f.data),
-        ),
-        Frame::Video(VideoFrame::BGR0(f)) => (
-            f.width as u32,
-            f.height as u32,
-            bgr0_to_rgba(f.width as u32, f.height as u32, &f.data),
-        ),
-        Frame::Video(VideoFrame::RGB(f)) => (
-            f.width as u32,
-            f.height as u32,
-            rgb_to_rgba(f.width as u32, f.height as u32, &f.data),
-        ),
-        Frame::Video(VideoFrame::YUVFrame(f)) => {
-            let mut nv12 = Vec::with_capacity(f.luminance_bytes.len() + f.chrominance_bytes.len());
-            nv12.extend_from_slice(&f.luminance_bytes);
-            nv12.extend_from_slice(&f.chrominance_bytes);
-            (
-                f.width as u32,
-                f.height as u32,
-                nv12_to_rgba(&nv12, f.width as u32, f.height as u32),
-            )
-        }
-        _ => anyhow::bail!("unsupported frame type for thumbnail"),
-    };
+    let (width, height, thumb) = frame_to_rgba(frame)?;
 
     Ok(DecodedFrame {
         width,
@@ -299,40 +262,145 @@ fn capture_thumbnail(target: &Target) -> Result<DecodedFrame> {
     })
 }
 
-fn bgra_to_rgba(_width: u32, _height: u32, data: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(data.len());
-    for chunk in data.chunks_exact(4) {
-        out.push(chunk[2]); // R
-        out.push(chunk[1]); // G
-        out.push(chunk[0]); // B
-        out.push(chunk[3]); // A
+fn frame_to_nv12(frame: Frame) -> Result<(u32, u32, Vec<u8>)> {
+    match frame {
+        Frame::Video(VideoFrame::YUVFrame(yuv)) => yuv_frame_to_nv12(&yuv),
+        Frame::Video(VideoFrame::BGRA(bgra)) => packed_4_to_nv12(
+            dim(bgra.width),
+            dim(bgra.height),
+            &bgra.data,
+            yuv::bgra_to_yuv_nv12,
+        ),
+        Frame::Video(VideoFrame::BGRx(bgrx)) => packed_4_to_nv12(
+            dim(bgrx.width),
+            dim(bgrx.height),
+            &bgrx.data,
+            yuv::bgra_to_yuv_nv12,
+        ),
+        Frame::Video(VideoFrame::RGBx(rgbx)) => packed_4_to_nv12(
+            dim(rgbx.width),
+            dim(rgbx.height),
+            &rgbx.data,
+            yuv::rgba_to_yuv_nv12,
+        ),
+        Frame::Video(VideoFrame::XBGR(xbgr)) => {
+            let (width, height, rgba) =
+                xbgr_to_rgba(dim(xbgr.width), dim(xbgr.height), &xbgr.data)?;
+            packed_4_to_nv12(width, height, &rgba, yuv::rgba_to_yuv_nv12)
+        }
+        Frame::Video(VideoFrame::BGR0(bgr)) => packed_4_to_nv12(
+            dim(bgr.width),
+            dim(bgr.height),
+            &bgr.data,
+            yuv::bgra_to_yuv_nv12,
+        ),
+        Frame::Video(VideoFrame::RGB(rgb)) => packed_3_to_nv12(
+            dim(rgb.width),
+            dim(rgb.height),
+            &rgb.data,
+            yuv::rgb_to_yuv_nv12,
+        ),
+        _ => anyhow::bail!("unsupported screen capture frame type"),
     }
-    out
 }
 
-fn bgr0_to_rgba(_width: u32, _height: u32, data: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(data.len());
-    for chunk in data.chunks_exact(4) {
-        out.push(chunk[2]); // R
-        out.push(chunk[1]); // G
-        out.push(chunk[0]); // B
-        out.push(255); // A (opaque)
+fn frame_to_rgba(frame: Frame) -> Result<(u32, u32, Vec<u8>)> {
+    match frame {
+        Frame::Video(VideoFrame::BGRA(f)) => bgra_to_rgba(dim(f.width), dim(f.height), &f.data),
+        Frame::Video(VideoFrame::BGRx(f)) => bgrx_to_rgba(dim(f.width), dim(f.height), &f.data),
+        Frame::Video(VideoFrame::RGBx(f)) => rgbx_to_rgba(dim(f.width), dim(f.height), &f.data),
+        Frame::Video(VideoFrame::XBGR(f)) => xbgr_to_rgba(dim(f.width), dim(f.height), &f.data),
+        Frame::Video(VideoFrame::BGR0(f)) => bgr0_to_rgba(dim(f.width), dim(f.height), &f.data),
+        Frame::Video(VideoFrame::RGB(f)) => rgb_to_rgba(dim(f.width), dim(f.height), &f.data),
+        Frame::Video(VideoFrame::YUVFrame(f)) => {
+            let (width, height, nv12) = yuv_frame_to_nv12(&f)?;
+            Ok((width, height, nv12_to_rgba(&nv12, width, height)))
+        }
+        _ => anyhow::bail!("unsupported frame type for thumbnail"),
     }
-    out
 }
 
-fn rgb_to_rgba(_width: u32, _height: u32, data: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(data.len() / 3 * 4);
-    for chunk in data.chunks_exact(3) {
-        out.push(chunk[0]); // R
-        out.push(chunk[1]); // G
-        out.push(chunk[2]); // B
-        out.push(255); // A (opaque)
-    }
-    out
+fn yuv_frame_to_nv12(frame: &YUVFrame) -> Result<(u32, u32, Vec<u8>)> {
+    let (width, height) = even_dimensions(dim(frame.width), dim(frame.height))?;
+    let y_stride = positive_stride(frame.luminance_stride, width)?;
+    let uv_stride = positive_stride(frame.chrominance_stride, width)?;
+
+    let y_plane = copy_plane_rows(
+        &frame.luminance_bytes,
+        y_stride,
+        width as usize,
+        height as usize,
+    )
+    .context("invalid NV12 luminance plane")?;
+    let uv_plane = copy_plane_rows(
+        &frame.chrominance_bytes,
+        uv_stride,
+        width as usize,
+        (height / 2) as usize,
+    )
+    .context("invalid NV12 chrominance plane")?;
+
+    let mut nv12 = y_plane;
+    nv12.extend_from_slice(&uv_plane);
+    Ok((width, height, nv12))
 }
 
-fn bgra_to_nv12(width: u32, height: u32, data: &[u8]) -> Vec<u8> {
+fn packed_4_to_nv12(
+    width: u32,
+    height: u32,
+    data: &[u8],
+    convert: fn(
+        &mut yuv::YuvBiPlanarImageMut<'_, u8>,
+        &[u8],
+        u32,
+        yuv::YuvRange,
+        yuv::YuvStandardMatrix,
+        yuv::YuvConversionMode,
+    ) -> std::result::Result<(), yuv::YuvError>,
+) -> Result<(u32, u32, Vec<u8>)> {
+    let source_width = width.max(1);
+    let (width, height) = even_dimensions(width, height)?;
+    let stride = source_width * 4;
+    ensure_packed_len(data, stride, width * 4, height)?;
+    let nv12 = convert_packed_to_nv12(width, height, data, stride, convert)?;
+    Ok((width, height, nv12))
+}
+
+fn packed_3_to_nv12(
+    width: u32,
+    height: u32,
+    data: &[u8],
+    convert: fn(
+        &mut yuv::YuvBiPlanarImageMut<'_, u8>,
+        &[u8],
+        u32,
+        yuv::YuvRange,
+        yuv::YuvStandardMatrix,
+        yuv::YuvConversionMode,
+    ) -> std::result::Result<(), yuv::YuvError>,
+) -> Result<(u32, u32, Vec<u8>)> {
+    let source_width = width.max(1);
+    let (width, height) = even_dimensions(width, height)?;
+    let stride = source_width * 3;
+    ensure_packed_len(data, stride, width * 3, height)?;
+    let nv12 = convert_packed_to_nv12(width, height, data, stride, convert)?;
+    Ok((width, height, nv12))
+}
+
+fn convert_packed_to_nv12(
+    width: u32,
+    height: u32,
+    data: &[u8],
+    stride: u32,
+    convert: fn(
+        &mut yuv::YuvBiPlanarImageMut<'_, u8>,
+        &[u8],
+        u32,
+        yuv::YuvRange,
+        yuv::YuvStandardMatrix,
+        yuv::YuvConversionMode,
+    ) -> std::result::Result<(), yuv::YuvError>,
+) -> Result<Vec<u8>> {
     let y_size = (width * height) as usize;
     let uv_size = y_size / 2;
     let mut y_plane = vec![0u8; y_size];
@@ -347,18 +415,160 @@ fn bgra_to_nv12(width: u32, height: u32, data: &[u8]) -> Vec<u8> {
         height,
     };
 
-    yuv::bgra_to_yuv_nv12(
+    convert(
         &mut image,
         data,
-        width * 4,
+        stride,
         yuv::YuvRange::Limited,
         yuv::YuvStandardMatrix::Bt709,
         yuv::YuvConversionMode::Balanced,
     )
-    .expect("BGRA to NV12 conversion failed");
+    .context("packed frame to NV12 conversion failed")?;
 
     drop(image);
     let mut nv12 = y_plane;
     nv12.extend_from_slice(&uv_plane);
-    nv12
+    Ok(nv12)
+}
+
+fn dim(value: i32) -> u32 {
+    value.max(1) as u32
+}
+
+fn ensure_packed_len(data: &[u8], stride: u32, row_bytes: u32, height: u32) -> Result<()> {
+    let needed = stride as usize * (height.saturating_sub(1)) as usize + row_bytes as usize;
+    ensure!(
+        data.len() >= needed,
+        "packed frame has {} bytes but needs at least {needed}",
+        data.len()
+    );
+    Ok(())
+}
+
+fn even_dimensions(width: u32, height: u32) -> Result<(u32, u32)> {
+    let width = width & !1;
+    let height = height & !1;
+    ensure!(width > 0 && height > 0, "frame must be at least 2x2 pixels");
+    Ok((width, height))
+}
+
+fn positive_stride(stride: i32, min_stride: u32) -> Result<usize> {
+    let stride = if stride <= 0 {
+        min_stride
+    } else {
+        stride as u32
+    };
+    ensure!(
+        stride >= min_stride,
+        "frame stride {stride} is smaller than row width {min_stride}"
+    );
+    Ok(stride as usize)
+}
+
+fn copy_plane_rows(src: &[u8], stride: usize, row_bytes: usize, rows: usize) -> Result<Vec<u8>> {
+    if rows == 0 {
+        return Ok(Vec::new());
+    }
+    let needed = stride * (rows - 1) + row_bytes;
+    ensure!(
+        src.len() >= needed,
+        "plane has {} bytes but needs at least {needed}",
+        src.len()
+    );
+
+    let mut out = Vec::with_capacity(row_bytes * rows);
+    for row in src.chunks(stride).take(rows) {
+        out.extend_from_slice(&row[..row_bytes]);
+    }
+    Ok(out)
+}
+
+fn bgra_to_rgba(width: u32, height: u32, data: &[u8]) -> Result<Vec<u8>> {
+    ensure!(
+        data.len() >= width as usize * height as usize * 4,
+        "BGRA frame is too short for {width}x{height}"
+    );
+    let mut out = Vec::with_capacity((width * height * 4) as usize);
+    for chunk in data.chunks_exact(4).take((width * height) as usize) {
+        out.push(chunk[2]); // R
+        out.push(chunk[1]); // G
+        out.push(chunk[0]); // B
+        out.push(chunk[3]); // A
+    }
+    Ok(out)
+}
+
+fn bgrx_to_rgba(width: u32, height: u32, data: &[u8]) -> Result<Vec<u8>> {
+    ensure!(
+        data.len() >= width as usize * height as usize * 4,
+        "BGRx frame is too short for {width}x{height}"
+    );
+    let mut out = Vec::with_capacity((width * height * 4) as usize);
+    for chunk in data.chunks_exact(4).take((width * height) as usize) {
+        out.push(chunk[2]); // R
+        out.push(chunk[1]); // G
+        out.push(chunk[0]); // B
+        out.push(255); // A (opaque)
+    }
+    Ok(out)
+}
+
+fn bgr0_to_rgba(width: u32, height: u32, data: &[u8]) -> Result<Vec<u8>> {
+    ensure!(
+        data.len() >= width as usize * height as usize * 4,
+        "BGR0 frame is too short for {width}x{height}"
+    );
+    let mut out = Vec::with_capacity((width * height * 4) as usize);
+    for chunk in data.chunks_exact(4).take((width * height) as usize) {
+        out.push(chunk[2]); // R
+        out.push(chunk[1]); // G
+        out.push(chunk[0]); // B
+        out.push(255); // A (opaque)
+    }
+    Ok(out)
+}
+
+fn rgbx_to_rgba(width: u32, height: u32, data: &[u8]) -> Result<Vec<u8>> {
+    ensure!(
+        data.len() >= width as usize * height as usize * 4,
+        "RGBx frame is too short for {width}x{height}"
+    );
+    let mut out = Vec::with_capacity((width * height * 4) as usize);
+    for chunk in data.chunks_exact(4).take((width * height) as usize) {
+        out.push(chunk[0]); // R
+        out.push(chunk[1]); // G
+        out.push(chunk[2]); // B
+        out.push(255); // A (opaque)
+    }
+    Ok(out)
+}
+
+fn rgb_to_rgba(width: u32, height: u32, data: &[u8]) -> Result<Vec<u8>> {
+    ensure!(
+        data.len() >= width as usize * height as usize * 3,
+        "RGB frame is too short for {width}x{height}"
+    );
+    let mut out = Vec::with_capacity((width * height * 4) as usize);
+    for chunk in data.chunks_exact(3).take((width * height) as usize) {
+        out.push(chunk[0]); // R
+        out.push(chunk[1]); // G
+        out.push(chunk[2]); // B
+        out.push(255); // A (opaque)
+    }
+    Ok(out)
+}
+
+fn xbgr_to_rgba(width: u32, height: u32, data: &[u8]) -> Result<Vec<u8>> {
+    ensure!(
+        data.len() >= width as usize * height as usize * 4,
+        "XBGR frame is too short for {width}x{height}"
+    );
+    let mut out = Vec::with_capacity((width * height * 4) as usize);
+    for chunk in data.chunks_exact(4).take((width * height) as usize) {
+        out.push(chunk[3]); // R
+        out.push(chunk[2]); // G
+        out.push(chunk[1]); // B
+        out.push(255); // A (opaque)
+    }
+    Ok(out)
 }

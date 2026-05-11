@@ -137,6 +137,7 @@ impl AudioPipeline {
             channels: CHANNELS,
             sample_rate: SAMPLE_RATE,
             buffer_size: cpal::BufferSize::Default,
+            audio_processing: cpal::AudioProcessing::Default,
         };
 
         let (cmd_tx, cmd_rx) = sync_mpsc::channel::<TrackCommand>();
@@ -153,7 +154,7 @@ impl AudioPipeline {
 
         let stream = device
             .build_output_stream(
-                &config,
+                config,
                 move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                     while let Ok(cmd) = cmd_rx.try_recv() {
                         match cmd {
@@ -231,6 +232,7 @@ impl AudioPipeline {
             channels: CHANNELS,
             sample_rate: SAMPLE_RATE,
             buffer_size: cpal::BufferSize::Default,
+            audio_processing: cpal::AudioProcessing::PreferRaw,
         };
 
         let (tx, rx) = mpsc::unbounded_channel();
@@ -243,7 +245,7 @@ impl AudioPipeline {
 
         let stream = device
             .build_input_stream(
-                &config,
+                config,
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
                     sample_buf.push_slice_overwrite(data);
                     let mut frame = [0f32; FRAME_SIZE * CHANNELS as usize];

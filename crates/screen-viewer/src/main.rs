@@ -43,7 +43,12 @@ impl App {
         let count_for_thread = frame_count.clone();
 
         std::thread::spawn(move || {
-            let mut capturer = match create_capturer(CaptureTarget::Monitor(0)) {
+            let mut capturer = match create_capturer(
+                #[cfg(windows)]
+                CaptureTarget::Monitor(0),
+                #[cfg(target_os = "linux")]
+                CaptureTarget::System,
+            ) {
                 Ok(c) => c,
                 Err(e) => {
                     debug!("create_capturer: {e}");

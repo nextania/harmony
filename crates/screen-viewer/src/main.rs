@@ -10,11 +10,17 @@ use iced::widget::{column, text};
 use iced::{Element, Length, Subscription, Task};
 use tracing::debug;
 
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 use wgpu_capture::{
     CaptureFrame, CaptureTarget, Codec, EncodeConfig, EncodeOutput, create_capturer, create_encoder,
 };
 
 fn main() -> iced::Result {
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::EnvFilter::new("screen-viewer=debug"))
+        .init();
     iced::application(App::new, App::update, App::view)
         .title("Screen Viewer")
         .subscription(App::subscription)

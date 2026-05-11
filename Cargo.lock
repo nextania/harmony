@@ -8124,6 +8124,7 @@ dependencies = [
  "iced",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "wgpu-capture",
 ]
 

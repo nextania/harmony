@@ -9,3 +9,5 @@ serde = { version = "1.0.228", features = ["derive"] }
 
 [patch.crates-io]
 audiopus_sys = { git = "https://github.com/sevenc-nanashi/audiopus_sys.git", rev = "00e9d16" }
+cros-libva = { git = "https://github.com/infiniwave/cros-libva.git", rev = "62ca98e" }
+

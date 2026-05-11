@@ -1,0 +1,13 @@
+[package]
+name = "screen-viewer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+arc-swap = "1.9.1"
+async-stream = "0.3.6"
+
+iced = { git = "https://github.com/iced-rs/iced.git", rev = "cf09909", features = ["wgpu", "advanced", "tokio"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+tracing.workspace = true
+wgpu-capture = { path = "../wgpu-capture" }

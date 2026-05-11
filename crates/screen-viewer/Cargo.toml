@@ -10,4 +10,5 @@ async-stream = "0.3.6"
 iced = { git = "https://github.com/iced-rs/iced.git", rev = "cf09909", features = ["wgpu", "advanced", "tokio"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 tracing.workspace = true
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 wgpu-capture = { path = "../wgpu-capture" }

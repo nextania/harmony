@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use vk_video::{EncodedInputChunk, VulkanDevice, VulkanInstance};
+use vk_video::{EncodedInputChunk, VulkanDevice, VulkanInstance, parameters::{VulkanAdapterDescriptor, VulkanDeviceDescriptor}};
 
 use crate::media::{
     codec,
@@ -17,13 +17,11 @@ impl HardwareVideoDecoder {
         let instance =
             VulkanInstance::new().context("failed to create Vulkan instance for video decode")?;
         let adapter = instance
-            .create_adapter(None)
+            .create_adapter(&VulkanAdapterDescriptor::default())
             .context("failed to create Vulkan adapter for video decode")?;
         let device = adapter
             .create_device(
-                wgpu::Features::empty(),
-                wgpu::ExperimentalFeatures::disabled(),
-                wgpu::Limits::default(),
+                &VulkanDeviceDescriptor::default()
             )
             .context("failed to create Vulkan device for video decode")?;
 

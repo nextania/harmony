@@ -772,6 +772,6 @@ fn main() -> iced::Result {
             "../assets/fonts/dm-sans-italic-variable.ttf"
         ))
         .font(include_bytes!("../assets/fonts/fluentsystemicons-resizable.ttf").as_slice())
-        .default_font(iced::Font::with_name("DM Sans"))
+        .default_font(iced::Font::new("DM Sans"))
         .run()
 }

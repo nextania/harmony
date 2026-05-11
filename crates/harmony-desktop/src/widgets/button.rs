@@ -69,12 +69,11 @@ where
         layout: iced::advanced::Layout<'_>,
         cursor: iced::advanced::mouse::Cursor,
         renderer: &Renderer,
-        clipboard: &mut dyn iced::advanced::Clipboard,
         shell: &mut iced::advanced::Shell<'_, Message>,
         viewport: &iced::Rectangle,
     ) {
         self.button.update(
-            tree, event, layout, cursor, renderer, clipboard, shell, viewport,
+            tree, event, layout, cursor, renderer, shell, viewport,
         );
     }
 

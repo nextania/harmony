@@ -66,6 +66,7 @@ impl WindowsCapturer {
                     interop.CreateForMonitor(hmonitor)?
                 }
                 CaptureTarget::Window(hwnd) => interop.CreateForWindow(HWND(*hwnd as _))?,
+                _ => unreachable!(),
             }
         })
     }

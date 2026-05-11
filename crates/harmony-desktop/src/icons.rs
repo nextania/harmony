@@ -1,6 +1,6 @@
 use iced::Font;
 
-pub const FLUENT_ICONS: Font = Font::with_name("FluentSystemIcons-Resizable");
+pub const FLUENT_ICONS: Font = Font::new("FluentSystemIcons-Resizable");
 
 pub enum Icon {
     AddCircleFilled,

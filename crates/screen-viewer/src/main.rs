@@ -10,6 +10,7 @@ use iced::widget::{column, text};
 use iced::{Element, Length, Subscription, Task};
 use tracing::debug;
 
+use tracing::level_filters::LevelFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use wgpu_capture::{
@@ -19,7 +20,11 @@ use wgpu_capture::{
 fn main() -> iced::Result {
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer())
-        .with(tracing_subscriber::EnvFilter::new("screen-viewer=debug"))
+        .with(
+            tracing_subscriber::filter::Targets::new()
+                .with_target("screen_viewer", LevelFilter::DEBUG)
+                .with_target("wgpu_capture", LevelFilter::DEBUG),
+        )
         .init();
     iced::application(App::new, App::update, App::view)
         .title("Screen Viewer")

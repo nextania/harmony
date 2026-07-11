@@ -5,6 +5,7 @@ use dashmap::DashMap;
 use futures_util::StreamExt;
 use lazy_static::lazy_static;
 use pulse_types::Region;
+use rapid::socket::RpcClients;
 use redis::{AsyncCommands, FromRedisValue, ToRedisArgs, ToSingleRedisArg};
 use serde::{Deserialize, Serialize};
 use tokio::{task, time};
@@ -13,7 +14,7 @@ use tracing::info;
 use crate::{
     RPC_CLIENTS,
     errors::{Error, Result},
-    methods::{Event, UserJoinedCallEvent, UserLeftCallEvent, emit_to_ids},
+    methods::{CallMigratedEvent, Event, UserJoinedCallEvent, UserLeftCallEvent, emit_to_ids},
     services::utilities::generate_token,
 };
 
@@ -36,10 +37,6 @@ pub struct Node {
 }
 
 impl Node {
-    pub fn suppress(&self) {
-        // TODO:!! disable node and clean up calls (move to other server if possible)
-    }
-
     pub fn new(id: String, description: NodeDescription) -> Self {
         let time = chrono::Utc::now().timestamp_millis();
         Node {
@@ -97,8 +94,10 @@ pub fn spawn_voice_events() {
                     id,
                     event: NodeEventKind::Disconnect,
                 } => {
+                    let region = AVAILABLE_NODES.get(&id).map(|n| n.region);
                     AVAILABLE_NODES.remove(&id);
                     info!("Node {} disconnected", id);
+                    task::spawn(handle_node_down(id, region));
                 }
                 _ => {}
             }
@@ -192,15 +191,19 @@ pub fn spawn_voice_events() {
     task::spawn(async move {
         loop {
             let time = chrono::Utc::now().timestamp_millis();
+            let mut dead_nodes: Vec<(String, Region)> = Vec::new();
             AVAILABLE_NODES.retain(|id, node| {
                 if node.last_ping + 10000 < time {
-                    node.suppress();
                     info!("Node {} timed out", id);
+                    dead_nodes.push((id.clone(), node.region));
                     false // Remove node
                 } else {
                     true // Keep node
                 }
             });
+            for (id, region) in dead_nodes {
+                task::spawn(handle_node_down(id, Some(region)));
+            }
             // Don't deadlock
             time::sleep(std::time::Duration::from_millis(1000)).await;
         }
@@ -225,11 +228,15 @@ pub fn spawn_voice_events() {
                     time::sleep(Duration::from_millis((call_id.1 - time) as u64)).await;
                     continue;
                 }
-                // TODO: handle dead nodes that cause calls to be stuck in memory and never expire
                 if let Ok(Some(call)) = ActiveCall::get(&call_id.0).await
                     && let Err(e) = call.end().await
                 {
                     tracing::error!("Failed to end call {}: {:?}", call_id.0, e);
+                    // don't leak in Redis
+                    let _ = redis
+                        .zadd::<_, _, _, ()>("voice:empty-calls", &call_id.0, call_id.1)
+                        .await;
+                    time::sleep(Duration::from_millis(1000)).await;
                     continue;
                 }
             }
@@ -322,6 +329,122 @@ async fn process_user_connect(session_id: &str, call_id: &str) -> Result<()> {
         }
     }
     Ok(())
+}
+
+pub async fn handle_node_down(node_id: String, region: Option<Region>) {
+    let mut redis = get_connection().await;
+    let index_key = format!("node:{}:calls", node_id);
+    let call_ids: Vec<String> = redis.smembers(&index_key).await.unwrap_or_default();
+    if call_ids.is_empty() {
+        let _: std::result::Result<(), _> = redis.del::<_, ()>(&index_key).await;
+        return;
+    }
+    info!(
+        "Node {} down: recovering {} call(s)",
+        node_id,
+        call_ids.len()
+    );
+
+    for call_id in call_ids {
+        let Ok(Some(mut call)) = ActiveCall::get(&call_id).await else {
+            let _: std::result::Result<(), _> = redis.srem::<_, _, ()>(&index_key, &call_id).await;
+            continue;
+        };
+
+        let affected_users: Vec<String> = call
+            .members
+            .iter()
+            .chain(call.pending_sessions.iter())
+            .map(|s| s.user_id.clone())
+            .collect();
+        let member_sessions: Vec<(String, String)> = call
+            .members
+            .iter()
+            .map(|s| (s.user_id.clone(), s.id.clone()))
+            .collect();
+
+        // pick an alternative node to move users
+        let target = region
+            .as_ref()
+            .and_then(|r| {
+                AVAILABLE_NODES
+                    .iter()
+                    .find(|n| n.region == *r && n.id != node_id)
+                    .map(|n| (n.id.clone(), n.server_address.clone()))
+            })
+            .or_else(|| {
+                AVAILABLE_NODES
+                    .iter()
+                    .find(|n| n.id != node_id)
+                    .map(|n| (n.id.clone(), n.server_address.clone()))
+            });
+
+        let clients = RPC_CLIENTS.get();
+
+        match target {
+            Some((target_id, target_addr)) => {
+                if let Err(e) = call.migrate_to(&node_id, &target_id, &target_addr).await {
+                    tracing::error!(
+                        "Failed to migrate call {} to node {}: {:?}; ending it instead",
+                        call_id,
+                        target_id,
+                        e
+                    );
+                    if let Err(e) = call.end().await {
+                        tracing::error!("Failed to end call {}: {:?}", call_id, e);
+                        let _: std::result::Result<(), _> =
+                            redis.srem::<_, _, ()>(&index_key, &call_id).await;
+                    }
+                    emit_call_ended(clients, &call_id, &affected_users, &member_sessions);
+                    continue;
+                }
+                info!(
+                    "Migrated call {} from node {} to node {}",
+                    call_id, node_id, target_id
+                );
+                if let Some(clients) = clients {
+                    emit_to_ids(
+                        clients.clone(),
+                        &affected_users,
+                        Event::CallMigrated(CallMigratedEvent {
+                            call_id: call_id.clone(),
+                            server_address: target_addr.clone(),
+                        }),
+                    );
+                }
+            }
+            None => {
+                info!("No alternative node for call {}; ending it", call_id);
+                if let Err(e) = call.end().await {
+                    tracing::error!("Failed to end call {}: {:?}", call_id, e);
+                    let _: std::result::Result<(), _> =
+                        redis.srem::<_, _, ()>(&index_key, &call_id).await;
+                }
+                emit_call_ended(clients, &call_id, &affected_users, &member_sessions);
+            }
+        }
+    }
+
+    let _: std::result::Result<(), _> = redis.del::<_, ()>(&index_key).await;
+}
+
+fn emit_call_ended(
+    clients: Option<&RpcClients>,
+    call_id: &str,
+    affected_users: &[String],
+    member_sessions: &[(String, String)],
+) {
+    let Some(clients) = clients else { return };
+    for (_user_id, session_id) in member_sessions {
+        emit_to_ids(
+            clients.clone(),
+            affected_users,
+            Event::UserLeftCall(UserLeftCallEvent {
+                call_id: call_id.to_string(),
+                session_id: session_id.clone(),
+            }),
+        );
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -420,6 +543,9 @@ impl ActiveCall {
         redis
             .zadd::<_, _, _, ()>("voice:empty-calls", &call.id, time)
             .await?;
+        redis
+            .sadd::<_, _, ()>(format!("node:{}:calls", call.assigned_node), &call.id)
+            .await?;
         let stored_call = Call {
             channel_id: channel.clone(),
             id: call.id.clone(),
@@ -507,6 +633,35 @@ impl ActiveCall {
         Ok((session_id, token))
     }
 
+    pub async fn migrate_to(
+        &mut self,
+        old_node: &str,
+        node_id: &str,
+        server_address: &str,
+    ) -> Result<()> {
+        let mut redis = get_connection().await;
+        self.assigned_node = node_id.to_string();
+        self.server_address = server_address.to_string();
+        self.members.clear();
+        self.pending_sessions.clear();
+        let time = chrono::Utc::now().timestamp_millis();
+        self.empty_since = Some(time);
+
+        redis
+            .set::<String, ActiveCall, ()>(format!("call:{}", self.id), self.clone())
+            .await?;
+        redis
+            .zadd::<_, _, _, ()>("voice:empty-calls", &self.id, time)
+            .await?;
+        redis
+            .srem::<_, _, ()>(format!("node:{}:calls", old_node), &self.id)
+            .await?;
+        redis
+            .sadd::<_, _, ()>(format!("node:{}:calls", node_id), &self.id)
+            .await?;
+        Ok(())
+    }
+
     pub async fn leave_user(&mut self, session_id: &String) -> Result<()> {
         self.members.retain(|x| x.id != *session_id);
         if self.members.is_empty() {
@@ -530,6 +685,12 @@ impl ActiveCall {
             .await?;
         redis
             .del::<std::string::String, ()>(format!("call:{}", self.id))
+            .await?;
+        redis
+            .zrem::<_, _, ()>("voice:empty-calls", &self.id)
+            .await?;
+        redis
+            .srem::<_, _, ()>(format!("node:{}:calls", self.assigned_node), &self.id)
             .await?;
 
         let member_ids: Vec<String> = self

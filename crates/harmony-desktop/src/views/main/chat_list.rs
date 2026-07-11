@@ -1,10 +1,11 @@
 use iced::{
     Border, Element, Font, Length, Padding, alignment,
-    widget::{Column, button, column, container, row, text},
+    widget::{Column, Row, Space, button, column, container, text},
 };
 
 use crate::{
-    theme::{BG_PANEL, DM_SANS, TEXT_PRIMARY, TEXT_WHITE},
+    icons::{FLUENT_ICONS, Icon},
+    theme::{ACCENT_PURPLE, BG_PANEL, DM_SANS, TEXT_PRIMARY, TEXT_WHITE},
     views::main::{MainMessage, MainView},
     widgets::{button::ButtonExt, styles},
 };
@@ -42,6 +43,20 @@ pub fn chat_list(state: &MainView) -> Element<MainMessage> {
             }
         };
 
+        let is_call_with_screenshare =
+            state.current_call.as_ref() == Some(id) && state.has_active_screenshare();
+        let screenshare_indicator: Option<Element<MainMessage>> = if is_call_with_screenshare {
+            Some(
+                text(Icon::ShareScreenPersonFilled.unicode())
+                    .size(12)
+                    .color(ACCENT_PURPLE)
+                    .font(FLUENT_ICONS)
+                    .into(),
+            )
+        } else {
+            None
+        };
+
         let name = text(channel_name.to_string())
             .size(16)
             .color(TEXT_PRIMARY)
@@ -54,7 +69,13 @@ pub fn chat_list(state: &MainView) -> Element<MainMessage> {
                 ..DM_SANS
             });
 
-        let user_row = row![channel_icon, name]
+        let mut user_row_items = vec![channel_icon.into(), name.into()];
+        if let Some(indicator) = screenshare_indicator {
+            user_row_items.push(Space::new().width(Length::Fill).into());
+            user_row_items.push(indicator);
+        }
+
+        let user_row = Row::from_vec(user_row_items)
             .spacing(12)
             .align_y(alignment::Vertical::Center);
 

@@ -26,7 +26,10 @@ dotenvy = "0.15.7"
 
 common = { path = "../common" }
 pulse-types = { path = "../pulse-types" }
-wtransport = "0.7.0"
+moq-native = "0.17.8"
+moq-net = "0.1.16"
+url = "2.5"
+bytes = "1"
 rkyv = { version = "0.8.14", features = ["unaligned"] }
 anyhow = "1.0.100"
 arc-swap = "1.8.0"

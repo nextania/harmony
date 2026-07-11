@@ -513,6 +513,10 @@ pub enum Event {
         muted: bool,
         deafened: bool,
     },
+    CallMigrated {
+        call_id: String,
+        server_address: String,
+    },
 }
 
 impl From<harmony_api::Event> for Event {
@@ -593,6 +597,13 @@ impl From<harmony_api::Event> for Event {
                 session_id,
                 muted,
                 deafened,
+            },
+            harmony_api::Event::CallMigrated {
+                call_id,
+                server_address,
+            } => Event::CallMigrated {
+                call_id,
+                server_address,
             },
         }
     }

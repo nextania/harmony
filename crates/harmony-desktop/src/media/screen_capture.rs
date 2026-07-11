@@ -1,21 +1,17 @@
-use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use anyhow::{Context, Result};
-use scap::Target;
-use scap::capturer::{Capturer, Options, Resolution};
-use scap::frame::{Frame, FrameType, VideoFrame};
+use anyhow::Result;
+use arc_swap::ArcSwap;
 use tokio::sync::mpsc;
-use vk_video::parameters::{RateControl, VideoParameters};
-use vk_video::{BytesEncoder, RawFrameData, VulkanDevice, VulkanInstance};
-
-use crate::media::{
-    codec,
-    video::{Frame as DecodedFrame, hardware::nv12_to_rgba},
+use wgpu_capture::{
+    CaptureFrame, CaptureTarget, Codec, EncodeConfig, EncodeOutput, EncodeSession, create_capturer,
+    create_encoder,
 };
+
+use crate::media::{codec, video::Frame as DecodedFrame};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScreenQuality {
@@ -25,13 +21,25 @@ pub enum ScreenQuality {
 }
 
 impl ScreenQuality {
-    fn to_resolution(self) -> Resolution {
+    fn target_height(self) -> u32 {
         match self {
-            ScreenQuality::P720 => Resolution::_720p,
-            ScreenQuality::P1080 => Resolution::_1080p,
-            ScreenQuality::P1440 => Resolution::_1440p,
+            ScreenQuality::P720 => 720,
+            ScreenQuality::P1080 => 1080,
+            ScreenQuality::P1440 => 1440,
         }
     }
+}
+
+fn compute_encode_resolution(src_w: u32, src_h: u32, quality: ScreenQuality) -> (u32, u32) {
+    let target_h = quality.target_height();
+    if src_h <= target_h {
+        return (src_w, src_h);
+    }
+    let scale = target_h as f64 / src_h as f64;
+    let w = ((src_w as f64 * scale).round() as u32).max(2);
+    let h = target_h;
+    // round width to even
+    (w & !1, h)
 }
 
 #[derive(Debug, Clone)]
@@ -39,6 +47,8 @@ pub struct ScreenCaptureConfig {
     pub fps: u32,
     pub bitrate_kbps: u32,
     pub quality: ScreenQuality,
+    pub source_width: u32,
+    pub source_height: u32,
 }
 
 impl Default for ScreenCaptureConfig {
@@ -47,6 +57,8 @@ impl Default for ScreenCaptureConfig {
             fps: 30,
             bitrate_kbps: 2500,
             quality: ScreenQuality::P1080,
+            source_width: 1920,
+            source_height: 1080,
         }
     }
 }
@@ -54,8 +66,16 @@ impl Default for ScreenCaptureConfig {
 #[derive(Debug, Clone)]
 pub struct CaptureTargetInfo {
     pub title: String,
-    pub target: Target,
+    pub target: CaptureTarget,
     pub thumbnail: Option<DecodedFrame>,
+    pub source_width: u32,
+    pub source_height: u32,
+}
+
+#[derive(Debug, Clone)]
+pub enum CaptureTargetList {
+    Portal(CaptureTargetInfo),
+    Targets(Vec<CaptureTargetInfo>),
 }
 
 pub struct ScreenCaptureSession {
@@ -72,126 +92,219 @@ impl ScreenCaptureSession {
     }
 }
 
-pub fn list_targets_with_thumbnails() -> Vec<CaptureTargetInfo> {
-    scap::get_all_targets()
-        .into_iter()
-        .map(|target| {
-            let title = target_label(&target);
-            let thumbnail = capture_thumbnail(&target).ok();
-            CaptureTargetInfo {
-                title,
-                target,
-                thumbnail,
-            }
+fn probe_encoder_codec() -> (Codec, u8) {
+    let probe_config = EncodeConfig {
+        width: 1920,
+        height: 1080,
+        fps: 30,
+        bitrate_bps: 2_500_000,
+        codec: Codec::H264,
+        output: EncodeOutput::new(|_| {}),
+    };
+    match create_encoder(probe_config) {
+        Ok(encoder) => {
+            encoder.finish().ok();
+            return (Codec::H264, codec::VIDEO_H264);
+        }
+        Err(e) => {
+            tracing::warn!("H.264 encoder probe failed: {e}");
+        }
+    }
+
+    // TODO: prefer av1
+    let probe_config = EncodeConfig {
+        width: 1920,
+        height: 1080,
+        fps: 30,
+        bitrate_bps: 2_500_000,
+        codec: Codec::AV1,
+        output: EncodeOutput::new(|_| {}),
+    };
+    match create_encoder(probe_config) {
+        Ok(encoder) => {
+            encoder.finish().ok();
+            (Codec::AV1, codec::VIDEO_AV1)
+        }
+        Err(e) => {
+            tracing::warn!("AV1 encoder probe failed: {e}");
+            (Codec::H264, codec::VIDEO_H264)
+        }
+    }
+}
+
+pub async fn list_targets_with_thumbnails() -> CaptureTargetList {
+    #[cfg(target_os = "linux")]
+    {
+        return CaptureTargetList::Portal(CaptureTargetInfo {
+            title: "Screen".to_string(),
+            target: CaptureTarget::System,
+            thumbnail: None,
+            source_width: 0,
+            source_height: 0,
+        });
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let raw_targets =
+            match tokio::task::spawn_blocking(|| wgpu_capture::enumerate_targets()).await {
+                Ok(Ok(targets)) => targets,
+                Ok(Err(e)) => {
+                    tracing::error!("enumerate_targets failed: {e}");
+                    return CaptureTargetList::Targets(Vec::new());
+                }
+                Err(e) => {
+                    tracing::error!("spawn_blocking for enumerate_targets panicked: {e}");
+                    return CaptureTargetList::Targets(Vec::new());
+                }
+            };
+
+        let infos: Vec<CaptureTargetInfo> = match tokio::task::spawn_blocking(move || {
+            raw_targets
+                .into_iter()
+                .map(|t| {
+                    let thumbnail = wgpu_capture::capture_screenshot(&t.target)
+                        .ok()
+                        .flatten()
+                        .map(|(w, h, rgba)| DecodedFrame {
+                            width: w,
+                            height: h,
+                            rgba: bytes::Bytes::from(rgba),
+                        });
+                    CaptureTargetInfo {
+                        title: t.title,
+                        target: t.target,
+                        thumbnail,
+                        source_width: t.width,
+                        source_height: t.height,
+                    }
+                })
+                .collect()
         })
-        .collect()
+        .await
+        {
+            Ok(infos) => infos,
+            Err(e) => {
+                tracing::error!("spawn_blocking for screenshots panicked: {e}");
+                Vec::new()
+            }
+        };
+
+        CaptureTargetList::Targets(infos)
+    }
 }
 
 pub fn start_screen_capture(
-    target: Target,
+    target: CaptureTarget,
     config: ScreenCaptureConfig,
-) -> Result<(ScreenCaptureSession, mpsc::UnboundedReceiver<Vec<u8>>)> {
-    let (tx, rx) = mpsc::unbounded_channel();
+) -> Result<(
+    ScreenCaptureSession,
+    mpsc::Receiver<codec::EncodedPacket>,
+    Arc<ArcSwap<Option<CaptureFrame>>>,
+    mpsc::UnboundedReceiver<()>,
+    Arc<AtomicBool>,
+)> {
+    let (tx, rx) = mpsc::channel(60);
+    let (tick_tx, tick_rx) = mpsc::unbounded_channel();
     let stop = Arc::new(AtomicBool::new(false));
     let stop_thread = Arc::clone(&stop);
+    let latest_frame = Arc::new(ArcSwap::from_pointee(None::<CaptureFrame>));
+    let latest_frame_for_ret = Arc::clone(&latest_frame);
+    let keyframe_requested = Arc::new(AtomicBool::new(false));
+    let keyframe_requested_ret = Arc::clone(&keyframe_requested);
 
-    let handle = thread::spawn(move || {
-        let options = Options {
-            fps: config.fps.max(1),
-            show_cursor: true,
-            show_highlight: false,
-            target: Some(target),
-            crop_area: None,
-            output_type: FrameType::YUVFrame,
-            output_resolution: config.quality.to_resolution(),
-            excluded_targets: None,
-            captures_audio: false,
-            exclude_current_process_audio: false,
-        };
-
-        let mut capturer = match Capturer::build(options) {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::error!("screen capture init failed: {e}");
+    let handle = thread::Builder::new()
+        .name("screen-capture".into())
+        .spawn(move || {
+            let mut capturer = match create_capturer(target) {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::error!("screen capture init failed: {e}");
+                    return;
+                }
+            };
+            if let Err(e) = capturer.start() {
+                tracing::error!("screen capture start failed: {e}");
                 return;
             }
-        };
 
-        capturer.start_capture();
-
-        let mut encoder: Option<BytesEncoder> = None;
-
-        while !stop_thread.load(Ordering::Relaxed) {
-            let frame = match capturer.get_next_frame() {
-                Ok(frame) => frame,
-                Err(e) => {
-                    tracing::warn!("screen capture frame error: {e}");
-                    break;
-                }
-            };
-
-            let (width, height, nv12) = match frame {
-                Frame::Video(VideoFrame::YUVFrame(yuv)) => {
-                    let width = (yuv.width.max(1)) as u32;
-                    let height = (yuv.height.max(1)) as u32;
-                    let mut nv12 =
-                        Vec::with_capacity(yuv.luminance_bytes.len() + yuv.chrominance_bytes.len());
-                    nv12.extend_from_slice(&yuv.luminance_bytes);
-                    nv12.extend_from_slice(&yuv.chrominance_bytes);
-                    (width, height, nv12)
-                }
-                Frame::Video(VideoFrame::BGRA(bgra)) => {
-                    let width = (bgra.width.max(1)) as u32;
-                    let height = (bgra.height.max(1)) as u32;
-                    let nv12 = bgra_to_nv12(width, height, &bgra.data);
-                    (width, height, nv12)
-                }
-                _ => {
-                    tracing::warn!("screen capture returned unsupported frame type; dropping");
-                    continue;
-                }
-            };
-
-            if encoder.is_none() {
-                match create_encoder(width, height, &config) {
-                    Ok(enc) => encoder = Some(enc),
-                    Err(e) => {
-                        tracing::error!("failed to initialize screen encoder: {e:#}");
-                        break;
+            let (src_w, src_h) = if config.source_width > 0 && config.source_height > 0 {
+                (config.source_width, config.source_height)
+            } else {
+                let first_frame = loop {
+                    if stop_thread.load(Ordering::Relaxed) {
+                        capturer.stop();
+                        return;
                     }
+                    match capturer.next_frame() {
+                        Some(f) => break f,
+                        None => thread::sleep(Duration::from_millis(1)),
+                    }
+                };
+                (first_frame.width(), first_frame.height())
+            };
+
+            let (enc_w, enc_h) = compute_encode_resolution(src_w, src_h, config.quality);
+
+            let (actual_codec, codec_byte) = probe_encoder_codec();
+
+            let start_time = std::time::Instant::now();
+            let tx_for_callback = tx.clone();
+            let encoder_config = EncodeConfig {
+                width: enc_w,
+                height: enc_h,
+                fps: config.fps.max(1),
+                bitrate_bps: config.bitrate_kbps.max(250) as u32 * 1000,
+                codec: actual_codec,
+                output: EncodeOutput::new(move |encoded_data: Vec<u8>| {
+                    let packet = codec::EncodedPacket {
+                        codec: codec_byte,
+                        keyframe: codec::detect_keyframe(codec_byte, &encoded_data),
+                        capture_ts_us: start_time.elapsed().as_micros() as u64,
+                        data: encoded_data,
+                    };
+                    match tx_for_callback.try_send(packet) {
+                        Ok(()) => {}
+                        Err(mpsc::error::TrySendError::Full(_)) => {
+                            tracing::debug!("screen capture: frame dropped, consumer lagging");
+                        }
+                        Err(mpsc::error::TrySendError::Closed(_)) => {}
+                    }
+                }),
+            };
+
+            let mut encoder: Box<dyn EncodeSession> = match create_encoder(encoder_config) {
+                Ok(e) => e,
+                Err(e) => {
+                    tracing::error!("screen encoder init failed: {e}");
+                    capturer.stop();
+                    return;
+                }
+            };
+
+            while !stop_thread.load(Ordering::Relaxed) {
+                if keyframe_requested.swap(false, Ordering::Relaxed) {
+                    if let Err(e) = encoder.request_keyframe() {
+                        tracing::warn!("screen encoder request_keyframe: {e}");
+                    }
+                }
+                match capturer.next_frame() {
+                    Some(frame) => {
+                        latest_frame.store(Arc::new(Some(frame.clone())));
+                        let _ = tick_tx.send(());
+                        if let Err(e) = encoder.submit_frame(&frame) {
+                            tracing::warn!("screen encoder submit failed: {e}");
+                            break;
+                        }
+                    }
+                    None => thread::sleep(Duration::from_millis(1)),
                 }
             }
 
-            let raw = RawFrameData {
-                frame: nv12,
-                width,
-                height,
-            };
-
-            let enc = encoder.as_mut().expect("encoder is initialized");
-            match enc.encode(
-                &vk_video::Frame {
-                    data: raw,
-                    pts: None,
-                },
-                false,
-            ) {
-                Ok(chunk) => {
-                    let packet = codec::prepend_codec_byte(codec::VIDEO_H264, &chunk.data);
-                    let _ = tx.send(packet);
-                }
-                Err(e) => {
-                    if matches!(e, vk_video::VulkanEncoderError::NoMemory) {
-                        tracing::warn!("screen frame dropped due to GPU memory pressure: {e}");
-                    } else {
-                        tracing::warn!("screen encode failed; dropping frame: {e}");
-                    }
-                }
+            capturer.stop();
+            if let Err(e) = encoder.finish() {
+                tracing::warn!("screen encoder finish: {e}");
             }
-        }
-
-        capturer.stop_capture();
-    });
+        })?;
 
     Ok((
         ScreenCaptureSession {
@@ -199,166 +312,8 @@ pub fn start_screen_capture(
             handle: Some(handle),
         },
         rx,
+        latest_frame_for_ret,
+        tick_rx,
+        keyframe_requested_ret,
     ))
-}
-
-fn create_encoder(width: u32, height: u32, config: &ScreenCaptureConfig) -> Result<BytesEncoder> {
-    let instance = VulkanInstance::new().context("failed to create Vulkan instance")?;
-    let adapter = instance
-        .create_adapter(None)
-        .context("failed to create Vulkan adapter")?;
-    let device: Arc<VulkanDevice> = adapter
-        .create_device(
-            wgpu::Features::empty(),
-            wgpu::ExperimentalFeatures::disabled(),
-            wgpu::Limits::default(),
-        )
-        .context("failed to create Vulkan device")?;
-
-    let video = VideoParameters {
-        width: NonZeroU32::new(width).context("invalid width")?,
-        height: NonZeroU32::new(height).context("invalid height")?,
-        target_framerate: config.fps.max(1).into(),
-    };
-
-    let avg_bitrate = config.bitrate_kbps.max(250) as u64 * 1000;
-    let max_bitrate = avg_bitrate.saturating_mul(2);
-
-    let params = device
-        .encoder_parameters_high_quality(
-            video,
-            RateControl::VariableBitrate {
-                average_bitrate: avg_bitrate,
-                max_bitrate,
-                virtual_buffer_size: Duration::from_secs(2),
-            },
-        )
-        .context("failed to create encoder parameters")?;
-
-    device
-        .create_bytes_encoder(params)
-        .context("failed to create bytes encoder")
-}
-
-fn target_label(target: &Target) -> String {
-    match target {
-        Target::Display(d) => format!("Display: {}", d.title),
-        Target::Window(w) => format!("Window: {}", w.title),
-    }
-}
-
-fn capture_thumbnail(target: &Target) -> Result<DecodedFrame> {
-    let options = Options {
-        fps: 1,
-        target: Some(target.clone()),
-        output_type: FrameType::BGRAFrame,
-        output_resolution: Resolution::_720p,
-        ..Default::default()
-    };
-
-    let mut capturer = Capturer::build(options).context("thumbnail capture init failed")?;
-    capturer.start_capture();
-    let frame = capturer
-        .get_next_frame()
-        .context("thumbnail capture frame failed")?;
-    capturer.stop_capture();
-
-    let (width, height, thumb) = match frame {
-        Frame::Video(VideoFrame::BGRA(f)) => (
-            f.width as u32,
-            f.height as u32,
-            bgra_to_rgba(f.width as u32, f.height as u32, &f.data),
-        ),
-        Frame::Video(VideoFrame::BGR0(f)) => (
-            f.width as u32,
-            f.height as u32,
-            bgr0_to_rgba(f.width as u32, f.height as u32, &f.data),
-        ),
-        Frame::Video(VideoFrame::RGB(f)) => (
-            f.width as u32,
-            f.height as u32,
-            rgb_to_rgba(f.width as u32, f.height as u32, &f.data),
-        ),
-        Frame::Video(VideoFrame::YUVFrame(f)) => {
-            let mut nv12 = Vec::with_capacity(f.luminance_bytes.len() + f.chrominance_bytes.len());
-            nv12.extend_from_slice(&f.luminance_bytes);
-            nv12.extend_from_slice(&f.chrominance_bytes);
-            (
-                f.width as u32,
-                f.height as u32,
-                nv12_to_rgba(&nv12, f.width as u32, f.height as u32),
-            )
-        }
-        _ => anyhow::bail!("unsupported frame type for thumbnail"),
-    };
-
-    Ok(DecodedFrame {
-        width,
-        height,
-        rgba: thumb.into(),
-    })
-}
-
-fn bgra_to_rgba(_width: u32, _height: u32, data: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(data.len());
-    for chunk in data.chunks_exact(4) {
-        out.push(chunk[2]); // R
-        out.push(chunk[1]); // G
-        out.push(chunk[0]); // B
-        out.push(chunk[3]); // A
-    }
-    out
-}
-
-fn bgr0_to_rgba(_width: u32, _height: u32, data: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(data.len());
-    for chunk in data.chunks_exact(4) {
-        out.push(chunk[2]); // R
-        out.push(chunk[1]); // G
-        out.push(chunk[0]); // B
-        out.push(255); // A (opaque)
-    }
-    out
-}
-
-fn rgb_to_rgba(_width: u32, _height: u32, data: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(data.len() / 3 * 4);
-    for chunk in data.chunks_exact(3) {
-        out.push(chunk[0]); // R
-        out.push(chunk[1]); // G
-        out.push(chunk[2]); // B
-        out.push(255); // A (opaque)
-    }
-    out
-}
-
-fn bgra_to_nv12(width: u32, height: u32, data: &[u8]) -> Vec<u8> {
-    let y_size = (width * height) as usize;
-    let uv_size = y_size / 2;
-    let mut y_plane = vec![0u8; y_size];
-    let mut uv_plane = vec![0u8; uv_size];
-
-    let mut image = yuv::YuvBiPlanarImageMut {
-        y_plane: yuv::BufferStoreMut::Borrowed(&mut y_plane),
-        y_stride: width,
-        uv_plane: yuv::BufferStoreMut::Borrowed(&mut uv_plane),
-        uv_stride: width,
-        width,
-        height,
-    };
-
-    yuv::bgra_to_yuv_nv12(
-        &mut image,
-        data,
-        width * 4,
-        yuv::YuvRange::Limited,
-        yuv::YuvStandardMatrix::Bt709,
-        yuv::YuvConversionMode::Balanced,
-    )
-    .expect("BGRA to NV12 conversion failed");
-
-    drop(image);
-    let mut nv12 = y_plane;
-    nv12.extend_from_slice(&uv_plane);
-    nv12
 }

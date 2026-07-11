@@ -5,7 +5,10 @@ edition = "2024"
 
 [dependencies]
 pulse-types = { path = "../pulse-types" }
-wtransport = "0.7.0"
+moq-native = "0.17.8"
+moq-net = "0.1.16"
+url = "2.5"
+bytes = "1"
 rkyv = { version = "0.8.14", features = ["unaligned"] }
 tokio = { version = "1.45.1", features = ["macros", "rt-multi-thread", "sync", "time"], default-features = false }
 openmls = "0.8.1"

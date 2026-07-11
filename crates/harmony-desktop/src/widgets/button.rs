@@ -32,10 +32,6 @@ where
     Theme: Catalog,
     Renderer: 'a + iced::advanced::Renderer,
 {
-    fn size_hint(&self) -> iced::Size<iced::Length> {
-        self.button.size_hint()
-    }
-
     fn tag(&self) -> iced::advanced::widget::tree::Tag {
         self.button.tag()
     }
@@ -44,11 +40,7 @@ where
         self.button.state()
     }
 
-    fn children(&self) -> Vec<iced::advanced::widget::Tree> {
-        self.button.children()
-    }
-
-    fn diff(&self, tree: &mut iced::advanced::widget::Tree) {
+    fn diff(&mut self, tree: &mut iced::advanced::widget::Tree) {
         self.button.diff(tree);
     }
 
@@ -72,9 +64,8 @@ where
         shell: &mut iced::advanced::Shell<'_, Message>,
         viewport: &iced::Rectangle,
     ) {
-        self.button.update(
-            tree, event, layout, cursor, renderer, shell, viewport,
-        );
+        self.button
+            .update(tree, event, layout, cursor, renderer, shell, viewport);
     }
 
     fn mouse_interaction(

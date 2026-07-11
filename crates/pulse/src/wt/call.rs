@@ -1,19 +1,12 @@
-use std::{
-    collections::HashSet,
-    sync::{Arc, atomic::Ordering},
-};
+use std::{collections::HashSet, sync::Arc};
 
-use arc_swap::ArcSwap;
 use dashmap::DashMap;
 use opentelemetry::KeyValue;
-use pulse_types::{AvailableTrack, WtFragmentedTrackData, WtMessageS2C};
+use pulse_types::{AvailableTrack, WtMessageS2C};
 use tokio::sync::Mutex;
 
 use crate::{
-    metrics::{
-        CALLS_ACTIVE, DATAGRAM_BYTES_RECEIVED, DATAGRAM_BYTES_SENT, DATAGRAM_DROPPED,
-        DATAGRAM_RECEIVED, DATAGRAM_SENT,
-    },
+    metrics::CALLS_ACTIVE,
     wt::{GLOBAL_SESSIONS, TrackInfo},
 };
 
@@ -27,8 +20,7 @@ pub struct PendingMember {
 pub struct Call {
     pub id: String,
     pub tracks: DashMap<String, TrackInfo>,
-    pub consumers: DashMap<String, Arc<ArcSwap<HashSet<String>>>>, // track -> set of session ids
-    pub members: DashMap<String, ()>,                              // session ids in this call
+    pub members: DashMap<String, ()>, // session ids in this call
     pub mls_state: Arc<Mutex<MlsState>>,
 }
 
@@ -60,49 +52,8 @@ pub enum PendingProposal {
         session_id: String,
     },
 }
-const FRAGMENT_ENVELOPE_OVERHEAD: usize = 128;
 
 impl Call {
-    pub fn start_consuming(&self, session_id: &str, track_id: &str) {
-        let track_info = self.tracks.get(track_id).map(|t| t.value().clone());
-        let Some(track_info) = track_info else {
-            warn!("Track {} does not exist", track_id);
-            return;
-        };
-        if track_info.session_id == session_id {
-            warn!("Cannot consume own track");
-            return;
-        }
-        let consumer_set = self
-            .consumers
-            .entry(track_id.to_string())
-            .or_insert_with(|| Arc::new(ArcSwap::from_pointee(HashSet::new())));
-        let mut set = consumer_set.value().load_full().as_ref().clone();
-        if set.insert(session_id.to_string()) {
-            consumer_set.value().store(Arc::new(set));
-        }
-    }
-
-    pub fn stop_consuming_all(&self, session_id: &str) {
-        for consumer_set in self.consumers.iter() {
-            let mut set = consumer_set.value().load_full().as_ref().clone();
-            if set.remove(session_id) {
-                consumer_set.value().store(Arc::new(set));
-            }
-        }
-    }
-
-    pub fn stop_consuming(&self, session_id: &str, track_id: &str) {
-        self.consumers
-            .entry(track_id.to_string())
-            .and_modify(|consumers| {
-                let mut set = consumers.load_full().as_ref().clone();
-                if set.remove(session_id) {
-                    consumers.store(Arc::new(set));
-                }
-            });
-    }
-
     pub async fn start_producing(&self, session_id: &str, track_info: TrackInfo) {
         let track_id = track_info.id.clone();
         let media_hint = track_info.media_hint.clone();
@@ -114,31 +65,27 @@ impl Call {
             if member.key() == session_id {
                 continue;
             }
-            let session = GLOBAL_SESSIONS.get(member.key());
-            let Some(session) = session else {
+            let Some(session) = GLOBAL_SESSIONS.get(member.key()) else {
                 continue;
             };
-            let available_track = AvailableTrack {
-                id: track_id.clone(),
-                media_hint: media_hint.clone(),
-                session_id: info_session_id.clone(),
-            };
             let _ = session.message_tx.send(WtMessageS2C::TrackAvailable {
-                track: available_track,
+                track: AvailableTrack {
+                    id: track_id.clone(),
+                    media_hint: media_hint.clone(),
+                    session_id: info_session_id.clone(),
+                },
             });
         }
     }
 
     pub fn stop_producing(&self, session_id: &str, track_id: &str) {
         self.tracks.remove(track_id);
-        self.consumers.remove(track_id);
 
         for member in self.members.iter() {
             if member.key() == session_id {
                 continue;
             }
-            let session = GLOBAL_SESSIONS.get(member.key());
-            let Some(session) = session else {
+            let Some(session) = GLOBAL_SESSIONS.get(member.key()) else {
                 continue;
             };
             let _ = session.message_tx.send(WtMessageS2C::TrackUnavailable {
@@ -148,14 +95,10 @@ impl Call {
     }
 
     pub fn get_mapped_track_id(&self, track_id: &str, session_id: &str) -> Option<String> {
-        if let Some(track_info) = self
-            .tracks
+        self.tracks
             .iter()
             .find(|t| t.client_track_id == track_id && t.session_id == session_id)
-        {
-            return Some(track_info.id.clone());
-        }
-        None
+            .map(|t| t.id.clone())
     }
 
     pub fn get_available_tracks(&self, excluding_session_id: &str) -> Vec<AvailableTrack> {
@@ -168,91 +111,6 @@ impl Call {
                 session_id: t.session_id.clone(),
             })
             .collect()
-    }
-
-    pub async fn dispatch(&self, track_id: &str, data: &[u8]) {
-        let call_attr = [KeyValue::new("call_id", self.id.clone())];
-        DATAGRAM_BYTES_RECEIVED.add(data.len() as u64, &call_attr);
-        DATAGRAM_RECEIVED.add(1, &call_attr);
-
-        if let Some(consumer_set) = self.consumers.get(track_id) {
-            let sessions = consumer_set.value().load_full();
-            for session_id in sessions.iter() {
-                let Some(session) = GLOBAL_SESSIONS.get(session_id) else {
-                    warn!(
-                        "Session {} not found while dispatching track {}",
-                        session_id, track_id
-                    );
-                    continue;
-                };
-
-                if !session.can_listen.load(Ordering::SeqCst) {
-                    continue; // skip deafened users
-                }
-
-                let consumer_connection = session.connection.clone();
-                let seq_counter = session.seq_counter.clone();
-                drop(session);
-
-                let max_datagram = consumer_connection
-                    .max_datagram_size()
-                    .expect("Failed to get max datagram size from connection");
-                let max_payload = max_datagram.saturating_sub(FRAGMENT_ENVELOPE_OVERHEAD);
-                if max_payload == 0 {
-                    warn!(
-                        "Max datagram size ({}) too small for session {}",
-                        max_datagram, session_id
-                    );
-                    continue;
-                }
-                let fragment_count = data.len().div_ceil(max_payload);
-                if fragment_count > u16::MAX as usize {
-                    warn!(
-                        "Data too large ({} bytes, {} fragments) for track {}",
-                        data.len(),
-                        fragment_count,
-                        track_id
-                    );
-                    continue;
-                }
-                let sequence_id = seq_counter.fetch_add(1, Ordering::Relaxed);
-
-                let mut failed = false;
-                for (i, chunk) in data.chunks(max_payload).enumerate() {
-                    let fragment = WtFragmentedTrackData {
-                        id: track_id.to_string(),
-                        sequence_id,
-                        fragment_index: i as u16,
-                        fragment_count: fragment_count as u16,
-                        data: chunk.to_vec(),
-                    };
-                    let Ok(bytes) = rkyv::to_bytes::<rkyv::rancor::Error>(&fragment) else {
-                        warn!("Failed to serialize fragment for track {}", track_id);
-                        failed = true;
-                        break;
-                    };
-                    if let Err(e) = consumer_connection.send_datagram(bytes) {
-                        warn!(
-                            "Failed to forward track {} fragment to session {}: {:?}",
-                            track_id, session_id, e
-                        );
-                        failed = true;
-                        break;
-                    }
-                }
-
-                if !failed {
-                    DATAGRAM_BYTES_SENT.add(data.len() as u64, &call_attr);
-                    DATAGRAM_SENT.add(1, &call_attr);
-                    debug!(
-                        "Forwarded track {} data ({} fragment(s)) to session {}",
-                        track_id, fragment_count, session_id
-                    );
-                } else {
-                    DATAGRAM_DROPPED.add(1, &call_attr);
-                }
-            }
-        }
     }
 
     pub async fn add_member(&self, session_id: String, key_package: Vec<u8>) {
@@ -347,14 +205,13 @@ impl Call {
                         key_package,
                     );
 
-                    let proposal_data = match proposal_result {
-                        Ok(data) => data,
+                    match proposal_result {
+                        Ok(data) => Some(data),
                         Err(e) => {
                             error!("Failed to create Add proposal: {:?}", e);
-                            return None;
+                            None
                         }
-                    };
-                    Some(proposal_data)
+                    }
                 }
                 PendingProposal::Remove { session_id } => {
                     let idx = state.full_members.iter().position(|s| s == session_id)?;
@@ -365,14 +222,13 @@ impl Call {
                             idx as u32,
                         );
 
-                    let proposal_data = match proposal_result {
-                        Ok(data) => data,
+                    match proposal_result {
+                        Ok(data) => Some(data),
                         Err(e) => {
                             error!("Failed to create Remove proposal: {:?}", e);
-                            return None;
+                            None
                         }
-                    };
-                    Some(proposal_data)
+                    }
                 }
             })
             .collect::<Vec<_>>();

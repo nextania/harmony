@@ -68,6 +68,8 @@ mod platform {
 }
 
 use iced::window;
+use tracing::level_filters::LevelFilter;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::{
     api::{ApiClient, Channel, CurrentUser, account},
@@ -78,12 +80,14 @@ use crate::{
     },
 };
 use crate::{
+    media::screen_capture::ScreenCaptureConfig,
     theme::TEXT_PRIMARY,
     views::{
         dialogs::{
             backend::{BackendMessage, BackendView},
             external_link::{ExternalLinkMessage, ExternalLinkView},
             mfa::{MfaMessage, MfaView},
+            screen_capture::{ScreenCaptureMessage, ScreenCaptureView},
             settings::{SettingsMessage, SettingsView},
         },
         main::MainMessage,
@@ -171,6 +175,7 @@ pub enum AppWindowView {
     Mfa(MfaView),
     Settings(SettingsView),
     ExternalLink(ExternalLinkView),
+    ScreenCapture(ScreenCaptureView),
     Backend(BackendView),
 }
 
@@ -228,6 +233,10 @@ pub enum Message {
     OpenSettings,
     FocusSettings,
     Settings(SettingsMessage),
+    OpenScreenCapture,
+    ScreenCapture(ScreenCaptureMessage),
+    ScreenCaptureSelected(wgpu_capture::CaptureTarget, ScreenCaptureConfig),
+    CloseScreenCapture,
     OpenBackend,
     Backend(BackendMessage),
     BackendChanged(String, String),
@@ -483,6 +492,50 @@ impl App {
             Message::CloseExternalLink => {
                 return self.close_dialog(|v| matches!(v, AppWindowView::ExternalLink(_)));
             }
+            Message::OpenScreenCapture => {
+                if let Some(task) =
+                    self.find_and_focus(|v| matches!(v, AppWindowView::ScreenCapture(_)))
+                {
+                    return task;
+                }
+                let parent = self
+                    .find_window_id(|v| matches!(v, AppWindowView::Main(_)))
+                    .expect("Main window should exist when opening screen capture");
+                let (view, load_task) = ScreenCaptureView::new();
+                let open_task = self.open_dialog(
+                    parent,
+                    AppWindowView::ScreenCapture(view),
+                    iced::Size::new(700.0, 500.0),
+                );
+                return Task::batch([open_task, load_task]);
+            }
+            Message::ScreenCapture(msg) => {
+                let (
+                    _,
+                    AppWindow {
+                        view: AppWindowView::ScreenCapture(v),
+                        ..
+                    },
+                ) = self
+                    .windows
+                    .iter_mut()
+                    .find(|(_, w)| matches!(w.view, AppWindowView::ScreenCapture(_)))
+                    .expect("Screen capture window should exist")
+                else {
+                    unreachable!()
+                };
+                return v.update(msg);
+            }
+            Message::ScreenCaptureSelected(target, config) => {
+                let close = self.close_dialog(|v| matches!(v, AppWindowView::ScreenCapture(_)));
+                let start = Task::done(Message::Main(MainMessage::StartScreenCapture(
+                    target, config,
+                )));
+                return Task::batch([close, start]);
+            }
+            Message::CloseScreenCapture => {
+                return self.close_dialog(|v| matches!(v, AppWindowView::ScreenCapture(_)));
+            }
             Message::Login(login_message) => {
                 let (
                     _,
@@ -734,6 +787,7 @@ impl App {
                 }
             }
             Some(AppWindowView::Settings(v)) => v.view().map(Message::Settings),
+            Some(AppWindowView::ScreenCapture(v)) => v.view().map(Message::ScreenCapture),
             Some(AppWindowView::Backend(v)) => v.view().map(Message::Backend),
             None => text("").into(),
         }
@@ -755,6 +809,7 @@ impl App {
             Some(AppWindowView::Mfa(_)) => "Two-factor authentication".into(),
             Some(AppWindowView::Main(_)) => "Harmony".into(),
             Some(AppWindowView::Settings(_)) => "Settings".into(),
+            Some(AppWindowView::ScreenCapture(_)) => "Share your screen".into(),
             Some(AppWindowView::Backend(_)) => "Custom server URLs".into(),
             None => "Harmony".into(),
         }
@@ -762,6 +817,15 @@ impl App {
 }
 
 fn main() -> iced::Result {
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer())
+        .with(
+            tracing_subscriber::filter::Targets::new()
+                .with_target("harmony_desktop", LevelFilter::DEBUG)
+                .with_target("harmony_api", LevelFilter::DEBUG)
+                .with_target("wgpu_capture", LevelFilter::DEBUG),
+        )
+        .init();
     rust_i18n::set_locale("en");
     iced::daemon(App::new, App::update, App::view)
         .title(App::title)

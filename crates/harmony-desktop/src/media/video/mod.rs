@@ -22,14 +22,14 @@ pub trait VideoDecoder: Send {
 pub fn create_video_decoder(codec: u8) -> Result<Box<dyn VideoDecoder>> {
     match codec {
         codec::VIDEO_H264 => {
-            let decoder = hardware::HardwareVideoDecoder::new();
-            if let Ok(decoder) = decoder {
-                Ok(Box::new(decoder))
-            } else {
-                // fall back to software decoder (e.g. unsupported GPU)
-                let software_decoder = software::SoftwareVideoDecoder::new();
-                Ok(Box::new(software_decoder))
+            if let Ok(decoder) = hardware::HardwareVideoDecoder::new() {
+                return Ok(Box::new(decoder));
             }
+            Ok(Box::new(software::SoftwareVideoDecoder::new()))
+        }
+        codec::VIDEO_AV1 => {
+            // TODO: implement AV1 decoder
+            anyhow::bail!("AV1 video decoding is not yet supported")
         }
         other => anyhow::bail!("unsupported video codec: 0x{other:02x}"),
     }

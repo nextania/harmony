@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use iced::advanced::image as iced_image;
 use iced::advanced::layout;
 use iced::advanced::renderer;
@@ -9,6 +11,10 @@ use crate::media::video::Frame;
 
 const DEFAULT_WIDTH: f32 = 640.0;
 const DEFAULT_HEIGHT: f32 = 360.0;
+
+struct VideoState {
+    cached: Option<(usize, iced_image::Handle)>,
+}
 
 pub struct VideoPlayer<'a> {
     frame: Option<&'a Frame>,
@@ -42,7 +48,11 @@ where
         iced::advanced::Renderer + iced_image::Renderer<Handle = iced::advanced::image::Handle>,
 {
     fn tag(&self) -> tree::Tag {
-        tree::Tag::stateless()
+        tree::Tag::of::<RefCell<VideoState>>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(RefCell::new(VideoState { cached: None }))
     }
 
     fn size(&self) -> Size<Length> {
@@ -77,7 +87,7 @@ where
 
     fn draw(
         &self,
-        _tree: &iced::advanced::widget::Tree,
+        tree: &iced::advanced::widget::Tree,
         renderer: &mut Renderer,
         _theme: &Theme,
         _style: &renderer::Style,
@@ -89,8 +99,25 @@ where
 
         match self.frame {
             Some(frame) => {
-                let handle =
-                    iced_image::Handle::from_rgba(frame.width, frame.height, frame.rgba.clone());
+                let state = tree.state.downcast_ref::<RefCell<VideoState>>();
+
+                let ptr = frame.rgba.as_ptr() as usize;
+                let needs_update = state
+                    .borrow()
+                    .cached
+                    .as_ref()
+                    .map_or(true, |(p, _)| *p != ptr);
+
+                if needs_update {
+                    let handle = iced_image::Handle::from_rgba(
+                        frame.width,
+                        frame.height,
+                        frame.rgba.clone(),
+                    );
+                    state.borrow_mut().cached = Some((ptr, handle));
+                }
+
+                let handle = state.borrow().cached.as_ref().unwrap().1.clone();
                 let image =
                     iced_image::Image::new(handle).filter_method(iced_image::FilterMethod::Linear);
                 iced_image::Renderer::draw_image(renderer, image, bounds, bounds);

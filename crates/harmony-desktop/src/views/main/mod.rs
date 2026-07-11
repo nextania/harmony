@@ -1,4 +1,9 @@
-use std::{collections::HashMap, num::NonZero, sync::Arc, time::UNIX_EPOCH};
+use std::{
+    collections::HashMap,
+    num::NonZero,
+    sync::{Arc, mpsc},
+    time::UNIX_EPOCH,
+};
 
 use async_stream::stream;
 use harmony_api::Event;
@@ -7,9 +12,12 @@ use iced::{
     widget::{Space, button, column, container, row, text},
 };
 use lru::LruCache;
-use pulse_api::{MediaHint, PulseClient, PulseClientOptions, PulseEvent};
+use pulse_api::{AvailableTrack, MediaHint, PulseClient, PulseClientOptions, PulseEvent};
 use ulid::Ulid;
 
+use crate::media::screen_capture::{ScreenCaptureConfig, ScreenCaptureSession};
+use crate::media::video::{self, Frame as VideoFrame};
+use crate::media::{audio::AudioPipeline, codec};
 use crate::{
     ChatMessage, Message, MessageContent,
     api::{
@@ -24,7 +32,9 @@ use crate::{
         chat_area::chat_area, chat_list::chat_list, people_list::people_list, sidebar::sidebar,
     },
 };
-use crate::media::{audio::AudioPipeline, codec};
+use arc_swap::ArcSwap;
+use iced::advanced::image::Handle as ImageHandle;
+use wgpu_capture::CaptureTarget;
 
 pub mod chat_area;
 pub mod chat_list;
@@ -71,6 +81,11 @@ pub enum MainMessage {
     ToggleMic,
     ToggleCamera,
     ToggleScreenShare,
+    StartScreenCapture(CaptureTarget, ScreenCaptureConfig),
+    ScreenCapturePacket(Vec<u8>),
+    ScreenCaptureStopped,
+    VideoTrackSubscribed(String),
+    VideoPacket(String, Vec<u8>),
     CallStateLoaded(String, Option<CallState>),
     CallParticipantJoined(CallParticipant),
     PulseConnected(Arc<PulseClient>, String),
@@ -107,6 +122,13 @@ pub enum MainMessage {
     ContactUnblocked(Contact),
     OpenPrivateChannel(String),
     PrivateChannelOpened(crate::errors::RenderableResult<crate::api::Channel>),
+
+    ConsumeScreenTrack(String),
+    StopViewingScreenTrack,
+    ToggleScreenshareFullscreen,
+    RequestScreenKeyframe,
+    ScreenCaptureError(String),
+    VideoFrameDecoded(String, Result<(u32, u32, Vec<u8>), String>),
 }
 
 pub struct MainView {
@@ -126,6 +148,11 @@ pub struct MainView {
     pub current_call_state: Option<CallState>,
     pub pulse_client: Option<Arc<PulseClient>>,
     pub audio: AudioPipeline,
+    pub screen_capture_session: Option<ScreenCaptureSession>,
+    pub screen_capture_preview: Option<Arc<ArcSwap<Option<wgpu_capture::CaptureFrame>>>>,
+    pub video_frames: HashMap<String, VideoFrame>,
+    pub video_handles: HashMap<String, ImageHandle>,
+    pub video_decode_tx: HashMap<String, mpsc::Sender<Vec<u8>>>,
 
     pub current_conversation_messages: Vec<ChatMessage>,
 
@@ -138,6 +165,18 @@ pub struct MainView {
     pub add_contact_input: String,
 
     pub error: Option<RenderableError>,
+
+    // Screenshare state
+    /// Global track id of the screen track this client is currently viewing.
+    /// Used to route decoded frames to the correct decoder and to target
+    /// keyframe requests at the right producer.
+    pub screen_view_track_id: Option<String>,
+    pub screen_keyframe_request: Option<Arc<std::sync::atomic::AtomicBool>>,
+    pub available_screen_tracks: Vec<AvailableTrack>,
+    pub screenshare_fullscreen: bool,
+    pub screen_track_codec: Option<u8>,
+    pub remote_screen_frame:
+        Option<Arc<ArcSwap<Option<crate::widgets::remote_screen::RemoteScreenFrame>>>>,
 }
 
 impl MainView {
@@ -163,6 +202,11 @@ impl MainView {
             current_call_state: None,
             pulse_client: None,
             audio: AudioPipeline::new().expect("audio pipeline init"),
+            screen_capture_session: None,
+            screen_capture_preview: None,
+            video_frames: HashMap::new(),
+            video_handles: HashMap::new(),
+            video_decode_tx: HashMap::new(),
             current_conversation_messages: Vec::new(),
             emoji_picker_open: false,
             emoji_picker_category: emojis::Group::SmileysAndEmotion,
@@ -171,6 +215,12 @@ impl MainView {
             contacts_loaded: false,
             add_contact_input: String::new(),
             error: None,
+            screen_view_track_id: None,
+            screen_keyframe_request: None,
+            available_screen_tracks: Vec::new(),
+            screenshare_fullscreen: false,
+            screen_track_codec: None,
+            remote_screen_frame: None,
         }
     }
 
@@ -531,6 +581,16 @@ impl MainView {
                 self.pulse_client = None;
                 self.audio.stop_playback();
                 self.audio.stop_capture();
+                if let Some(session) = self.screen_capture_session.take() {
+                    session.stop();
+                }
+                self.screen_capture_preview = None;
+                self.screen_keyframe_request = None;
+                self.clear_screen_view_state();
+                self.available_screen_tracks.clear();
+                self.video_frames.clear();
+                self.video_handles.clear();
+                self.video_decode_tx.clear();
                 if let Some(ref mut call) = self.current_call_state {
                     call.participants
                         .retain(|p| p.profile.id != self.current_user.profile.id);
@@ -629,38 +689,140 @@ impl MainView {
                 }
             }
             MainMessage::ToggleScreenShare => {
+                if let Some(session) = self.screen_capture_session.take() {
+                    session.stop();
+                    self.screen_capture_preview = None;
+                    self.screen_keyframe_request = None;
+                    if let Some(ref mut call) = self.current_call_state {
+                        if let Some(p) = call
+                            .participants
+                            .iter_mut()
+                            .find(|p| p.profile.id == self.current_user.profile.id)
+                        {
+                            p.tracks.screen = false;
+                        }
+                    }
+                    if let Some(pulse) = self.pulse_client.clone() {
+                        return Task::perform(
+                            async move { pulse.stop_producing("screen".to_string()).await },
+                            |result| match result {
+                                Ok(()) => Message::Main(MainMessage::DismissError),
+                                Err(e) => Message::Main(MainMessage::ApiError(
+                                    RenderableError::UnknownError(format!(
+                                        "Screen share stop error: {e}"
+                                    )),
+                                )),
+                            },
+                        );
+                    }
+                } else if self.pulse_client.is_some() {
+                    return Task::done(Message::OpenScreenCapture);
+                }
+            }
+            MainMessage::StartScreenCapture(target, config) => {
+                let (session, rx, frame_ref, tick_rx, keyframe_flag) =
+                    match crate::media::screen_capture::start_screen_capture(target, config) {
+                        Ok(result) => result,
+                        Err(e) => {
+                            self.error = Some(RenderableError::UnknownError(format!(
+                                "Screen capture failed: {e:#}"
+                            )));
+                            return Task::none();
+                        }
+                    };
+                self.screen_capture_session = Some(session);
+                self.screen_capture_preview = Some(frame_ref);
+                self.screen_keyframe_request = Some(keyframe_flag.clone());
+
                 if let Some(ref mut call) = self.current_call_state {
                     if let Some(p) = call
                         .participants
                         .iter_mut()
                         .find(|p| p.profile.id == self.current_user.profile.id)
                     {
-                        let new_screen = !p.tracks.screen;
-                        p.tracks.screen = new_screen;
-                        if let Some(pulse) = self.pulse_client.clone() {
-                            return Task::perform(
-                                async move {
-                                    if new_screen {
-                                        pulse
-                                            .produce_track(
-                                                "screen".to_string(),
-                                                pulse_api::MediaHint::ScreenVideo,
-                                            )
-                                            .await
-                                    } else {
-                                        pulse.stop_producing("screen".to_string()).await
+                        p.tracks.screen = true;
+                    }
+                }
+
+                let pulse = self.pulse_client.clone();
+                return Task::stream(stream! {
+                    let Some(pulse) = pulse else {
+                        yield Message::Main(MainMessage::ScreenCaptureStopped);
+                        return;
+                    };
+                    if let Err(e) = pulse
+                        .produce_track("screen".to_string(), pulse_api::MediaHint::ScreenVideo)
+                        .await
+                    {
+                        yield Message::Main(MainMessage::ApiError(
+                            RenderableError::UnknownError(format!(
+                                "Failed to produce screen track: {e}"
+                            )),
+                        ));
+                        yield Message::Main(MainMessage::ScreenCaptureStopped);
+                        return;
+                    }
+                    let mut rx = rx;
+                    let mut tick_rx = tick_rx;
+                    loop {
+                        tokio::select! {
+                            packet = rx.recv() => {
+                                match packet {
+                                    Some(p) => {
+                                        let payload = codec::prepend_codec_byte(p.codec, &p.data);
+                                        if let Err(e) = pulse.send_media(
+                                            pulse_api::MediaHint::ScreenVideo,
+                                            p.capture_ts_us,
+                                            p.keyframe,
+                                            &payload,
+                                        ) {
+                                            tracing::warn!("screen send_media: {e:#}");
+                                            break;
+                                        }
                                     }
-                                },
-                                |result| match result {
-                                    Ok(()) => Message::Main(MainMessage::DismissError),
-                                    Err(e) => Message::Main(MainMessage::ApiError(
-                                        RenderableError::UnknownError(format!(
-                                            "Screen share error: {e}"
-                                        )),
-                                    )),
-                                },
-                            );
+                                    None => break,
+                                }
+                            }
+                            Some(()) = tick_rx.recv() => {
+                                yield Message::Main(MainMessage::ScreenCapturePacket(Vec::new()));
+                            }
                         }
+                    }
+                    yield Message::Main(MainMessage::ScreenCaptureStopped);
+                });
+            }
+            MainMessage::ScreenCapturePacket(_) => {}
+            MainMessage::ScreenCaptureStopped => {
+                let was_sharing = self.screen_capture_session.is_some();
+                if let Some(session) = self.screen_capture_session.take() {
+                    session.stop();
+                }
+                self.screen_capture_preview = None;
+                self.screen_keyframe_request = None;
+                let mut had_track_flag = false;
+                if let Some(ref mut call) = self.current_call_state {
+                    if let Some(p) = call
+                        .participants
+                        .iter_mut()
+                        .find(|p| p.profile.id == self.current_user.profile.id)
+                    {
+                        had_track_flag = p.tracks.screen;
+                        p.tracks.screen = false;
+                    }
+                }
+                if was_sharing || had_track_flag {
+                    if let Some(pulse) = self.pulse_client.clone() {
+                        return Task::perform(
+                            async move { pulse.stop_producing("screen".to_string()).await },
+                            |result| match result {
+                                Ok(()) => Message::Main(MainMessage::DismissError),
+                                Err(e) => Message::Main(MainMessage::ApiError(
+                                    RenderableError::UnknownError(format!(
+                                        "Screen share cleanup error: {e}"
+                                    )),
+                                )),
+                            },
+                        );
                     }
                 }
             }
@@ -671,7 +833,14 @@ impl MainView {
                     self.current_call_state = state;
                 }
             }
-            MainMessage::CallParticipantJoined(participant) => {
+            MainMessage::CallParticipantJoined(mut participant) => {
+                if self
+                    .available_screen_tracks
+                    .iter()
+                    .any(|t| t.session_id == participant.session_id)
+                {
+                    participant.tracks.screen = true;
+                }
                 if let Some(ref mut call) = self.current_call_state {
                     if !call
                         .participants
@@ -695,6 +864,16 @@ impl MainView {
                 self.pulse_client = None;
                 self.audio.stop_playback();
                 self.audio.stop_capture();
+                if let Some(session) = self.screen_capture_session.take() {
+                    session.stop();
+                }
+                self.screen_capture_preview = None;
+                self.screen_keyframe_request = None;
+                self.clear_screen_view_state();
+                self.available_screen_tracks.clear();
+                self.video_frames.clear();
+                self.video_handles.clear();
+                self.video_decode_tx.clear();
                 if self.current_call.is_some() {
                     if let Some(ref mut call) = self.current_call_state {
                         call.participants
@@ -715,6 +894,16 @@ impl MainView {
                             self.pulse_client = None;
                             self.audio.stop_playback();
                             self.audio.stop_capture();
+                            if let Some(session) = self.screen_capture_session.take() {
+                                session.stop();
+                            }
+                            self.screen_capture_preview = None;
+                            self.screen_keyframe_request = None;
+                            self.clear_screen_view_state();
+                            self.available_screen_tracks.clear();
+                            self.video_frames.clear();
+                            self.video_handles.clear();
+                            self.video_decode_tx.clear();
                             self.current_call = None;
                             self.current_call_id = None;
                         }
@@ -743,9 +932,9 @@ impl MainView {
                                     yield Message::Main(MainMessage::AudioTrackSubscribed(
                                         track_id.clone(),
                                     ));
-                                    while let Some(packet) = rx.recv().await {
+                                    while let Some(frame) = rx.recv().await {
                                         if let Some((_codec, data)) =
-                                            codec::strip_codec_byte(&packet)
+                                            codec::strip_codec_byte(&frame.data)
                                         {
                                             yield Message::Main(MainMessage::AudioPacket(
                                                 track_id.clone(),
@@ -754,27 +943,78 @@ impl MainView {
                                         }
                                     }
                                 });
+                            } else if matches!(track.media_hint, MediaHint::ScreenVideo) {
+                                if let Some(ref mut call) = self.current_call_state {
+                                    if let Some(p) = call
+                                        .participants
+                                        .iter_mut()
+                                        .find(|p| p.session_id == track.session_id)
+                                    {
+                                        p.tracks.screen = true;
+                                    }
+                                }
+                                self.available_screen_tracks.push(track);
                             } else {
-                                return Task::perform(
-                                    async move { pulse.consume_track(&track).await },
-                                    |result| match result {
-                                        Ok(_rx) => {
-                                            // TODO: feed into video pipeline
-                                            Message::Main(MainMessage::DismissError)
+                                return Task::stream(stream! {
+                                    let track_id = track.id.clone();
+                                    let mut rx = match pulse.consume_track(&track).await {
+                                        Ok(rx) => rx,
+                                        Err(e) => {
+                                            yield Message::Main(MainMessage::ApiError(
+                                                RenderableError::UnknownError(format!(
+                                                    "Failed to consume video track: {e}"
+                                                )),
+                                            ));
+                                            return;
                                         }
-                                        Err(e) => Message::Main(MainMessage::ApiError(
-                                            RenderableError::UnknownError(format!(
-                                                "Failed to consume track: {e}"
-                                            )),
-                                        )),
-                                    },
-                                );
+                                    };
+                                    yield Message::Main(MainMessage::VideoTrackSubscribed(
+                                        track_id.clone(),
+                                    ));
+                                    while let Some(frame) = rx.recv().await {
+                                        if let Some((_codec, data)) =
+                                            codec::strip_codec_byte(&frame.data)
+                                        {
+                                            yield Message::Main(MainMessage::VideoPacket(
+                                                track_id.clone(),
+                                                data.to_vec(),
+                                            ));
+                                        }
+                                    }
+                                });
                             }
                         }
                     }
                     PulseEvent::TrackUnavailable(id) => {
+                        if let Some(track) =
+                            self.available_screen_tracks.iter().find(|t| t.id == id)
+                        {
+                            let session_id = track.session_id.clone();
+                            if let Some(ref mut call) = self.current_call_state {
+                                if let Some(p) = call
+                                    .participants
+                                    .iter_mut()
+                                    .find(|p| p.session_id == session_id)
+                                {
+                                    p.tracks.screen = false;
+                                }
+                            }
+                        }
                         self.audio.remove_track(&id);
+                        self.video_frames.remove(&id);
+                        self.video_handles.remove(&id);
+                        self.video_decode_tx.remove(&id);
+                        self.available_screen_tracks.retain(|t| t.id != id);
+                        if self.screen_view_track_id.as_deref() == Some(id.as_str()) {
+                            self.clear_screen_view_state();
+                        }
                         tracing::info!("Track unavailable: {id}");
+                    }
+                    PulseEvent::KeyFrameRequested(_track_id) => {
+                        // we need to send an IDR
+                        if let Some(ref flag) = self.screen_keyframe_request {
+                            flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                        }
                     }
                     _ => {}
                 }
@@ -792,6 +1032,78 @@ impl MainView {
                     tracing::warn!("audio feed_packet ({track_id}): {e:#}");
                 }
             }
+            MainMessage::VideoTrackSubscribed(track_id) => {
+                let (data_tx, data_rx) = mpsc::channel::<Vec<u8>>();
+                let (frame_tx, mut frame_rx) = tokio::sync::mpsc::unbounded_channel();
+                let tid_thread = track_id.clone();
+                let tid_stream = track_id.clone();
+
+                let spawn_result = std::thread::Builder::new()
+                    .name(format!("video-decode-{tid_thread}"))
+                    .spawn(move || {
+                        let mut decoder = match video::create_video_decoder(codec::VIDEO_H264) {
+                            Ok(d) => d,
+                            Err(e) => {
+                                tracing::warn!(
+                                    "failed to create video decoder for {tid_thread}: {e:#}"
+                                );
+                                return;
+                            }
+                        };
+                        while let Ok(data) = data_rx.recv() {
+                            match decoder.decode(&data) {
+                                Ok(frames) => {
+                                    if let Some(f) = frames.into_iter().last() {
+                                        let _ =
+                                            frame_tx.send(Ok((f.width, f.height, f.rgba.to_vec())));
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::debug!("video decode ({tid_thread}): {e:#}");
+                                }
+                            }
+                        }
+                    });
+                if let Err(e) = spawn_result {
+                    tracing::warn!("failed to spawn video decode thread: {e:#}");
+                    return Task::none();
+                }
+
+                self.video_decode_tx.insert(track_id.clone(), data_tx);
+
+                return Task::stream(stream! {
+                    while let Some(result) = frame_rx.recv().await {
+                        yield Message::Main(MainMessage::VideoFrameDecoded(
+                            tid_stream.clone(),
+                            result,
+                        ));
+                    }
+                });
+            }
+            MainMessage::VideoPacket(track_id, data) => {
+                if let Some(tx) = self.video_decode_tx.get(&track_id) {
+                    let _ = tx.send(data);
+                }
+            }
+            MainMessage::VideoFrameDecoded(track_id, result) => match result {
+                Ok((width, height, rgba)) => {
+                    let handle = ImageHandle::from_rgba(width, height, rgba.clone());
+                    self.video_handles.insert(track_id.clone(), handle);
+
+                    let frame = crate::widgets::remote_screen::RemoteScreenFrame {
+                        width,
+                        height,
+                        rgba,
+                    };
+                    let swap = self
+                        .remote_screen_frame
+                        .get_or_insert_with(|| Arc::new(ArcSwap::from_pointee(None)));
+                    swap.store(Arc::new(Some(frame)));
+                }
+                Err(e) => {
+                    tracing::debug!("video decode ({track_id}): {e}");
+                }
+            },
             MainMessage::MicEnabled => {
                 if self.pulse_client.is_some() {
                     match self.audio.start_capture() {
@@ -801,7 +1113,13 @@ impl MainView {
                                 let Some(pulse) = pulse else { return; };
                                 let mut rx = rx;
                                 while let Some(packet) = rx.recv().await {
-                                    if let Err(e) = pulse.send_media("audio", &packet) {
+
+                                    if let Err(e) = pulse.send_media(
+                                        pulse_api::MediaHint::Audio,
+                                        codec::now_micros(),
+                                        true,
+                                        &packet,
+                                    ) {
                                         tracing::warn!("mic send_media: {e:#}");
                                     }
                                 }
@@ -989,6 +1307,72 @@ impl MainView {
                     return Task::done(Message::Main(MainMessage::ApiError(e)));
                 }
             },
+            MainMessage::ConsumeScreenTrack(track_id) => {
+                if self.screen_view_track_id.is_some() {
+                    return Task::none();
+                }
+                if let Some(pulse) = self.pulse_client.clone() {
+                    if let Some(track) = self
+                        .available_screen_tracks
+                        .iter()
+                        .find(|t| t.id == track_id)
+                        .cloned()
+                    {
+                        self.screen_view_track_id = Some(track.id.clone());
+
+                        let drain_tid = track_id.clone();
+                        return Task::stream(stream! {
+                            let mut rx = match pulse.consume_track(&track).await {
+                                Ok(rx) => rx,
+                                Err(e) => {
+                                    yield Message::Main(MainMessage::ApiError(
+                                        RenderableError::UnknownError(format!(
+                                            "Failed to consume screen track: {e}"
+                                        )),
+                                    ));
+                                    yield Message::Main(MainMessage::StopViewingScreenTrack);
+                                    return;
+                                }
+                            };
+                            yield Message::Main(MainMessage::VideoTrackSubscribed(
+                                drain_tid.clone(),
+                            ));
+
+                            while let Some(frame) = rx.recv().await {
+                                if let Some((_codec, data)) = codec::strip_codec_byte(&frame.data) {
+                                    yield Message::Main(MainMessage::VideoPacket(
+                                        drain_tid.clone(),
+                                        data.to_vec(),
+                                    ));
+                                }
+                            }
+                        });
+                    }
+                }
+            }
+            MainMessage::StopViewingScreenTrack => {
+                if let Some(track_id) = self.clear_screen_view_state() {
+                    if let Some(pulse) = self.pulse_client.clone() {
+                        return Task::future(async move {
+                            if let Err(e) = pulse.stop_consuming(track_id).await {
+                                tracing::warn!("stop_consuming screen track: {e:#}");
+                            }
+                        })
+                        .discard();
+                    }
+                }
+            }
+            MainMessage::ToggleScreenshareFullscreen => {
+                self.screenshare_fullscreen = !self.screenshare_fullscreen;
+            }
+            MainMessage::RequestScreenKeyframe => {
+                if let Some(ref flag) = self.screen_keyframe_request {
+                    flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
+            MainMessage::ScreenCaptureError(msg) => {
+                self.error = Some(RenderableError::UnknownError(msg));
+            }
         }
         Task::none()
     }
@@ -1138,6 +1522,15 @@ impl MainView {
                             self.current_call_state = None;
                         }
                     }
+                    let viewed_left = self.available_screen_tracks.iter().any(|t| {
+                        t.session_id == session_id
+                            && self.screen_view_track_id.as_deref() == Some(t.id.as_str())
+                    });
+                    self.available_screen_tracks
+                        .retain(|t| t.session_id != session_id);
+                    if viewed_left {
+                        self.clear_screen_view_state();
+                    }
                 }
             }
             Event::UserVoiceStateChanged {
@@ -1156,6 +1549,61 @@ impl MainView {
                             p.tracks.audio = !muted;
                         }
                     }
+                }
+            }
+            Event::CallMigrated {
+                call_id,
+                server_address: _,
+            } => {
+                // reconnect to new server
+                if self.current_call_id.as_deref() == Some(&call_id)
+                    && let Some(conv_id) = self.current_call.clone()
+                {
+                    if let Some(ref pulse) = self.pulse_client {
+                        pulse.disconnect();
+                    }
+                    self.pulse_client = None;
+                    let client = self.api.clone();
+                    return Task::stream(stream! {
+                        let token_info = match client.create_call_token(&conv_id).await {
+                            Ok(info) => info,
+                            Err(e) => {
+                                yield Message::Main(MainMessage::ApiError(e));
+                                return;
+                            }
+                        };
+                        let (pulse_client, mut event_rx) = match PulseClient::connect(
+                            PulseClientOptions {
+                                server_url: token_info.server_address,
+                                session_id: token_info.session_id,
+                                session_token: token_info.token,
+                                call_id: token_info.call_id.clone(),
+                            },
+                        )
+                        .await
+                        {
+                            Ok(result) => result,
+                            Err(e) => {
+                                yield Message::Main(MainMessage::ApiError(
+                                    RenderableError::UnknownError(format!(
+                                        "Failed to reconnect to voice server: {e}"
+                                    )),
+                                ));
+                                return;
+                            }
+                        };
+                        let pulse_call_id = token_info.call_id.clone();
+                        yield Message::Main(MainMessage::PulseConnected(
+                            Arc::new(pulse_client),
+                            pulse_call_id,
+                        ));
+                        let call_state = client.get_call(&conv_id).await.ok().flatten();
+                        yield Message::Main(MainMessage::CallStateLoaded(conv_id, call_state));
+                        while let Some(event) = event_rx.recv().await {
+                            yield Message::Main(MainMessage::PulseEvent(event));
+                        }
+                        yield Message::Main(MainMessage::PulseDisconnected);
+                    });
                 }
             }
             Event::ContactStateChanged { user_id, state } => {
@@ -1230,6 +1678,43 @@ impl MainView {
             _ => {}
         }
         Task::none()
+    }
+
+    fn clear_screen_view_state(&mut self) -> Option<String> {
+        let track_id = self.screen_view_track_id.take();
+        self.remote_screen_frame = None;
+        self.screenshare_fullscreen = false;
+        if let Some(ref id) = track_id {
+            self.video_decode_tx.remove(id);
+            self.video_frames.remove(id);
+            self.video_handles.remove(id);
+        }
+        track_id
+    }
+
+    pub fn is_local_screensharing(&self) -> bool {
+        self.screen_capture_session.is_some()
+    }
+
+    pub fn is_consuming_remote_screenshare(&self) -> bool {
+        self.screen_view_track_id.is_some()
+    }
+
+    pub fn remote_screenshare_available(&self) -> Option<&CallParticipant> {
+        let call = self.current_call_state.as_ref()?;
+        self.available_screen_tracks.iter().find_map(|t| {
+            call.participants.iter().find(|p| {
+                p.session_id == t.session_id && p.profile.id != self.current_user.profile.id
+            })
+        })
+    }
+
+    pub fn pending_screen_track_id(&self) -> Option<&str> {
+        self.available_screen_tracks.first().map(|t| t.id.as_str())
+    }
+
+    pub fn has_active_screenshare(&self) -> bool {
+        self.is_local_screensharing() || !self.available_screen_tracks.is_empty()
     }
 
     pub fn view(&self) -> Element<MainMessage> {

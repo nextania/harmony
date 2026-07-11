@@ -34,6 +34,7 @@ pub enum Event {
     UserJoinedCall(UserJoinedCallEvent),
     UserLeftCall(UserLeftCallEvent),
     UserVoiceStateChanged(UserVoiceStateChangedEvent),
+    CallMigrated(CallMigratedEvent),
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -114,6 +115,13 @@ pub struct UserVoiceStateChangedEvent {
     pub session_id: String,
     pub muted: bool,
     pub deafened: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CallMigratedEvent {
+    pub call_id: String,
+    pub server_address: String,
 }
 
 pub fn emit_to_id(clients: RpcClients, user_id: &str, event: Event) {

@@ -138,9 +138,7 @@ pub fn listen() {
                             .message_tx
                             .send(WtMessageS2C::Disconnected { reconnect: None });
 
-                        session
-                            .connection
-                            .close(0u32.into(), b"User disconnected by server");
+                        session.close("User disconnected by server");
                     }
                 }
 
@@ -158,9 +156,7 @@ pub fn listen() {
                             reconnect: Some((target_server, target_token)),
                         });
 
-                        session
-                            .connection
-                            .close(0u32.into(), b"User moved to another server");
+                        session.close("User moved to another server");
                     }
                 }
 
@@ -176,7 +172,7 @@ pub fn listen() {
                                     .message_tx
                                     .send(WtMessageS2C::Disconnected { reconnect: None });
 
-                                session.connection.close(0u32.into(), b"Call ended");
+                                session.close("Call ended");
                             }
                         }
                     }

@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.102"
+arc-swap = "1.9.1"
 async-trait = "0.1.89"
 base64 = "0.22.1"
 bytes = "1.11.1"
@@ -14,8 +15,8 @@ cpal = { git = "https://github.com/infiniwave/cpal.git", rev = "91dc035" }
 emojis = "0.8.2"
 hkdf = "0.12.3"
 harmony-api = { path = "../harmony-api" }
-iced = { git = "https://github.com/iced-rs/iced.git", rev = "cf09909", features = ["canvas", "advanced", "tokio", "svg", "image"] }
-iced_aw = { git = "https://github.com/infiniwave/iced_aw.git", rev = "c2b3b18", features = ["drop_down"] }
+iced = { git = "https://github.com/infiniwave/iced.git", rev = "29432bd", features = ["canvas", "advanced", "tokio", "svg", "image", "wgpu"] }
+iced_aw = { git = "https://github.com/infiniwave/iced_aw.git", rev = "58471e4", features = ["drop_down"] }
 keyring = { version = "3.6.3", features = ["windows-native", "apple-native", "sync-secret-service"] }
 lru = "0.18.0"
 opaque-ke = "4.0.1"
@@ -29,14 +30,16 @@ serde = { workspace = true }
 serde_json = "1.0.149"
 sha2 = "0.10.9"
 sqlx = "0.8.6"
-tokio = { version = "1", features = ["time"] }
+tokio = { version = "1", features = ["time", "macros"] }
 tracing = { workspace = true }
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 tray-icon = "0.21.3"
 ulid = "1.2.1"
 vk-video = "0.3.0"
 wgpu = "29.0.3"
 wgpu-capture = { path = "../wgpu-capture" }
 x25519-dalek = "2.0.1"
+openh264 = "0.7"
 yuv = "0.8.11"
 async-stream = "0.3.6"
 futures = "0.3"

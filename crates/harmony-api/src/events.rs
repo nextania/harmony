@@ -70,6 +70,13 @@ pub enum Event {
         muted: bool,
         deafened: bool,
     },
+    /// The call was moved to a different voice node; reconnect to the new
+    /// server to stay in the call.
+    #[serde(rename_all = "camelCase")]
+    CallMigrated {
+        call_id: String,
+        server_address: String,
+    },
 
     /// Connection was established
     Connected,

@@ -25,4 +25,9 @@ pub enum PulseEvent {
 
     /// A new MLS epoch has been reached by all members.
     EpochReady(u64),
+
+    /// A consumer (or the relay, on a new consumer joining) requested a
+    /// keyframe for a track this client produces. The producer should have its
+    /// encoder emit an IDR. Carries the producer-local track id.
+    KeyFrameRequested(String),
 }

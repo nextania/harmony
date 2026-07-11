@@ -1,5 +1,3 @@
-pub mod fragment;
-
 use std::str::FromStr;
 
 use rkyv::Archive;
@@ -48,11 +46,9 @@ pub enum MediaHint {
 
 #[derive(Archive, Clone, Debug, rkyv::Deserialize, rkyv::Serialize)]
 pub enum WtMessageC2S {
-    Connect {
-        session_token: String,
+    Join {
         key_package: Vec<u8>, // Serialized MLS KeyPackage
     },
-    Disconnect {},
     StartProduce {
         id: String,
         media_hint: MediaHint,
@@ -66,7 +62,6 @@ pub enum WtMessageC2S {
     StopConsume {
         id: String,
     },
-    Heartbeat {},
     // MLS coordination messages
     MlsCommit {
         commit_data: Vec<u8>,
@@ -75,6 +70,16 @@ pub enum WtMessageC2S {
     },
     CommitAck {
         epoch: u64,
+    },
+    // Feedback messages
+    RequestKeyFrame {
+        track_id: String,
+    },
+    ReceiverReport {
+        track_id: String,
+        lost: u32,
+        received: u32,
+        jitter_ms: u32,
     },
 }
 
@@ -113,7 +118,6 @@ pub enum WtMessageS2C {
     TrackUnavailable {
         id: String,
     },
-    Heartbeat {},
     // MLS coordination messages
     MlsProposals {
         proposals: Vec<Vec<u8>>,
@@ -131,13 +135,52 @@ pub enum WtMessageS2C {
         external_sender_credential: Vec<u8>, // Serialized BasicCredential
         external_sender_signature_key: Vec<u8>, // Public signature key
     },
+    KeyFrameRequested {
+        track_id: String,
+    },
+    ReceiverReport {
+        track_id: String,
+        lost: u32,
+        received: u32,
+        jitter_ms: u32,
+    },
 }
 
-#[derive(Archive, Clone, Debug, rkyv::Deserialize, rkyv::Serialize)]
-pub struct WtFragmentedTrackData {
-    pub id: String,
-    pub sequence_id: u32,
-    pub fragment_index: u16,
-    pub fragment_count: u16,
-    pub data: Vec<u8>,
+// TODO:
+pub const MEDIA_FRAME_HEADER_LEN: usize = 8;
+
+pub fn encode_media_header(capture_ts_us: u64) -> [u8; MEDIA_FRAME_HEADER_LEN] {
+    capture_ts_us.to_le_bytes()
+}
+
+pub fn decode_media_header(buf: &[u8]) -> Option<u64> {
+    let bytes: [u8; MEDIA_FRAME_HEADER_LEN] = buf.get(..MEDIA_FRAME_HEADER_LEN)?.try_into().ok()?;
+    Some(u64::from_le_bytes(bytes))
+}
+
+pub mod track_names {
+    pub const MICROPHONE: &str = "microphone";
+    pub const CAMERA: &str = "camera";
+    pub const SCREEN: &str = "screen";
+    pub const SCREEN_AUDIO: &str = "screen-audio";
+    pub const CTL_C2S: &str = "c2s";
+    pub const CTL_S2C: &str = "s2c";
+}
+
+pub fn track_name_for_hint(hint: &MediaHint) -> &'static str {
+    match hint {
+        MediaHint::Audio => track_names::MICROPHONE,
+        MediaHint::Video => track_names::CAMERA,
+        MediaHint::ScreenAudio => track_names::SCREEN_AUDIO,
+        MediaHint::ScreenVideo => track_names::SCREEN,
+    }
+}
+
+pub fn priority_for_hint(hint: &MediaHint) -> u8 {
+    match hint {
+        MediaHint::Audio => 3,
+        MediaHint::ScreenAudio => 2,
+        MediaHint::Video => 1,
+        MediaHint::ScreenVideo => 0,
+    }
 }

@@ -9,7 +9,7 @@ lazy_static! {
     pub static ref LISTEN_ADDRESS: String =
         env::var("LISTEN_ADDRESS").unwrap_or("0.0.0.0:3001".to_string());
     pub static ref PUBLIC_ADDRESS: String =
-        env::var("PUBLIC_ADDRESS").unwrap_or("192.168.0.101".to_string());
+        env::var("PUBLIC_ADDRESS").unwrap_or("https://192.168.0.101:4433".to_string());
     pub static ref REDIS_URI: String = env::var("REDIS_URI").expect("REDIS_URI must be set");
     pub static ref REGION: Region = env::var("REGION")
         .expect("REGION must be set")

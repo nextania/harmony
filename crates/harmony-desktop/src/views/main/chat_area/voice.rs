@@ -1,6 +1,8 @@
+use std::sync::Arc;
+
 use iced::{
     Border, Color, Element, Length, Padding, Shadow, Vector, alignment, color,
-    widget::{Column, Space, button, column, container, row, text},
+    widget::{Column, Space, button, column, container, row, shader, stack, text},
 };
 
 use crate::{
@@ -11,7 +13,10 @@ use crate::{
         BG_SCREENSHARE_PANEL, DANGER_RED, DM_SANS, OVERLAY, TEXT_MUTED, TEXT_PRIMARY,
     },
     views::main::{MainMessage, MainView},
-    widgets::{button::ButtonExt, styles},
+    widgets::{
+        button::ButtonExt, remote_screen::RemoteScreenProgram, screen_share::ScreenShareProgram,
+        styles,
+    },
 };
 
 pub fn voice_area(state: &MainView) -> Element<MainMessage> {
@@ -133,7 +138,76 @@ fn voice_in_call<'a>(state: &'a MainView, call: &'a CallState) -> Element<'a, Ma
         .map(|p| p.profile.display_name.as_str());
 
     if let Some(sharer_name) = screen_sharer {
-        let screen_label = container(
+        let video_view: Element<MainMessage> = if screen_active {
+            match &state.screen_capture_preview {
+                Some(frame_swap) => {
+                    let program = ScreenShareProgram::new(Arc::clone(frame_swap));
+                    shader(program)
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .into()
+                }
+                None => container(
+                    text("You are sharing your screen")
+                        .size(14)
+                        .color(TEXT_MUTED)
+                        .font(DM_SANS),
+                )
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+                .into(),
+            }
+        } else if state.is_consuming_remote_screenshare() {
+            match &state.remote_screen_frame {
+                Some(frame_swap) => {
+                    let program = RemoteScreenProgram::new(Arc::clone(frame_swap));
+                    shader(program)
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .into()
+                }
+                None => container(
+                    text("Waiting for video...")
+                        .size(14)
+                        .color(TEXT_MUTED)
+                        .font(DM_SANS),
+                )
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+                .into(),
+            }
+        } else {
+            let mut prompt = column![
+                text(format!("{sharer_name} is sharing their screen"))
+                    .size(14)
+                    .color(TEXT_MUTED)
+                    .font(DM_SANS),
+            ]
+            .spacing(12)
+            .align_x(alignment::Horizontal::Center);
+            if let Some(track_id) = state.pending_screen_track_id() {
+                prompt = prompt.push(
+                    button(
+                        container(
+                            text("View stream")
+                                .size(13)
+                                .color(TEXT_PRIMARY)
+                                .font(DM_SANS),
+                        )
+                        .padding(Padding::from([4, 12])),
+                    )
+                    .on_press(MainMessage::ConsumeScreenTrack(track_id.to_string()))
+                    .style(styles::accent_dim)
+                    .cursor_default(),
+                );
+            }
+            container(prompt)
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+                .into()
+        };
+
+        let screen_label: Element<MainMessage> = container(
             row![
                 text(Icon::ShareScreenPersonFilled.unicode())
                     .size(18)
@@ -156,38 +230,56 @@ fn voice_in_call<'a>(state: &'a MainView, call: &'a CallState) -> Element<'a, Ma
                 radius: 5.into(),
             },
             ..Default::default()
-        });
+        })
+        .into();
 
-        let fullscreen_btn = container(
-            text(Icon::FullScreenMaximizeRegular.unicode())
-                .size(18)
-                .color(TEXT_PRIMARY)
-                .font(FLUENT_ICONS),
+        let fullscreen_icon = Icon::FullScreenMaximizeRegular.unicode();
+        let fullscreen_btn: Element<MainMessage> = button(
+            container(
+                text(fullscreen_icon)
+                    .size(18)
+                    .color(TEXT_PRIMARY)
+                    .font(FLUENT_ICONS),
+            )
+            .center(32)
+            .style(|_theme| container::Style {
+                background: Some(iced::Background::Color(OVERLAY)),
+                border: Border {
+                    color: color!(0x9d9d9d),
+                    width: 1.0,
+                    radius: 5.into(),
+                },
+                ..Default::default()
+            }),
         )
-        .center(32)
-        .style(|_theme| container::Style {
-            background: Some(iced::Background::Color(OVERLAY)),
-            border: Border {
-                color: color!(0x9d9d9d),
-                width: 1.0,
-                radius: 5.into(),
-            },
-            ..Default::default()
-        });
+        .on_press(MainMessage::ToggleScreenshareFullscreen)
+        .padding(0)
+        .cursor_default()
+        .into();
 
-        let panel_bottom = row![
+        let panel_bottom: Element<MainMessage> = row![
             screen_label,
             Space::new().width(Length::Fill),
             fullscreen_btn,
         ]
         .align_y(alignment::Vertical::Center)
-        .width(Length::Fill);
+        .width(Length::Fill)
+        .into();
+
+        let overlay_controls: Element<MainMessage> = container(
+            Column::from_vec(vec![Space::new().height(Length::Fill).into(), panel_bottom])
+                .width(Length::Fill)
+                .padding(10),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into();
 
         content.push(
             container(
-                column![Space::new().height(Length::Fill), panel_bottom]
+                stack![video_view, overlay_controls]
                     .width(Length::Fill)
-                    .padding(10),
+                    .height(Length::Fill),
             )
             .width(Length::Fill)
             .height(Length::Fill)
@@ -279,9 +371,12 @@ fn voice_in_call<'a>(state: &'a MainView, call: &'a CallState) -> Element<'a, Ma
     let participants_row = container(participants_row_content)
         .center_x(Length::Fill)
         .into();
-    content.push(participants_row);
-    if screen_sharer.is_none() {
-        content.push(Space::new().height(Length::Fill).into());
+
+    if !state.screenshare_fullscreen {
+        content.push(participants_row);
+        if screen_sharer.is_none() {
+            content.push(Space::new().height(Length::Fill).into());
+        }
     }
 
     let ctrl_btn = |icon: char, bg: Color, msg: MainMessage| -> Element<MainMessage> {
@@ -330,22 +425,24 @@ fn voice_in_call<'a>(state: &'a MainView, call: &'a CallState) -> Element<'a, Ma
         BG_CTRL_INACTIVE
     };
 
-    let controls = container(
-        row![
-            ctrl_btn(cam_icon, cam_bg, MainMessage::ToggleCamera),
-            ctrl_btn(mic_icon, mic_bg, MainMessage::ToggleMic),
-            ctrl_btn(screen_icon, screen_bg, MainMessage::ToggleScreenShare),
-            ctrl_btn(
-                Icon::CallEndFilled.unicode(),
-                DANGER_RED,
-                MainMessage::LeaveCall
-            ),
-        ]
-        .spacing(8),
-    )
-    .center_x(Length::Fill)
-    .into();
-    content.push(controls);
+    if !state.screenshare_fullscreen {
+        let controls = container(
+            row![
+                ctrl_btn(cam_icon, cam_bg, MainMessage::ToggleCamera),
+                ctrl_btn(mic_icon, mic_bg, MainMessage::ToggleMic),
+                ctrl_btn(screen_icon, screen_bg, MainMessage::ToggleScreenShare),
+                ctrl_btn(
+                    Icon::CallEndFilled.unicode(),
+                    DANGER_RED,
+                    MainMessage::LeaveCall
+                ),
+            ]
+            .spacing(8),
+        )
+        .center_x(Length::Fill)
+        .into();
+        content.push(controls);
+    }
 
     let content = Column::from_vec(content)
         .spacing(16)

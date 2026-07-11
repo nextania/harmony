@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use vk_video::{EncodedInputChunk, VulkanDevice, VulkanInstance, parameters::{VulkanAdapterDescriptor, VulkanDeviceDescriptor}};
+use vk_video::{
+    BytesDecoder, EncodedInputChunk, VulkanDevice, VulkanInstance,
+    parameters::{DecoderParameters, VulkanAdapterDescriptor, VulkanDeviceDescriptor},
+};
 
 use crate::media::{
     codec,
@@ -10,6 +13,25 @@ use crate::media::{
 
 pub struct HardwareVideoDecoder {
     device: Arc<VulkanDevice>,
+    decoder: Option<BytesDecoder>,
+    awaiting_keyframe: bool,
+}
+
+// TODO:
+fn contains_keyframe_nal(data: &[u8]) -> bool {
+    let mut i = 0;
+    while i + 3 < data.len() {
+        if data[i] == 0 && data[i + 1] == 0 && data[i + 2] == 1 {
+            let nal_type = data[i + 3] & 0x1f;
+            if nal_type == 5 || nal_type == 7 {
+                return true;
+            }
+            i += 4;
+        } else {
+            i += 1;
+        }
+    }
+    false
 }
 
 impl HardwareVideoDecoder {
@@ -20,12 +42,14 @@ impl HardwareVideoDecoder {
             .create_adapter(&VulkanAdapterDescriptor::default())
             .context("failed to create Vulkan adapter for video decode")?;
         let device = adapter
-            .create_device(
-                &VulkanDeviceDescriptor::default()
-            )
+            .create_device(&VulkanDeviceDescriptor::default())
             .context("failed to create Vulkan device for video decode")?;
 
-        Ok(Self { device })
+        Ok(Self {
+            device,
+            decoder: None,
+            awaiting_keyframe: true,
+        })
     }
 }
 
@@ -35,15 +59,41 @@ impl VideoDecoder for HardwareVideoDecoder {
     }
 
     fn decode(&mut self, data: &[u8]) -> Result<Vec<Frame>> {
-        let mut decoder = self
-            .device
-            .create_bytes_decoder(vk_video::parameters::DecoderParameters::default())
-            .context("failed to create bytes decoder")?;
+        if self.awaiting_keyframe {
+            if !contains_keyframe_nal(data) {
+                // don't poison the decoder
+                return Ok(Vec::new());
+            }
+            self.decoder = None;
+            self.awaiting_keyframe = false;
+        }
+
+        let is_new = self.decoder.is_none();
+        let decoder = self.decoder.get_or_insert_with(|| {
+            tracing::info!("creating new Vulkan bytes decoder for H.264");
+            self.device
+                .create_bytes_decoder(DecoderParameters::default())
+                .expect("failed to create Vulkan bytes decoder")
+        });
+
+        let preview: Vec<u8> = data.iter().take(16).copied().collect();
+        tracing::debug!(
+            "decode {} bytes (new_decoder={is_new}), first bytes: {preview:02x?}",
+            data.len()
+        );
 
         let chunk = EncodedInputChunk { data, pts: None };
-        let raw_frames = decoder
-            .decode(chunk)
-            .map_err(|e| anyhow::anyhow!("H.264 decode error: {e:?}"))?;
+        let raw_frames = match decoder.decode(chunk) {
+            Ok(frames) => frames,
+            Err(e) => {
+                self.decoder = None;
+                // IMPORTANT: the decoder breaks permanently whenever
+                // it errors (likely because it got a P frame before a keyframe)
+                // and needs to be recreated with a fresh keyframe.
+                self.awaiting_keyframe = true;
+                return Err(anyhow::anyhow!("H.264 decode error: {e:?}"));
+            }
+        };
 
         let mut frames = Vec::with_capacity(raw_frames.len());
         for frame in raw_frames {
@@ -63,7 +113,29 @@ impl VideoDecoder for HardwareVideoDecoder {
     }
 
     fn flush(&mut self) -> Vec<Frame> {
-        Vec::new()
+        if let Some(decoder) = self.decoder.as_mut() {
+            match decoder.flush() {
+                Ok(raw_frames) => raw_frames
+                    .into_iter()
+                    .map(|f| {
+                        let w = f.data.width;
+                        let h = f.data.height;
+                        let rgba = nv12_to_rgba(&f.data.frame, w, h);
+                        Frame {
+                            width: w,
+                            height: h,
+                            rgba: rgba.into(),
+                        }
+                    })
+                    .collect(),
+                Err(e) => {
+                    tracing::warn!("H.264 decoder flush: {e:#}");
+                    Vec::new()
+                }
+            }
+        } else {
+            Vec::new()
+        }
     }
 }
 

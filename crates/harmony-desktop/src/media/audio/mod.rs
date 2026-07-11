@@ -1,9 +1,9 @@
 pub mod limiter;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc as sync_mpsc;
-use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -42,11 +42,14 @@ impl TrackPlayback {
         let decoder =
             opus::Decoder::new(SAMPLE_RATE, opus::Channels::Stereo).context("opus decoder init")?;
         let (producer, consumer) = HeapRb::new(SAMPLE_RATE as usize).split();
-        Ok((Self {
-            decoder,
-            producer,
-            volume: Arc::new(AtomicU32::new(1.0f32.to_bits())),
-        }, consumer))
+        Ok((
+            Self {
+                decoder,
+                producer,
+                volume: Arc::new(AtomicU32::new(1.0f32.to_bits())),
+            },
+            consumer,
+        ))
     }
 
     fn reset(&mut self) -> HeapCons<f32> {
@@ -158,7 +161,11 @@ impl AudioPipeline {
                 move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                     while let Ok(cmd) = cmd_rx.try_recv() {
                         match cmd {
-                            TrackCommand::Add { id, consumer, volume } => {
+                            TrackCommand::Add {
+                                id,
+                                consumer,
+                                volume,
+                            } => {
                                 cb_tracks.insert(id, (consumer, volume));
                             }
                             TrackCommand::Remove { id } => {
@@ -196,7 +203,8 @@ impl AudioPipeline {
     pub fn stop_playback(&mut self) {
         self.playback_stream = None;
         self.track_cmd_tx = None;
-        let consumers: Vec<(String, HeapCons<f32>)> = self.tracks
+        let consumers: Vec<(String, HeapCons<f32>)> = self
+            .tracks
             .iter_mut()
             .map(|(id, track)| (id.clone(), track.reset()))
             .collect();
@@ -239,9 +247,12 @@ impl AudioPipeline {
         self.capture_tx = Some(tx.clone());
 
         let mut sample_buf = HeapRb::new(FRAME_SIZE * CHANNELS as usize * 10);
-        let mut encoder = 
-            opus::Encoder::new(SAMPLE_RATE, opus::Channels::Stereo, opus::Application::Audio)
-                .context("opus encoder init")?;
+        let mut encoder = opus::Encoder::new(
+            SAMPLE_RATE,
+            opus::Channels::Stereo,
+            opus::Application::Audio,
+        )
+        .context("opus encoder init")?;
 
         let stream = device
             .build_input_stream(

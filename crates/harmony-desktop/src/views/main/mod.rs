@@ -1353,12 +1353,9 @@ impl MainView {
             MainMessage::StopViewingScreenTrack => {
                 if let Some(track_id) = self.clear_screen_view_state() {
                     if let Some(pulse) = self.pulse_client.clone() {
-                        return Task::future(async move {
-                            if let Err(e) = pulse.stop_consuming(track_id).await {
-                                tracing::warn!("stop_consuming screen track: {e:#}");
-                            }
-                        })
-                        .discard();
+                        if let Err(e) = pulse.stop_consuming(track_id) {
+                            tracing::warn!("stop_consuming screen track: {e:#}");
+                        }
                     }
                 }
             }

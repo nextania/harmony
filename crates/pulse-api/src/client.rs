@@ -63,10 +63,12 @@ enum ClientCommand {
     StopProducer {
         media_hint: MediaHint,
     },
-    // TODO:
     StartConsume {
         track: AvailableTrack,
         sink: mpsc::UnboundedSender<MediaFrame>,
+    },
+    StopConsume {
+        id: String,
     },
     Shutdown,
 }
@@ -137,6 +139,7 @@ impl PulseClient {
             _ctl_broadcast: ctl_broadcast,
             _ctl_track: ctl_track,
             producers: DashMap::new(),
+            consumers: DashMap::new(),
         };
 
         tokio::spawn(async move {
@@ -208,22 +211,18 @@ impl PulseClient {
             })
             .map_err(|_| anyhow::anyhow!("event loop shut down"))?;
 
-        self.send_and_wait(
-            &track.id,
-            WtMessageC2S::StartConsume {
-                id: track.id.clone(),
-            },
-        )
-        .await
-        .context("Timed out waiting for ConsumeStarted")?;
+        if matches!(track.media_hint, MediaHint::Video | MediaHint::ScreenVideo) {
+            let _ = self.request_keyframe(&track.id);
+        }
         Ok(rx)
     }
 
     /// Stop consuming a remote track.
-    pub async fn stop_consuming(&self, id: String) -> Result<()> {
-        self.send_and_wait(&id, WtMessageC2S::StopConsume { id: id.clone() })
-            .await
-            .context("Timed out waiting for ConsumeStopped")
+    pub fn stop_consuming(&self, id: String) -> Result<()> {
+        self.command_tx
+            .send(ClientCommand::StopConsume { id })
+            .map_err(|_| anyhow::anyhow!("event loop shut down"))?;
+        Ok(())
     }
 
     /// Write an encoded access unit for a track. `keyframe` rolls a new MoQ group.
@@ -320,6 +319,7 @@ struct EventCtx {
     _ctl_broadcast: BroadcastProducer,
     _ctl_track: TrackProducer,
     producers: DashMap<String, MediaProducer>, // track_name -> producer
+    consumers: DashMap<String, tokio::task::JoinHandle<()>>, // track id -> consumer task
 }
 
 async fn event_loop(
@@ -365,7 +365,16 @@ async fn event_loop(
                         ctx.producers.remove(track_name_for_hint(&media_hint));
                     }
                     ClientCommand::StartConsume { track, sink } => {
-                        spawn_consumer(&ctx, track, sink);
+                        let id = track.id.clone();
+                        let handle = spawn_consumer(&ctx, track, sink);
+                        if let Some(prev) = ctx.consumers.insert(id, handle) {
+                            prev.abort();
+                        }
+                    }
+                    ClientCommand::StopConsume { id } => {
+                        if let Some((_, handle)) = ctx.consumers.remove(&id) {
+                            handle.abort();
+                        }
                     }
                     ClientCommand::Shutdown => {
                         ctx.session.close(moq_net::Error::Cancel);
@@ -514,7 +523,11 @@ async fn write_media(
     }
 }
 
-fn spawn_consumer(ctx: &EventCtx, track: AvailableTrack, sink: mpsc::UnboundedSender<MediaFrame>) {
+fn spawn_consumer(
+    ctx: &EventCtx,
+    track: AvailableTrack,
+    sink: mpsc::UnboundedSender<MediaFrame>,
+) -> tokio::task::JoinHandle<()> {
     let origin = ctx.origin.clone();
     let mls = ctx.mls.clone();
     let call_id = ctx.call_id.clone();
@@ -593,15 +606,14 @@ fn spawn_consumer(ctx: &EventCtx, track: AvailableTrack, sink: mpsc::UnboundedSe
                 }
             }
         }
-    });
+    })
 }
 
 async fn handle_server_message(ctx: &mut EventCtx, msg: WtMessageS2C) -> Result<()> {
     match msg {
-        WtMessageS2C::ProduceStarted { id }
-        | WtMessageS2C::ProduceStopped { id }
-        | WtMessageS2C::ConsumeStarted { id }
-        | WtMessageS2C::ConsumeStopped { id } => resolve_pending(&ctx.pending_requests, &id),
+        WtMessageS2C::ProduceStarted { id } | WtMessageS2C::ProduceStopped { id } => {
+            resolve_pending(&ctx.pending_requests, &id)
+        }
 
         WtMessageS2C::TrackAvailable { track } => {
             let _ = ctx.event_tx.send(PulseEvent::TrackAvailable(track));

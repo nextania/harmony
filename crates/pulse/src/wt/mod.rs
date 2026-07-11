@@ -391,10 +391,6 @@ async fn dispatch_message(unique_id: &str, message: WtMessageC2S) -> anyhow::Res
             handle_start_produce(id, media_hint, &state).await;
         }
         WtMessageC2S::StopProduce { id } => handle_stop_produce(id, &state),
-        WtMessageC2S::StartConsume { id } => handle_start_consume(id, &state),
-        WtMessageC2S::StopConsume { id } => {
-            let _ = state.message_tx.send(WtMessageS2C::ConsumeStopped { id });
-        }
         WtMessageC2S::MlsCommit {
             commit_data,
             epoch,
@@ -468,29 +464,6 @@ fn handle_stop_produce(client_track_id: String, state: &SessionState) {
     let _ = state.message_tx.send(WtMessageS2C::ProduceStopped {
         id: client_track_id,
     });
-}
-
-// TODO: is this still necessary?
-fn handle_start_consume(track_id: String, state: &SessionState) {
-    if !state.can_listen.load(Ordering::SeqCst) {
-        warn!("Cannot consume while deafened");
-        return;
-    }
-    if let Some(call) = GLOBAL_CALLS.get(&state.call_id) {
-        if let Some(track) = call.tracks.get(&track_id) {
-            if matches!(track.media_hint, MediaHint::Video | MediaHint::ScreenVideo) {
-                let _ = track
-                    .producer_session
-                    .message_tx
-                    .send(WtMessageS2C::KeyFrameRequested {
-                        track_id: track.client_track_id.clone(),
-                    });
-            }
-        }
-    }
-    let _ = state
-        .message_tx
-        .send(WtMessageS2C::ConsumeStarted { id: track_id });
 }
 
 fn handle_request_keyframe(track_id: String, state: &SessionState) {

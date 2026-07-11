@@ -56,12 +56,6 @@ pub enum WtMessageC2S {
     StopProduce {
         id: String,
     },
-    StartConsume {
-        id: String,
-    },
-    StopConsume {
-        id: String,
-    },
     // MLS coordination messages
     MlsCommit {
         commit_data: Vec<u8>,
@@ -104,12 +98,6 @@ pub enum WtMessageS2C {
         id: String,
     },
     ProduceStopped {
-        id: String,
-    },
-    ConsumeStarted {
-        id: String,
-    },
-    ConsumeStopped {
         id: String,
     },
     TrackAvailable {

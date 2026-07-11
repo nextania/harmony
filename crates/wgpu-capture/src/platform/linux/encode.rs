@@ -61,7 +61,13 @@ impl VaapiEncoder {
 
         let encoder_thread = thread::Builder::new()
             .name("wgpu-capture-vaapi-enc".to_owned())
-            .spawn(move || encoder_thread(rx, width, height, fps, bitrate, codec, output))?;
+            .spawn(move || {
+                let result = encoder_thread(rx, width, height, fps, bitrate, codec, output);
+                if let Err(e) = &result {
+                    debug!("encoder thread exiting with error: {e}");
+                }
+                result
+            })?;
 
         Ok(VaapiEncoder {
             tx,
@@ -152,10 +158,14 @@ fn encoder_thread(
     let low_power = check_low_power(&*display, &codec);
     let callback: Arc<dyn Fn(Vec<u8>) + Send + Sync> = output.0.clone();
 
+    let gop_limit = (fps.max(1) * 2).clamp(1, u16::MAX as u32) as u16;
+    let pred_structure = cros_codecs::encoder::PredictionStructure::LowDelay { limit: gop_limit };
+
     let mut encoder: Box<dyn VideoEncoder<GenericDmaVideoFrame>> = match codec {
         Codec::H264 => {
             let config = H264Config {
                 resolution,
+                pred_structure,
                 initial_tunings: Tunings {
                     rate_control: RateControl::ConstantBitrate(bitrate as u64),
                     framerate: fps,
@@ -185,6 +195,7 @@ fn encoder_thread(
             let qp = bitrate_to_qp(bitrate);
             let config = Av1Config {
                 resolution,
+                pred_structure,
                 initial_tunings: Tunings {
                     rate_control: RateControl::ConstantQuality(qp),
                     framerate: fps,
@@ -213,7 +224,15 @@ fn encoder_thread(
     };
 
     let mut force_keyframe = false;
-    let mut frame_timestamp: u64 = 0;
+
+    // on high refresh rate displays the compositor will give us frames
+    // much faster than we need them, so we drop frames on the an interval
+    // determined by the desired frame rate accordingly
+    let target_fps = fps.max(1);
+    let frame_interval = std::time::Duration::from_secs_f64(1.0 / target_fps as f64);
+    let mut stream_start: Option<Instant> = None;
+    let mut next_frame_deadline: Option<Instant> = None;
+    let mut last_timestamp: Option<u64> = None;
 
     loop {
         drain_output(&mut *encoder, &callback)?;
@@ -226,10 +245,32 @@ fn encoder_thread(
                 stride,
                 fourcc: frame_fourcc,
             }) => {
-                let needs_alignment =
-                    fw % CODEC_SIZE_ALIGNMENT != 0 || fh % CODEC_SIZE_ALIGNMENT != 0;
-                let is_native_nv12 =
-                    frame_fourcc == drm_fourcc::DrmFourcc::Nv12 && !needs_alignment;
+                let now = Instant::now();
+
+                if next_frame_deadline.is_some_and(|deadline| now < deadline) {
+                    continue;
+                }
+
+                next_frame_deadline = Some(match next_frame_deadline {
+                    Some(prev) if now.duration_since(prev) < frame_interval => {
+                        prev + frame_interval
+                    }
+                    _ => now + frame_interval,
+                });
+
+                let start = *stream_start.get_or_insert(now);
+                let mut frame_timestamp =
+                    (now.duration_since(start).as_secs_f64() * target_fps as f64).round() as u64;
+                if let Some(last) = last_timestamp
+                    && frame_timestamp <= last
+                {
+                    frame_timestamp = last + 1;
+                }
+                last_timestamp = Some(frame_timestamp);
+
+                let is_native_nv12 = frame_fourcc == drm_fourcc::DrmFourcc::Nv12
+                    && fw == aligned_width
+                    && fh == aligned_height;
 
                 let (dma_frame, frame_layout) = if is_native_nv12 {
                     let layout = FrameLayout {
@@ -278,7 +319,6 @@ fn encoder_thread(
 
                 encoder.encode(meta, dma_frame)?;
 
-                frame_timestamp += 1;
                 force_keyframe = false;
             }
             Ok(EncodeCommand::SetBitrate(new_bitrate)) => {
@@ -402,8 +442,7 @@ impl VaapiVpp {
 
         let src_surface = if stride % SURFACE_PITCH_ALIGNMENT == 0 {
             debug!("VPP convert: zero-copy path (stride={stride}, {width}x{height})");
-            let src_fourcc_bytes: [u8; 4] = (src_drm_fourcc as u32).to_le_bytes();
-            let src_cros_fourcc = Fourcc::from(&src_fourcc_bytes);
+            let src_cros_fourcc = Fourcc::from(&va_src_fourcc.to_le_bytes());
             let src_layout = FrameLayout {
                 format: (src_cros_fourcc, 0u64),
                 size: Resolution { width, height },
@@ -498,24 +537,11 @@ impl VaapiVpp {
         let dst = Rc::clone(&self.dst_pool[used_idx]);
 
         let ppb = {
-            let needs_region = width != self.aligned_width || height != self.aligned_height;
-            if needs_region {
-                debug!(
-                    "VPP: frame {width}x{height} < aligned {}x{}",
-                    self.aligned_width, self.aligned_height
-                );
-            }
-            let region = needs_region.then(|| libva::VARectangle {
-                x: 0,
-                y: 0,
-                width: width as u16,
-                height: height as u16,
-            });
             ProcPipelineParameterBuffer::new(
                 src_surface.id(),
-                region, // surface_region
+                None, // whole source
                 0,
-                region, // output_region
+                None, // whole destination
                 0,
                 0,
                 0,

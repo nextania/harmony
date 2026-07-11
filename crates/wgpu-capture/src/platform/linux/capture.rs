@@ -5,9 +5,8 @@ use std::thread;
 
 use ashpd::desktop::CreateSessionOptions;
 use ashpd::desktop::PersistMode;
-use ashpd::desktop::screencast::{Screencast, SourceType};
+use ashpd::desktop::screencast::{CursorMode, Screencast, SourceType};
 use ashpd::desktop::screencast::{SelectSourcesOptions, StartCastOptions};
-use ashpd::enumflags2::BitFlags;
 use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
 use pipewire::channel;
 use pipewire::context::ContextRc;
@@ -20,7 +19,7 @@ use pipewire::spa::sys::{
     SPA_CHOICE_Enum, SPA_CHOICE_None, SPA_FORMAT_VIDEO_format, SPA_FORMAT_VIDEO_modifier,
     SPA_FORMAT_mediaSubtype, SPA_FORMAT_mediaType, SPA_MEDIA_SUBTYPE_raw, SPA_MEDIA_TYPE_video,
     SPA_PARAM_EnumFormat, SPA_POD_PROP_FLAG_MANDATORY, SPA_TYPE_OBJECT_Format,
-    SPA_VIDEO_FORMAT_BGRA, SPA_VIDEO_FORMAT_BGRx, SPA_VIDEO_FORMAT_NV12,
+    SPA_VIDEO_FORMAT_BGRA, SPA_VIDEO_FORMAT_BGRx,
 };
 use pipewire::spa::utils::Id;
 use pipewire::stream::StreamFlags;
@@ -76,61 +75,100 @@ impl Capturer for LinuxCapturer {
     }
 
     fn next_frame(&mut self) -> Option<CaptureFrame> {
-        self.frame_rx.as_ref()?.recv().ok()
+        self.frame_rx.as_ref()?.try_recv().ok()
     }
 }
 
 fn capture_thread(frame_tx: SyncSender<CaptureFrame>, stop_rx: std::sync::mpsc::Receiver<()>) {
-    let pw_fd = {
-        let rt = match tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(rt) => rt,
-            Err(e) => {
-                debug!("tokio runtime build failed: {e}");
-                return;
-            }
-        };
-        let _enter = rt.enter();
-        match rt.block_on(open_screencast_portal()) {
-            Ok(fd) => fd,
-            Err(e) => {
-                debug!("screencast portal: {e}");
-                return;
-            }
+    let rt = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => rt,
+        Err(e) => {
+            debug!("tokio runtime build failed: {e}");
+            return;
         }
     };
-    run_pipewire_loop(pw_fd, frame_tx, stop_rx);
+
+    let (portal_tx, portal_rx) = mpsc::channel::<Result<(OwnedFd, u32)>>();
+    let (close_tx, close_rx) = tokio::sync::oneshot::channel::<()>();
+
+    let portal_task = rt.spawn(open_screencast_portal(portal_tx, close_rx));
+
+    let (pw_fd, node_id) = match portal_rx.recv() {
+        Ok(Ok(v)) => v,
+        Ok(Err(e)) => {
+            debug!("screencast portal: {e}");
+            return;
+        }
+        Err(_) => {
+            debug!("screencast portal task exited before opening a stream");
+            return;
+        }
+    };
+
+    run_pipewire_loop((pw_fd, node_id), frame_tx, stop_rx);
+
+    close_tx.send(()).ok();
+    rt.block_on(async {
+        portal_task.await.ok();
+    });
 }
 
-/// Opens the XDG ScreenCast portal and returns the PipeWire remote fd + node_id.
-async fn open_screencast_portal() -> Result<(OwnedFd, u32)> {
-    let proxy = Screencast::new().await?;
-    let session = proxy
-        .create_session(CreateSessionOptions::default())
-        .await?;
+async fn open_screencast_portal(
+    portal_tx: std::sync::mpsc::Sender<Result<(OwnedFd, u32)>>,
+    close_rx: tokio::sync::oneshot::Receiver<()>,
+) {
+    macro_rules! try_or_report {
+        ($e:expr) => {
+            match $e {
+                Ok(v) => v,
+                Err(e) => {
+                    portal_tx.send(Err(e.into())).ok();
+                    return;
+                }
+            }
+        };
+    }
+
+    let proxy = try_or_report!(Screencast::new().await);
+    let session = try_or_report!(proxy.create_session(CreateSessionOptions::default()).await);
     let options = SelectSourcesOptions::default()
-        // .set_cursor_mode(CursorMode::Metadata)
-        .set_sources(BitFlags::from(SourceType::Monitor))
+        .set_cursor_mode(CursorMode::Embedded)
+        .set_sources(SourceType::Monitor | SourceType::Window)
         .set_multiple(false)
         .set_persist_mode(PersistMode::DoNot);
-    proxy.select_sources(&session, options).await?;
-    let response = proxy
-        .start(&session, None, StartCastOptions::default())
-        .await?
-        .response()?;
-    let stream = response
-        .streams()
-        .first()
-        .ok_or_else(|| crate::Error::NoSuitableStreams)?;
-    let node_id = stream.pipe_wire_node_id();
-    let pw_fd = proxy
-        .open_pipe_wire_remote(&session, Default::default())
-        .await?;
-    let owned = nix::unistd::dup(pw_fd).unwrap();
+    try_or_report!(proxy.select_sources(&session, options).await);
+    let response = try_or_report!(
+        try_or_report!(
+            proxy
+                .start(&session, None, StartCastOptions::default())
+                .await
+        )
+        .response()
+    );
+    let node_id = match response.streams().first() {
+        Some(stream) => stream.pipe_wire_node_id(),
+        None => {
+            portal_tx.send(Err(crate::Error::NoSuitableStreams)).ok();
+            return;
+        }
+    };
+    let pw_fd = try_or_report!(
+        proxy
+            .open_pipe_wire_remote(&session, Default::default())
+            .await
+    );
+    let owned = try_or_report!(nix::unistd::dup(&pw_fd));
 
-    Ok((owned, node_id))
+    if portal_tx.send(Ok((owned, node_id))).is_err() {
+        session.close().await.ok();
+        return;
+    }
+
+    close_rx.await.ok();
+    session.close().await.ok();
 }
 
 fn run_pipewire_loop(
@@ -323,15 +361,12 @@ fn build_format_params(buf: &mut Vec<u8>) -> Option<&pipewire::spa::pod::Pod> {
         b.add_prop(SPA_FORMAT_mediaSubtype, 0).ok()?;
         b.add_id(Id(SPA_MEDIA_SUBTYPE_raw)).ok()?;
 
-        // format: prefer BGRA (display pipeline needs RGB for zero-copy import),
-        // then BGRx, then NV12 (encoder VPP converts on the GPU).
         b.add_prop(SPA_FORMAT_VIDEO_format, 0).ok()?;
         let mut fmt_frame = MaybeUninit::<pipewire::spa::sys::spa_pod_frame>::uninit();
         b.push_choice(&mut fmt_frame, SPA_CHOICE_Enum, 0).ok()?;
         b.add_id(Id(SPA_VIDEO_FORMAT_BGRA)).ok()?; // default/preferred choice
         b.add_id(Id(SPA_VIDEO_FORMAT_BGRA)).ok()?;
         b.add_id(Id(SPA_VIDEO_FORMAT_BGRx)).ok()?;
-        b.add_id(Id(SPA_VIDEO_FORMAT_NV12)).ok()?;
         b.pop(fmt_frame.assume_init_mut());
 
         // modifier: ONLY LINEAR (0).

@@ -54,6 +54,17 @@ impl App {
         let count_for_thread = frame_count.clone();
 
         std::thread::spawn(move || {
+            #[cfg(windows)]
+            let (src_w, src_h) = match wgpu_capture::enumerate_targets() {
+                Ok(targets) => targets
+                    .first()
+                    .map(|t| (t.width, t.height))
+                    .unwrap_or((1920, 1080)),
+                Err(_) => (1920, 1080),
+            };
+            #[cfg(target_os = "linux")]
+            let (src_w, src_h) = (1920, 1080);
+
             let mut capturer = match create_capturer(
                 #[cfg(windows)]
                 CaptureTarget::Monitor(0),
@@ -72,20 +83,9 @@ impl App {
                 return;
             }
 
-            // Encoder: read first frame to get dimensions, then initialise.
-            let first_frame = loop {
-                match capturer.next_frame() {
-                    Some(f) => break f,
-                    None => {
-                        std::thread::sleep(Duration::from_millis(1));
-                    }
-                }
-            };
-            let (w, h) = (first_frame.width(), first_frame.height());
-
             let encoder_config = EncodeConfig {
-                width: w,
-                height: h,
+                width: src_w,
+                height: src_h,
                 fps: 60,
                 bitrate_bps: 8_000_000,
                 codec: Codec::H264,
@@ -102,15 +102,6 @@ impl App {
                     None
                 }
             };
-
-            if let Some(enc) = encoder.as_mut() {
-                if let Err(e) = enc.submit_frame(&first_frame) {
-                    debug!("submit_frame: {e}");
-                }
-            }
-            latest_for_thread.store(Arc::new(Some(first_frame)));
-            count_for_thread.fetch_add(1, Ordering::Relaxed);
-            tick_tx.send(()).ok();
 
             loop {
                 match capturer.next_frame() {

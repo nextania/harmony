@@ -50,6 +50,26 @@ pub(crate) fn create_encoder(
     Err(crate::Error::UnsupportedPlatform)
 }
 
+pub(crate) fn enumerate_targets() -> crate::Result<Vec<crate::TargetInfo>> {
+    #[cfg(windows)]
+    return windows::enum_::enumerate_targets();
+    #[cfg(target_os = "linux")]
+    return Ok(Vec::new());
+    #[cfg(not(any(windows, target_os = "linux")))]
+    Err(crate::Error::UnsupportedPlatform)
+}
+
+pub(crate) fn capture_screenshot(
+    target: &crate::CaptureTarget,
+) -> crate::Result<Option<(u32, u32, Vec<u8>)>> {
+    #[cfg(windows)]
+    return windows::screenshot::capture_screenshot(target);
+    #[cfg(target_os = "linux")]
+    return Ok(None);
+    #[cfg(not(any(windows, target_os = "linux")))]
+    Err(crate::Error::UnsupportedPlatform)
+}
+
 pub(crate) enum ImportBackend {
     #[cfg(windows)]
     Vulkan(windows::import_vk::VulkanWin32Importer),

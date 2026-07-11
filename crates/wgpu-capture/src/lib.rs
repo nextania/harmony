@@ -42,6 +42,19 @@ pub enum CaptureTarget {
     System,
 }
 
+/// Metadata about an available capture source (monitor or window).
+#[derive(Debug, Clone)]
+pub struct TargetInfo {
+    /// The capture target identifier.
+    pub target: CaptureTarget,
+    /// Human-readable title (monitor name or window title).
+    pub title: String,
+    /// Source width in pixels.
+    pub width: u32,
+    /// Source height in pixels.
+    pub height: u32,
+}
+
 /// Implemented by platform capturers. Produced via [`create_capturer`].
 pub trait Capturer: Send {
     /// Begin capture. Must be called before `next_frame()`.
@@ -57,6 +70,22 @@ pub trait Capturer: Send {
 /// Creates a capturer for the given target.
 pub fn create_capturer(target: CaptureTarget) -> Result<Box<dyn Capturer>> {
     platform::create_capturer(target)
+}
+
+/// Enumerate all capturable monitors and non-minimized windows.
+///
+/// On Linux this returns an empty `Vec`, since this is handled by the portal.
+pub fn enumerate_targets() -> Result<Vec<TargetInfo>> {
+    platform::enumerate_targets()
+}
+
+/// Capture a single screenshot frame from a target.
+///
+/// Returns RGBA pixel data with width and height on success,
+/// or `Ok(None)` if no frame arrived within the timeout.
+/// On Linux this always returns `Ok(None)`.
+pub fn capture_screenshot(target: &CaptureTarget) -> Result<Option<(u32, u32, Vec<u8>)>> {
+    platform::capture_screenshot(target)
 }
 
 /// Codec selection for the encode pipeline.

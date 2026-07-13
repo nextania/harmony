@@ -3,73 +3,65 @@
 pub use harmony_types::errors::Error as ApiError;
 use thiserror::Error;
 
+pub use crate::crypto::CryptoError;
+
+/// A type-erased error originating from a third-party crate.
+pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
 /// Result type alias for Harmony API operations
 pub type Result<T> = std::result::Result<T, HarmonyError>;
 
 /// Errors that can occur when using the Harmony API client
 #[derive(Error, Debug)]
 pub enum HarmonyError {
-    /// WebSocket connection errors
     #[error("WebSocket error: {0}")]
-    WebSocket(#[from] async_tungstenite::tungstenite::Error),
+    WebSocket(#[source] BoxError),
 
-    /// MessagePack serialization/deserialization errors
-    #[error("MessagePack serialization error: {0}")]
-    MessagePackSerialization(#[from] rmp_serde::encode::Error),
+    #[error("CBOR serialization error: {0}")]
+    Serialization(#[source] BoxError),
 
-    /// MessagePack deserialization errors
-    #[error("MessagePack deserialization error: {0}")]
-    MessagePackDeserialization(#[from] rmp_serde::decode::Error),
+    #[error("HTTP request error: {0}")]
+    Http(#[source] BoxError),
 
-    /// MessagePack value conversion errors
-    #[error("MessagePack value conversion error: {0}")]
-    MessagePackValue(#[from] rmpv::decode::Error),
+    #[error("invalid server URL: {0}")]
+    InvalidServerUrl(#[source] BoxError),
 
-    /// MessagePack ext conversion errors
-    #[error("MessagePack ext conversion error: {0}")]
-    MessagePackExt(#[from] rmpv::ext::Error),
+    #[error("connection closed before authentication")]
+    AuthenticationClosed,
 
-    /// Authentication errors
-    #[error("Authentication failed: {0}")]
-    Authentication(String),
-
-    /// API errors returned by the server
     #[error("API error: {0}")]
     Api(#[from] ApiError),
 
-    /// Resource not found
-    #[error("Resource not found")]
-    NotFound,
+    #[error("request timed out")]
+    Timeout,
 
-    /// Permission denied
-    #[error("Permission denied")]
-    PermissionDenied,
-
-    /// Rate limit exceeded
-    #[error("Rate limit exceeded")]
-    RateLimit,
-
-    /// Invalid input
-    #[error("Invalid input: {0}")]
-    InvalidInput(String),
-
-    /// Connection is not established
-    #[error("Connection not established")]
+    #[error("connection not established")]
     NotConnected,
 
-    /// Connection was lost
-    #[error("Connection lost")]
+    #[error("connection lost")]
     ConnectionLost,
 
-    /// Reconnection failed after maximum attempts
-    #[error("Reconnection failed after {attempts} attempts")]
+    #[error("reconnection failed after {attempts} attempts")]
     ReconnectionFailed { attempts: u32 },
 
-    /// Connection is in the process of reconnecting
-    #[error("Connection is reconnecting")]
+    #[error("connection is reconnecting")]
     Reconnecting,
 
-    /// Internal client error
-    #[error("Internal error: {0}")]
-    Internal(String),
+    #[error("keystore sync failed after {attempts} conflicting writes")]
+    KeystoreSyncFailed { attempts: u32 },
+
+    #[error("contact not found")]
+    ContactNotFound,
+
+    #[error("cannot accept: requester's public key not available")]
+    RequesterPublicKeyUnavailable,
+
+    #[error("expected an Established relationship state after finalizing contact")]
+    UnexpectedRelationshipState,
+
+    #[error("group key must be exactly 32 bytes, got {0}")]
+    InvalidGroupKeyLength(usize),
+
+    #[error("Crypto error: {0}")]
+    Crypto(#[from] CryptoError),
 }

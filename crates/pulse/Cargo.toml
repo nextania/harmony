@@ -5,7 +5,6 @@ edition = "2024"
 
 [dependencies]
 serde = { workspace = true }
-rmp-serde = "1.1.2"
 
 futures = "0.3.24"
 tokio = { version = "1.45.1", features = [
@@ -30,7 +29,7 @@ moq-native = "0.17.8"
 moq-net = "0.1.16"
 url = "2.5"
 bytes = "1"
-rkyv = { version = "0.8.14", features = ["unaligned"] }
+ciborium = "0.2"
 anyhow = "1.0.100"
 arc-swap = "1.8.0"
 

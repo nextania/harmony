@@ -6,13 +6,15 @@ use std::{
 };
 
 use async_stream::stream;
-use harmony_api::Event;
+use harmony_api::{ClientEvent, Event, LifecycleEvent};
 use iced::{
     Element, Length, Task,
     widget::{Space, button, column, container, row, text},
 };
 use lru::LruCache;
-use pulse_api::{AvailableTrack, MediaHint, PulseClient, PulseClientOptions, PulseEvent};
+use pulse_api::{
+    AvailableTrack, MediaHint, PulseClient, PulseClientOptions, PulseEvent, TrackHandle,
+};
 use ulid::Ulid;
 
 use crate::media::screen_capture::{ScreenCaptureConfig, ScreenCaptureSession};
@@ -74,7 +76,8 @@ pub enum MainMessage {
     MessageEdited(String, ChatMessage),
     DeleteMessage(String),
     MessageDeleted(String, String),
-    ServerEvent(harmony_api::Event),
+    ServerEvent(harmony_api::ClientEvent),
+    Ignore,
     JoinCall,
     StartCall,
     LeaveCall,
@@ -93,7 +96,9 @@ pub enum MainMessage {
     PulseEvent(PulseEvent),
     AudioTrackSubscribed(String),
     AudioPacket(String, Vec<u8>),
-    MicEnabled,
+    MicEnabled(TrackHandle),
+    CameraTrackStarted(TrackHandle),
+    ScreenTrackStarted(TrackHandle),
     ToggleChatList,
     ToggleAvatarMenu,
     AvatarMenuDismiss,
@@ -147,6 +152,9 @@ pub struct MainView {
     pub current_call_id: Option<String>,
     pub current_call_state: Option<CallState>,
     pub pulse_client: Option<Arc<PulseClient>>,
+    pub mic_track: Option<TrackHandle>,
+    pub camera_track: Option<TrackHandle>,
+    pub screen_track: Option<TrackHandle>,
     pub audio: AudioPipeline,
     pub screen_capture_session: Option<ScreenCaptureSession>,
     pub screen_capture_preview: Option<Arc<ArcSwap<Option<wgpu_capture::CaptureFrame>>>>,
@@ -201,6 +209,9 @@ impl MainView {
             current_call_id: None,
             current_call_state: None,
             pulse_client: None,
+            mic_track: None,
+            camera_track: None,
+            screen_track: None,
             audio: AudioPipeline::new().expect("audio pipeline init"),
             screen_capture_session: None,
             screen_capture_preview: None,
@@ -481,9 +492,29 @@ impl MainView {
                 }
             }
             MainMessage::ServerEvent(event) => {
-                tracing::info!("Received server event: {:?}", event);
-                return self.handle_server_event(event);
+                tracing::info!("Received client event: {:?}", event);
+                match event {
+                    ClientEvent::Lifecycle(l) => return self.handle_lifecycle_event(l),
+                    ClientEvent::Event(e) => {
+                        let crypto_task = {
+                            let api = self.api.clone();
+                            let ev = e.clone();
+                            Task::perform(async move { api.handle_event(&ev).await }, |result| {
+                                match result {
+                                    Ok(Some(contact)) => {
+                                        Message::Main(MainMessage::ContactAccepted(contact))
+                                    }
+                                    Ok(None) => Message::Main(MainMessage::Ignore),
+                                    Err(err) => Message::Main(MainMessage::ApiError(err)),
+                                }
+                            })
+                        };
+                        let ui_task = self.handle_server_event(e);
+                        return Task::batch([crypto_task, ui_task]);
+                    }
+                }
             }
+            MainMessage::Ignore => {}
             MainMessage::JoinCall => {
                 if let Some(conv_id) = self.current_conversation.clone() {
                     let client = self.api.clone();
@@ -501,6 +532,7 @@ impl MainView {
                                 session_id: token_info.session_id,
                                 session_token: token_info.token,
                                 call_id: token_info.call_id.clone(),
+                                identity: client.call_identity().await,
                             },
                         )
                         .await
@@ -548,6 +580,7 @@ impl MainView {
                                 session_id: token_info.session_id,
                                 session_token: token_info.token,
                                 call_id: token_info.call_id.clone(),
+                                identity: client.call_identity().await,
                             },
                         )
                         .await
@@ -579,6 +612,9 @@ impl MainView {
                     pulse.disconnect();
                 }
                 self.pulse_client = None;
+                self.mic_track = None;
+                self.camera_track = None;
+                self.screen_track = None;
                 self.audio.stop_playback();
                 self.audio.stop_capture();
                 if let Some(session) = self.screen_capture_session.take() {
@@ -618,6 +654,7 @@ impl MainView {
                             let client = self.api.clone();
                             let pulse = self.pulse_client.clone();
                             let muted = !new_audio;
+                            let mic_track = self.mic_track.take();
                             return Task::perform(
                                 async move {
                                     client
@@ -625,26 +662,26 @@ impl MainView {
                                         .await?;
                                     if let Some(pulse) = pulse {
                                         if new_audio {
-                                            pulse
-                                                .produce_track(
-                                                    "audio".to_string(),
-                                                    MediaHint::Audio,
-                                                )
+                                            let handle = pulse
+                                                .produce_track(MediaHint::Audio)
                                                 .await
                                                 .map_err(|e| {
                                                     RenderableError::UnknownError(format!(
                                                         "Failed to produce audio track: {e}"
                                                     ))
                                                 })?;
-                                        } else {
-                                            let _ = pulse.stop_producing("audio".to_string()).await;
+                                            return Ok(Some(handle));
+                                        } else if let Some(handle) = mic_track {
+                                            let _ = pulse.stop_producing(handle).await;
                                         }
                                     }
-                                    Ok::<bool, RenderableError>(new_audio)
+                                    Ok::<Option<TrackHandle>, RenderableError>(None)
                                 },
                                 |result| match result {
-                                    Ok(true) => Message::Main(MainMessage::MicEnabled),
-                                    Ok(false) => Message::Main(MainMessage::DismissError),
+                                    Ok(Some(handle)) => {
+                                        Message::Main(MainMessage::MicEnabled(handle))
+                                    }
+                                    Ok(None) => Message::Main(MainMessage::DismissError),
                                     Err(e) => Message::Main(MainMessage::ApiError(e)),
                                 },
                             );
@@ -662,21 +699,28 @@ impl MainView {
                         let new_video = !p.tracks.video;
                         p.tracks.video = new_video;
                         if let Some(pulse) = self.pulse_client.clone() {
+                            let camera_track = self.camera_track.take();
                             return Task::perform(
                                 async move {
                                     if new_video {
                                         pulse
-                                            .produce_track(
-                                                "video".to_string(),
-                                                pulse_api::MediaHint::Video,
-                                            )
+                                            .produce_track(pulse_api::MediaHint::Video)
                                             .await
+                                            .map(Some)
                                     } else {
-                                        pulse.stop_producing("video".to_string()).await
+                                        match camera_track {
+                                            Some(handle) => {
+                                                pulse.stop_producing(handle).await.map(|_| None)
+                                            }
+                                            None => Ok(None),
+                                        }
                                     }
                                 },
                                 |result| match result {
-                                    Ok(()) => Message::Main(MainMessage::DismissError),
+                                    Ok(Some(handle)) => {
+                                        Message::Main(MainMessage::CameraTrackStarted(handle))
+                                    }
+                                    Ok(None) => Message::Main(MainMessage::DismissError),
                                     Err(e) => Message::Main(MainMessage::ApiError(
                                         RenderableError::UnknownError(format!(
                                             "Video track error: {e}"
@@ -702,9 +746,11 @@ impl MainView {
                             p.tracks.screen = false;
                         }
                     }
-                    if let Some(pulse) = self.pulse_client.clone() {
+                    if let Some(pulse) = self.pulse_client.clone()
+                        && let Some(handle) = self.screen_track.take()
+                    {
                         return Task::perform(
-                            async move { pulse.stop_producing("screen".to_string()).await },
+                            async move { pulse.stop_producing(handle).await },
                             |result| match result {
                                 Ok(()) => Message::Main(MainMessage::DismissError),
                                 Err(e) => Message::Main(MainMessage::ApiError(
@@ -750,18 +796,22 @@ impl MainView {
                         yield Message::Main(MainMessage::ScreenCaptureStopped);
                         return;
                     };
-                    if let Err(e) = pulse
-                        .produce_track("screen".to_string(), pulse_api::MediaHint::ScreenVideo)
+                    let screen_track = match pulse
+                        .produce_track(pulse_api::MediaHint::ScreenVideo)
                         .await
                     {
-                        yield Message::Main(MainMessage::ApiError(
-                            RenderableError::UnknownError(format!(
-                                "Failed to produce screen track: {e}"
-                            )),
-                        ));
-                        yield Message::Main(MainMessage::ScreenCaptureStopped);
-                        return;
-                    }
+                        Ok(handle) => handle,
+                        Err(e) => {
+                            yield Message::Main(MainMessage::ApiError(
+                                RenderableError::UnknownError(format!(
+                                    "Failed to produce screen track: {e}"
+                                )),
+                            ));
+                            yield Message::Main(MainMessage::ScreenCaptureStopped);
+                            return;
+                        }
+                    };
+                    yield Message::Main(MainMessage::ScreenTrackStarted(screen_track.clone()));
                     let mut rx = rx;
                     let mut tick_rx = tick_rx;
                     loop {
@@ -771,7 +821,7 @@ impl MainView {
                                     Some(p) => {
                                         let payload = codec::prepend_codec_byte(p.codec, &p.data);
                                         if let Err(e) = pulse.send_media(
-                                            pulse_api::MediaHint::ScreenVideo,
+                                            &screen_track,
                                             p.capture_ts_us,
                                             p.keyframe,
                                             &payload,
@@ -811,9 +861,11 @@ impl MainView {
                     }
                 }
                 if was_sharing || had_track_flag {
-                    if let Some(pulse) = self.pulse_client.clone() {
+                    if let Some(pulse) = self.pulse_client.clone()
+                        && let Some(handle) = self.screen_track.take()
+                    {
                         return Task::perform(
-                            async move { pulse.stop_producing("screen".to_string()).await },
+                            async move { pulse.stop_producing(handle).await },
                             |result| match result {
                                 Ok(()) => Message::Main(MainMessage::DismissError),
                                 Err(e) => Message::Main(MainMessage::ApiError(
@@ -862,6 +914,9 @@ impl MainView {
             }
             MainMessage::PulseDisconnected => {
                 self.pulse_client = None;
+                self.mic_track = None;
+                self.camera_track = None;
+                self.screen_track = None;
                 self.audio.stop_playback();
                 self.audio.stop_capture();
                 if let Some(session) = self.screen_capture_session.take() {
@@ -889,24 +944,26 @@ impl MainView {
             MainMessage::PulseEvent(event) => {
                 tracing::info!("Received Pulse event: {:?}", event);
                 match event {
-                    PulseEvent::Disconnected { reconnect } => {
-                        if reconnect.is_none() {
-                            self.pulse_client = None;
-                            self.audio.stop_playback();
-                            self.audio.stop_capture();
-                            if let Some(session) = self.screen_capture_session.take() {
-                                session.stop();
-                            }
-                            self.screen_capture_preview = None;
-                            self.screen_keyframe_request = None;
-                            self.clear_screen_view_state();
-                            self.available_screen_tracks.clear();
-                            self.video_frames.clear();
-                            self.video_handles.clear();
-                            self.video_decode_tx.clear();
-                            self.current_call = None;
-                            self.current_call_id = None;
+                    PulseEvent::Disconnected { reason } => {
+                        tracing::warn!("Voice disconnected: {reason}");
+                        self.pulse_client = None;
+                        self.mic_track = None;
+                        self.camera_track = None;
+                        self.screen_track = None;
+                        self.audio.stop_playback();
+                        self.audio.stop_capture();
+                        if let Some(session) = self.screen_capture_session.take() {
+                            session.stop();
                         }
+                        self.screen_capture_preview = None;
+                        self.screen_keyframe_request = None;
+                        self.clear_screen_view_state();
+                        self.available_screen_tracks.clear();
+                        self.video_frames.clear();
+                        self.video_handles.clear();
+                        self.video_decode_tx.clear();
+                        self.current_call = None;
+                        self.current_call_id = None;
                     }
                     PulseEvent::TrackAvailable(track) => {
                         if let Some(ref pulse) = self.pulse_client {
@@ -1010,11 +1067,19 @@ impl MainView {
                         }
                         tracing::info!("Track unavailable: {id}");
                     }
-                    PulseEvent::KeyFrameRequested(_track_id) => {
+                    PulseEvent::KeyFrameRequested(media_hint) => {
                         // we need to send an IDR
-                        if let Some(ref flag) = self.screen_keyframe_request {
+                        if matches!(media_hint, MediaHint::ScreenVideo)
+                            && let Some(ref flag) = self.screen_keyframe_request
+                        {
                             flag.store(true, std::sync::atomic::Ordering::Relaxed);
                         }
+                    }
+                    PulseEvent::Error(e) => {
+                        tracing::warn!("Voice client error: {e}");
+                    }
+                    PulseEvent::Reconnecting { attempt } => {
+                        tracing::info!("Voice connection lost, reconnecting (attempt {attempt})");
                     }
                     _ => {}
                 }
@@ -1104,7 +1169,8 @@ impl MainView {
                     tracing::debug!("video decode ({track_id}): {e}");
                 }
             },
-            MainMessage::MicEnabled => {
+            MainMessage::MicEnabled(handle) => {
+                self.mic_track = Some(handle.clone());
                 if self.pulse_client.is_some() {
                     match self.audio.start_capture() {
                         Ok(Some(rx)) => {
@@ -1115,7 +1181,7 @@ impl MainView {
                                 while let Some(packet) = rx.recv().await {
 
                                     if let Err(e) = pulse.send_media(
-                                        pulse_api::MediaHint::Audio,
+                                        &handle,
                                         codec::now_micros(),
                                         true,
                                         &packet,
@@ -1134,6 +1200,12 @@ impl MainView {
                         }
                     }
                 }
+            }
+            MainMessage::CameraTrackStarted(handle) => {
+                self.camera_track = Some(handle);
+            }
+            MainMessage::ScreenTrackStarted(handle) => {
+                self.screen_track = Some(handle);
             }
             MainMessage::ToggleEmojiPicker => self.emoji_picker_open = !self.emoji_picker_open,
             MainMessage::EmojiPickerDismiss => self.emoji_picker_open = false,
@@ -1374,6 +1446,22 @@ impl MainView {
         Task::none()
     }
 
+    fn handle_lifecycle_event(&mut self, event: LifecycleEvent) -> Task<Message> {
+        match event {
+            LifecycleEvent::Disconnected => {
+                self.error = Some(RenderableError::NetworkError);
+            }
+            LifecycleEvent::Reconnected => {
+                self.error = None;
+            }
+            LifecycleEvent::ReconnectionFailed { .. } => {
+                self.error = Some(RenderableError::NetworkError);
+            }
+            LifecycleEvent::Connected | LifecycleEvent::Reconnecting { .. } => {}
+        }
+        Task::none()
+    }
+
     fn handle_server_event(&mut self, event: Event) -> Task<Message> {
         match event {
             Event::NewMessage(e) => {
@@ -1466,15 +1554,6 @@ impl MainView {
             }
             Event::MemberLeft(_e) => {
                 // TODO: update group channel membership
-            }
-            Event::Disconnected => {
-                self.error = Some(RenderableError::NetworkError);
-            }
-            Event::Reconnected => {
-                self.error = None;
-            }
-            Event::ReconnectionFailed { .. } => {
-                self.error = Some(RenderableError::NetworkError);
             }
             Event::UserJoinedCall {
                 call_id,
@@ -1575,6 +1654,7 @@ impl MainView {
                                 session_id: token_info.session_id,
                                 session_token: token_info.token,
                                 call_id: token_info.call_id.clone(),
+                                identity: client.call_identity().await,
                             },
                         )
                         .await
@@ -1606,53 +1686,11 @@ impl MainView {
             Event::ContactStateChanged { user_id, state } => {
                 if matches!(state, harmony_api::RelationshipState::None) {
                     self.contacts.retain(|c| c.profile.id != user_id);
-                } else if let harmony_api::RelationshipState::PendingKeyExchange {
-                    public_key: Some(public_key),
-                    encapsulated: Some(encapsulated),
-                } = state
-                {
-                    let client = self.api.clone();
-                    let uid = user_id.clone();
-                    return Task::perform(
-                        async move {
-                            client
-                                .add_contact(ContactAction::Finalize {
-                                    user_id: uid,
-                                    public_key,
-                                    encapsulated,
-                                })
-                                .await
-                        },
-                        |result| match result {
-                            Ok(contact) => Message::Main(MainMessage::ContactAccepted(contact)),
-                            Err(e) => Message::Main(MainMessage::ApiError(e)),
-                        },
-                    );
-                } else if let harmony_api::RelationshipState::Established {
-                    public_key,
-                    encapsulated,
-                    key_id,
-                } = state
-                {
-                    let client = self.api.clone();
-                    let uid = user_id.clone();
-                    return Task::perform(
-                        async move {
-                            client
-                                .add_contact(ContactAction::HandleEstablished {
-                                    user_id: uid,
-                                    public_key,
-                                    encapsulated,
-                                    key_id,
-                                })
-                                .await
-                        },
-                        |result| match result {
-                            Ok(contact) => Message::Main(MainMessage::ContactAccepted(contact)),
-                            Err(e) => Message::Main(MainMessage::ApiError(e)),
-                        },
-                    );
-                } else {
+                } else if !matches!(
+                    state,
+                    harmony_api::RelationshipState::PendingKeyExchange { .. }
+                        | harmony_api::RelationshipState::Established { .. }
+                ) {
                     let new_status = crate::api::map_relationship(&state);
                     if let Some(c) = self.contacts.iter_mut().find(|c| c.profile.id == user_id) {
                         c.status = new_status;
@@ -1672,7 +1710,6 @@ impl MainView {
                     }
                 }
             }
-            _ => {}
         }
         Task::none()
     }

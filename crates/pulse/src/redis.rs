@@ -5,7 +5,7 @@ use std::{
 
 use common::{NodeDescription, NodeEvent, NodeEventKind};
 use futures::StreamExt;
-use pulse_types::{MediaHint, WtMessageS2C};
+use pulse_types::{MediaHint, ControlS2C};
 use redis::{AsyncCommands, Client, aio::MultiplexedConnection};
 use tokio::{task, time};
 use ulid::Ulid;
@@ -117,7 +117,7 @@ pub fn listen() {
                                             crate::wt::GLOBAL_SESSIONS.get(member_key)
                                         {
                                             let _ = member_session.message_tx.send(
-                                                WtMessageS2C::TrackUnavailable {
+                                                ControlS2C::TrackUnavailable {
                                                     id: track.id.clone(),
                                                 },
                                             );
@@ -136,7 +136,7 @@ pub fn listen() {
                     if let Some(session) = crate::wt::GLOBAL_SESSIONS.get(&id) {
                         let _ = session
                             .message_tx
-                            .send(WtMessageS2C::Disconnected { reconnect: None });
+                            .send(ControlS2C::Disconnected { reconnect: None });
 
                         session.close("User disconnected by server");
                     }
@@ -152,7 +152,7 @@ pub fn listen() {
                     ..
                 } => {
                     if let Some(session) = crate::wt::GLOBAL_SESSIONS.get(&id) {
-                        let _ = session.message_tx.send(WtMessageS2C::Disconnected {
+                        let _ = session.message_tx.send(ControlS2C::Disconnected {
                             reconnect: Some((target_server, target_token)),
                         });
 
@@ -170,7 +170,7 @@ pub fn listen() {
                             if let Some(session) = crate::wt::GLOBAL_SESSIONS.get(member_key) {
                                 let _ = session
                                     .message_tx
-                                    .send(WtMessageS2C::Disconnected { reconnect: None });
+                                    .send(ControlS2C::Disconnected { reconnect: None });
 
                                 session.close("Call ended");
                             }

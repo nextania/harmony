@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::broadcast::{self, error::RecvError};
 
 use crate::error::HarmonyResult;
 use crate::models::*;
@@ -8,7 +8,7 @@ use crate::models::*;
 #[derive(uniffi::Object)]
 pub struct HarmonyClient {
     inner: Arc<harmony_api::HarmonyClient>,
-    recv: Arc<Mutex<UnboundedReceiver<harmony_api::Event>>>,
+    recv: Arc<Mutex<broadcast::Receiver<harmony_api::ClientEvent>>>,
 }
 
 #[uniffi::export]
@@ -24,14 +24,18 @@ impl HarmonyClient {
     }
 
     pub async fn next_event(&self) -> HarmonyResult<Event> {
-        let event = self
-            .recv
-            .lock()
-            .await
-            .recv()
-            .await
-            .ok_or(crate::HarmonyBindingError::NotConnected)?;
-        Ok(event.into())
+        let mut recv = self.recv.lock().await;
+        loop {
+            match recv.recv().await {
+                Ok(event) => return Ok(event.into()),
+                Err(RecvError::Lagged(missed)) => {
+                    tracing::warn!("event receiver lagged; {missed} events dropped");
+                }
+                Err(RecvError::Closed) => {
+                    return Err(crate::HarmonyBindingError::NotConnected);
+                }
+            }
+        }
     }
 
     pub async fn get_channels(&self) -> HarmonyResult<Vec<Channel>> {
@@ -187,5 +191,118 @@ impl HarmonyClient {
 
     pub fn disconnect(&self) -> HarmonyResult<()> {
         Ok(self.inner.disconnect()?)
+    }
+
+    pub async fn create_private_channel(&self, target_id: String) -> HarmonyResult<Channel> {
+        Ok(self.inner.create_private_channel(&target_id).await?.into())
+    }
+
+    pub async fn create_group_channel(
+        &self,
+        metadata: Vec<u8>,
+        encryption_hint: EncryptionHint,
+    ) -> HarmonyResult<Channel> {
+        Ok(self
+            .inner
+            .create_group_channel(metadata, encryption_hint.into())
+            .await?
+            .into())
+    }
+
+    pub async fn edit_channel(
+        &self,
+        channel_id: String,
+        metadata: Vec<u8>,
+    ) -> HarmonyResult<Channel> {
+        Ok(self.inner.edit_channel(&channel_id, metadata).await?.into())
+    }
+
+    pub async fn delete_channel(&self, channel_id: String) -> HarmonyResult<()> {
+        self.inner.delete_channel(&channel_id).await?;
+        Ok(())
+    }
+
+    pub async fn leave_channel(&self, channel_id: String) -> HarmonyResult<()> {
+        self.inner.leave_channel(&channel_id).await?;
+        Ok(())
+    }
+
+    pub async fn edit_message(
+        &self,
+        message_id: String,
+        content: String,
+    ) -> HarmonyResult<Message> {
+        Ok(self
+            .inner
+            .edit_message(&message_id, content.into_bytes())
+            .await?
+            .into())
+    }
+
+    pub async fn delete_message(&self, message_id: String) -> HarmonyResult<()> {
+        self.inner.delete_message(&message_id).await?;
+        Ok(())
+    }
+
+    pub async fn accept_invite(&self, code: String) -> HarmonyResult<AcceptInviteResult> {
+        let (pending, channel_id) = self.inner.accept_invite(&code).await?;
+        Ok(AcceptInviteResult {
+            pending,
+            channel_id,
+        })
+    }
+
+    pub async fn set_key_package(
+        &self,
+        encrypted_keys: Vec<u8>,
+        expected_generation: u64,
+    ) -> HarmonyResult<u64> {
+        Ok(self
+            .inner
+            .set_key_package(encrypted_keys, expected_generation)
+            .await?)
+    }
+
+    pub async fn get_user(&self, user_id: String) -> HarmonyResult<UserProfile> {
+        Ok(self.inner.get_user(&user_id).await?.into())
+    }
+
+    pub async fn get_current_user(&self) -> HarmonyResult<CurrentUserResponse> {
+        Ok(self.inner.get_current_user().await?.into())
+    }
+
+    pub async fn add_contact(&self, stage: AddContactStage) -> HarmonyResult<AddContactResponse> {
+        Ok(self.inner.add_contact(stage.into()).await?.into())
+    }
+
+    pub async fn remove_contact(&self, user_id: String) -> HarmonyResult<()> {
+        self.inner.remove_contact(&user_id).await?;
+        Ok(())
+    }
+
+    pub async fn get_contacts(&self) -> HarmonyResult<Vec<ContactExtended>> {
+        let contacts = self
+            .inner
+            .get_contacts()
+            .await?
+            .into_iter()
+            .map(Into::into)
+            .collect();
+        Ok(contacts)
+    }
+
+    pub async fn block_contact(&self, user_id: String) -> HarmonyResult<()> {
+        self.inner.block_contact(&user_id).await?;
+        Ok(())
+    }
+
+    pub async fn unblock_contact(&self, user_id: String) -> HarmonyResult<ContactExtended> {
+        Ok(self.inner.unblock_contact(&user_id).await?.into())
+    }
+}
+
+impl HarmonyClient {
+    pub(crate) fn inner(&self) -> Arc<harmony_api::HarmonyClient> {
+        self.inner.clone()
     }
 }

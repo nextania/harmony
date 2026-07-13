@@ -4,7 +4,7 @@ use common::{NodeEvent, NodeEventKind, SessionData};
 use dashmap::DashMap;
 use lazy_static::lazy_static;
 use moq_native::moq_net::{self, BroadcastProducer, Origin, OriginProducer, Track};
-use pulse_types::{MediaHint, WtMessageC2S, WtMessageS2C, track_names};
+use pulse_types::{ControlC2S, ControlS2C, MediaHint, decode_control, encode_control, track_names};
 use redis::AsyncCommands;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -20,8 +20,7 @@ use crate::wt::call::{Call, MlsState, PendingProposal};
 
 #[derive(Clone, Debug)]
 pub struct TrackInfo {
-    pub id: String,              // global unique track ID
-    pub client_track_id: String, // client-provided track ID
+    pub id: String, // global unique track ID
     pub media_hint: MediaHint,
     pub session_id: String,
     pub producer_session: SessionState,
@@ -34,7 +33,7 @@ pub struct SessionState {
     pub call_id: String,
     pub session_token: String,
 
-    pub message_tx: mpsc::UnboundedSender<WtMessageS2C>,
+    pub message_tx: mpsc::UnboundedSender<ControlS2C>,
 
     pub close_tx: mpsc::UnboundedSender<()>,
     pub can_listen: Arc<AtomicBool>,
@@ -145,7 +144,7 @@ async fn handle_request(request: moq_native::Request) -> anyhow::Result<()> {
     CONNECTIONS_ACTIVE.add(1, &[]);
 
     // persistent s2c track
-    let (message_tx, message_rx) = mpsc::unbounded_channel::<WtMessageS2C>();
+    let (message_tx, message_rx) = mpsc::unbounded_channel::<ControlS2C>();
     let (close_tx, mut close_rx) = mpsc::unbounded_channel::<()>();
     let s2c_path = broadcast_path(&call_id, &session_id, track_names::CTL_S2C);
     spawn_s2c_writer(s2c_path, message_rx);
@@ -170,7 +169,7 @@ async fn handle_request(request: moq_native::Request) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn spawn_s2c_writer(path: String, mut rx: mpsc::UnboundedReceiver<WtMessageS2C>) {
+fn spawn_s2c_writer(path: String, mut rx: mpsc::UnboundedReceiver<ControlS2C>) {
     task::spawn(async move {
         let mut broadcast: BroadcastProducer = match GLOBAL_ORIGIN.create_broadcast(path.as_str()) {
             Some(b) => b,
@@ -186,18 +185,15 @@ fn spawn_s2c_writer(path: String, mut rx: mpsc::UnboundedReceiver<WtMessageS2C>)
                 return;
             }
         };
-        let mut group = match track.append_group() {
-            Ok(g) => g,
-            Err(e) => {
-                error!("Failed to open s2c control group: {:?}", e);
-                return;
-            }
-        };
 
+        // Each control message is its own single-frame MoQ group. Appending to
+        // one long-lived group would grow unbounded over a long call and make a
+        // re-subscriber replay the whole control history; per-message groups let
+        // the relay evict old ones.
         while let Some(message) = rx.recv().await {
-            match rkyv::to_bytes::<rkyv::rancor::Error>(&message) {
+            match encode_control(&message) {
                 Ok(bytes) => {
-                    if let Err(e) = group.write_frame(bytes.into_vec()) {
+                    if let Err(e) = track.write_frame(bytes) {
                         warn!("Failed to write s2c control frame: {:?}", e);
                         break;
                     }
@@ -213,7 +209,7 @@ async fn run_control(
     unique_id: &str,
     token: &str,
     session_data: &SessionData,
-    message_tx: mpsc::UnboundedSender<WtMessageS2C>,
+    message_tx: mpsc::UnboundedSender<ControlS2C>,
     close_tx: mpsc::UnboundedSender<()>,
 ) -> anyhow::Result<()> {
     let origin = GLOBAL_ORIGIN.consume();
@@ -226,18 +222,17 @@ async fn run_control(
     let mut joined = false;
     while let Some(mut group) = ctl.next_group().await? {
         while let Some(frame) = group.read_frame().await? {
-            let message: WtMessageC2S =
-                match rkyv::api::high::from_bytes::<_, rkyv::rancor::Error>(&frame) {
-                    Ok(m) => m,
-                    Err(e) => {
-                        warn!("Failed to decode control frame: {:?}", e);
-                        continue;
-                    }
-                };
+            let message: ControlC2S = match decode_control(&frame) {
+                Ok(m) => m,
+                Err(e) => {
+                    warn!("Failed to decode control frame: {:?}", e);
+                    continue;
+                }
+            };
 
             if !joined {
                 // the first message must be Join
-                let WtMessageC2S::Join { key_package } = message else {
+                let ControlC2S::Join { key_package } = message else {
                     return Err(anyhow::anyhow!("first control frame was not Join"));
                 };
                 handle_join(
@@ -280,7 +275,7 @@ async fn handle_join(
     token: &str,
     session_data: &SessionData,
     key_package: Vec<u8>,
-    message_tx: mpsc::UnboundedSender<WtMessageS2C>,
+    message_tx: mpsc::UnboundedSender<ControlS2C>,
     close_tx: mpsc::UnboundedSender<()>,
 ) -> anyhow::Result<()> {
     // reconnection
@@ -288,7 +283,7 @@ async fn handle_join(
         GLOBAL_UNIQUE_SESSIONS.remove(&old.id);
         let _ = old
             .message_tx
-            .send(WtMessageS2C::Disconnected { reconnect: None });
+            .send(ControlS2C::Disconnected { reconnect: None });
         old.close("replaced by reconnection");
     }
 
@@ -331,7 +326,7 @@ async fn handle_join(
     let available_tracks = call.get_available_tracks(&state.session_id);
     drop(call);
 
-    let _ = message_tx.send(WtMessageS2C::Connected {
+    let _ = message_tx.send(ControlS2C::Connected {
         id: state.session_id.clone(),
         available_tracks,
     });
@@ -343,7 +338,7 @@ async fn handle_join(
         let external_sender_signature_key = crate::environment::EXTERNAL_SENDER
             .signature_public_key()
             .clone();
-        let _ = message_tx.send(WtMessageS2C::InitializeGroup {
+        let _ = message_tx.send(ControlS2C::InitializeGroup {
             external_sender_credential,
             external_sender_signature_key,
         });
@@ -375,7 +370,7 @@ async fn handle_join(
     Ok(())
 }
 
-async fn dispatch_message(unique_id: &str, message: WtMessageC2S) -> anyhow::Result<()> {
+async fn dispatch_message(unique_id: &str, message: ControlC2S) -> anyhow::Result<()> {
     let Some(state) = GLOBAL_UNIQUE_SESSIONS
         .get(unique_id)
         .map(|s| s.value().clone())
@@ -386,19 +381,25 @@ async fn dispatch_message(unique_id: &str, message: WtMessageC2S) -> anyhow::Res
     };
 
     match message {
-        WtMessageC2S::Join { .. } => warn!("Duplicate Join ignored"),
-        WtMessageC2S::StartProduce { id, media_hint } => {
-            handle_start_produce(id, media_hint, &state).await;
+        ControlC2S::Join { .. } => warn!("Duplicate Join ignored"),
+        ControlC2S::StartProduce {
+            request_id,
+            media_hint,
+        } => {
+            handle_start_produce(request_id, media_hint, &state).await;
         }
-        WtMessageC2S::StopProduce { id } => handle_stop_produce(id, &state),
-        WtMessageC2S::MlsCommit {
+        ControlC2S::StopProduce {
+            request_id,
+            media_hint,
+        } => handle_stop_produce(request_id, media_hint, &state),
+        ControlC2S::MlsCommit {
             commit_data,
             epoch,
             welcome_data,
         } => handle_mls_commit(commit_data, epoch, welcome_data, &state).await,
-        WtMessageC2S::CommitAck { epoch } => handle_commit_ack(epoch, &state).await,
-        WtMessageC2S::RequestKeyFrame { track_id } => handle_request_keyframe(track_id, &state),
-        WtMessageC2S::ReceiverReport {
+        ControlC2S::CommitAck { epoch } => handle_commit_ack(epoch, &state).await,
+        ControlC2S::RequestKeyFrame { track_id } => handle_request_keyframe(track_id, &state),
+        ControlC2S::ReceiverReport {
             track_id,
             lost,
             received,
@@ -408,11 +409,7 @@ async fn dispatch_message(unique_id: &str, message: WtMessageC2S) -> anyhow::Res
     Ok(())
 }
 
-async fn handle_start_produce(
-    client_track_id: String,
-    media_hint: MediaHint,
-    state: &SessionState,
-) {
+async fn handle_start_produce(request_id: u64, media_hint: MediaHint, state: &SessionState) {
     let allowed = match media_hint {
         MediaHint::Audio => state.can_speak.load(Ordering::SeqCst),
         MediaHint::Video => state.can_video.load(Ordering::SeqCst),
@@ -420,19 +417,28 @@ async fn handle_start_produce(
     };
     if !allowed {
         warn!("User lacks permission to produce {:?}", media_hint);
+        let _ = state.message_tx.send(ControlS2C::ProduceFailed {
+            request_id,
+            reason: format!("missing permission to produce {media_hint:?}"),
+        });
         return;
     }
-    for track in state.producers.iter() {
-        if std::mem::discriminant(&track.media_hint) == std::mem::discriminant(&media_hint) {
-            warn!("Already producing track of type {:?}", media_hint);
-            return;
-        }
+    if state
+        .producers
+        .iter()
+        .any(|track| track.media_hint == media_hint)
+    {
+        warn!("Already producing track of type {:?}", media_hint);
+        let _ = state.message_tx.send(ControlS2C::ProduceFailed {
+            request_id,
+            reason: format!("already producing a {media_hint:?} track"),
+        });
+        return;
     }
 
     let global_track_id = Ulid::new().to_string();
     let track_info = TrackInfo {
         id: global_track_id.clone(),
-        client_track_id: client_track_id.clone(),
         media_hint: media_hint.clone(),
         session_id: state.session_id.clone(),
         producer_session: state.clone(),
@@ -444,26 +450,33 @@ async fn handle_start_produce(
     if let Some(call) = GLOBAL_CALLS.get(&state.call_id) {
         call.start_producing(&state.session_id, track_info).await;
     }
-    let _ = state.message_tx.send(WtMessageS2C::ProduceStarted {
-        id: client_track_id,
+    let _ = state.message_tx.send(ControlS2C::ProduceStarted {
+        request_id,
+        track_id: global_track_id,
     });
 }
 
-fn handle_stop_produce(client_track_id: String, state: &SessionState) {
-    let Some(call) = GLOBAL_CALLS.get(&state.call_id) else {
-        return;
-    };
-    let Some(global_track_id) = call.get_mapped_track_id(&client_track_id, &state.session_id)
+fn handle_stop_produce(request_id: u64, media_hint: MediaHint, state: &SessionState) {
+    let Some(global_track_id) = state
+        .producers
+        .iter()
+        .find(|track| track.media_hint == media_hint)
+        .map(|track| track.id.clone())
     else {
-        warn!("StopProduce for unknown track {}", client_track_id);
+        warn!("StopProduce for track type {:?} not produced", media_hint);
+        let _ = state.message_tx.send(ControlS2C::ProduceFailed {
+            request_id,
+            reason: format!("not producing a {media_hint:?} track"),
+        });
         return;
     };
-    call.stop_producing(&state.session_id, &global_track_id);
-    drop(call);
+    if let Some(call) = GLOBAL_CALLS.get(&state.call_id) {
+        call.stop_producing(&state.session_id, &global_track_id);
+    }
     state.producers.remove(&global_track_id);
-    let _ = state.message_tx.send(WtMessageS2C::ProduceStopped {
-        id: client_track_id,
-    });
+    let _ = state
+        .message_tx
+        .send(ControlS2C::ProduceStopped { request_id });
 }
 
 fn handle_request_keyframe(track_id: String, state: &SessionState) {
@@ -474,8 +487,8 @@ fn handle_request_keyframe(track_id: String, state: &SessionState) {
         let _ = track
             .producer_session
             .message_tx
-            .send(WtMessageS2C::KeyFrameRequested {
-                track_id: track.client_track_id.clone(),
+            .send(ControlS2C::KeyFrameRequested {
+                track_id: track.id.clone(),
             });
     }
 }
@@ -494,8 +507,8 @@ fn handle_receiver_report(
         let _ = track
             .producer_session
             .message_tx
-            .send(WtMessageS2C::ReceiverReport {
-                track_id: track.client_track_id.clone(),
+            .send(ControlS2C::ReceiverReport {
+                track_id: track.id.clone(),
                 lost,
                 received,
                 jitter_ms,
@@ -508,7 +521,7 @@ async fn broadcast_proposals(call: &Call) {
     if let Some((proposals, recipients, epoch)) = proposals {
         for recipient in recipients {
             if let Some(session) = GLOBAL_SESSIONS.get(&recipient) {
-                let _ = session.message_tx.send(WtMessageS2C::MlsProposals {
+                let _ = session.message_tx.send(ControlS2C::MlsProposals {
                     proposals: proposals.clone(),
                 });
             }
@@ -557,7 +570,7 @@ async fn handle_mls_commit(
 
     for recipient in mls_state.full_members.iter() {
         if let Some(session) = GLOBAL_SESSIONS.get(recipient) {
-            let _ = session.message_tx.send(WtMessageS2C::MlsCommit {
+            let _ = session.message_tx.send(ControlS2C::MlsCommit {
                 commit_data: commit_data.clone(),
                 epoch,
                 welcome_data: None,
@@ -566,7 +579,7 @@ async fn handle_mls_commit(
     }
     for new_member in new_members.iter() {
         if let Some(session) = GLOBAL_SESSIONS.get(new_member) {
-            let _ = session.message_tx.send(WtMessageS2C::MlsCommit {
+            let _ = session.message_tx.send(ControlS2C::MlsCommit {
                 commit_data: commit_data.clone(),
                 epoch,
                 welcome_data: welcome_data.clone(),
@@ -590,7 +603,7 @@ async fn handle_mls_commit(
                     if let Some(session) = GLOBAL_SESSIONS.get(recipient) {
                         let _ = session
                             .message_tx
-                            .send(WtMessageS2C::EpochReady { epoch: new_epoch });
+                            .send(ControlS2C::EpochReady { epoch: new_epoch });
                     }
                 }
                 info!("Advanced to epoch {} for call {}", new_epoch, call_id);
@@ -609,7 +622,7 @@ async fn handle_commit_ack(epoch: u64, state: &SessionState) {
                 if let Some(session) = GLOBAL_SESSIONS.get(recipient) {
                     let _ = session
                         .message_tx
-                        .send(WtMessageS2C::EpochReady { epoch: new_epoch });
+                        .send(ControlS2C::EpochReady { epoch: new_epoch });
                 }
             }
         }

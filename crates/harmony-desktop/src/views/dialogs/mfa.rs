@@ -76,8 +76,14 @@ impl MfaView {
                         match result {
                             Ok((client, user, convs, mut stream)) => {
                                 yield Message::LoginFinished((client, user, convs));
-                                while let Some(event) = stream.recv().await {
-                                    yield Message::Main(MainMessage::ServerEvent(event));
+                                loop {
+                                    match stream.recv().await {
+                                        Ok(event) => yield Message::Main(MainMessage::ServerEvent(event)),
+                                        Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
+                                            tracing::warn!("event stream lagged; {missed} events dropped");
+                                        }
+                                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                                    }
                                 }
                             }
                             Err(e) => yield Message::Mfa(MfaMessage::Failed(e)),

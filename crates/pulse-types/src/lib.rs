@@ -1,8 +1,8 @@
 use std::str::FromStr;
 
-use rkyv::Archive;
 use serde::Deserialize;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
 pub enum Region {
@@ -36,7 +36,7 @@ impl FromStr for Region {
     }
 }
 
-#[derive(Archive, Clone, Debug, rkyv::Deserialize, rkyv::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub enum MediaHint {
     Audio,
     Video,
@@ -44,17 +44,19 @@ pub enum MediaHint {
     ScreenVideo,
 }
 
-#[derive(Archive, Clone, Debug, rkyv::Deserialize, rkyv::Serialize)]
-pub enum WtMessageC2S {
+/// Client-to-server control messages.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub enum ControlC2S {
     Join {
         key_package: Vec<u8>, // Serialized MLS KeyPackage
     },
     StartProduce {
-        id: String,
+        request_id: u64,
         media_hint: MediaHint,
     },
     StopProduce {
-        id: String,
+        request_id: u64,
+        media_hint: MediaHint,
     },
     // MLS coordination messages
     MlsCommit {
@@ -77,7 +79,7 @@ pub enum WtMessageC2S {
     },
 }
 
-#[derive(Archive, Clone, Debug, rkyv::Deserialize, rkyv::Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct AvailableTrack {
     pub id: String,
     pub media_hint: MediaHint,
@@ -85,8 +87,9 @@ pub struct AvailableTrack {
     pub session_id: String,
 }
 
-#[derive(Archive, Clone, Debug, rkyv::Deserialize, rkyv::Serialize)]
-pub enum WtMessageS2C {
+/// Server-to-client control messages.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub enum ControlS2C {
     Connected {
         id: String,
         available_tracks: Vec<AvailableTrack>,
@@ -95,10 +98,15 @@ pub enum WtMessageS2C {
         reconnect: Option<(String, String)>, // (new_server_address, new_token)
     },
     ProduceStarted {
-        id: String,
+        request_id: u64,
+        track_id: String,
     },
     ProduceStopped {
-        id: String,
+        request_id: u64,
+    },
+    ProduceFailed {
+        request_id: u64,
+        reason: String,
     },
     TrackAvailable {
         track: AvailableTrack,
@@ -134,16 +142,46 @@ pub enum WtMessageS2C {
     },
 }
 
-// TODO:
-pub const MEDIA_FRAME_HEADER_LEN: usize = 8;
-
-pub fn encode_media_header(capture_ts_us: u64) -> [u8; MEDIA_FRAME_HEADER_LEN] {
-    capture_ts_us.to_le_bytes()
+pub fn encode_control<T: Serialize>(
+    message: &T,
+) -> Result<Vec<u8>, ciborium::ser::Error<std::io::Error>> {
+    let mut buf = Vec::new();
+    ciborium::into_writer(message, &mut buf)?;
+    Ok(buf)
 }
 
-pub fn decode_media_header(buf: &[u8]) -> Option<u64> {
-    let bytes: [u8; MEDIA_FRAME_HEADER_LEN] = buf.get(..MEDIA_FRAME_HEADER_LEN)?.try_into().ok()?;
-    Some(u64::from_le_bytes(bytes))
+pub fn decode_control<T: DeserializeOwned>(
+    bytes: &[u8],
+) -> Result<T, ciborium::de::Error<std::io::Error>> {
+    ciborium::from_reader(bytes)
+}
+
+// TODO: optimize
+/// Plaintext header prepended to every encrypted media frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MediaHeader {
+    pub epoch: u64,
+    pub sequence: u64,
+    pub capture_ts_us: u64,
+}
+
+pub const MEDIA_FRAME_HEADER_LEN: usize = 24;
+
+pub fn encode_media_header(header: &MediaHeader) -> [u8; MEDIA_FRAME_HEADER_LEN] {
+    let mut out = [0u8; MEDIA_FRAME_HEADER_LEN];
+    out[0..8].copy_from_slice(&header.epoch.to_le_bytes());
+    out[8..16].copy_from_slice(&header.sequence.to_le_bytes());
+    out[16..24].copy_from_slice(&header.capture_ts_us.to_le_bytes());
+    out
+}
+
+pub fn decode_media_header(buf: &[u8]) -> Option<MediaHeader> {
+    let bytes = buf.get(..MEDIA_FRAME_HEADER_LEN)?;
+    Some(MediaHeader {
+        epoch: u64::from_le_bytes(bytes[0..8].try_into().ok()?),
+        sequence: u64::from_le_bytes(bytes[8..16].try_into().ok()?),
+        capture_ts_us: u64::from_le_bytes(bytes[16..24].try_into().ok()?),
+    })
 }
 
 pub mod track_names {

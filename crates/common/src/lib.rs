@@ -2,7 +2,6 @@ pub mod telemetry;
 
 use pulse_types::Region;
 use redis::{FromRedisValue, ToRedisArgs, ToSingleRedisArg};
-use rmp_serde::{Deserializer, Serializer};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -116,13 +115,14 @@ impl FromRedisValue for SessionData {
     }
 }
 
-pub fn serialize<T: Serialize>(value: &T) -> Result<Vec<u8>, rmp_serde::encode::Error> {
+pub fn serialize<T: Serialize>(value: &T) -> Result<Vec<u8>, ciborium::ser::Error<std::io::Error>> {
     let mut buf = Vec::new();
-    value.serialize(&mut Serializer::new(&mut buf).with_struct_map())?;
+    ciborium::into_writer(value, &mut buf)?;
     Ok(buf)
 }
 
-pub fn deserialize<T: for<'a> Deserialize<'a>>(buf: &[u8]) -> Result<T, rmp_serde::decode::Error> {
-    let mut deserializer = Deserializer::new(buf);
-    Deserialize::deserialize(&mut deserializer)
+pub fn deserialize<T: for<'a> Deserialize<'a>>(
+    buf: &[u8],
+) -> Result<T, ciborium::de::Error<std::io::Error>> {
+    ciborium::from_reader(buf)
 }

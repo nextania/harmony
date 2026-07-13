@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
 
 pub const MLKEM768_EK_BYTES: usize = 1184;
 pub const MLKEM768_CT_BYTES: usize = 1088;
@@ -20,17 +21,26 @@ pub struct Presence {
 
 /// Combined X25519 + ML-KEM-768 public key for hybrid post-quantum key exchange.
 /// Layout: [ x25519_pk (32 bytes) | mlkem_ek (1184 bytes) ]
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct HybridPublicKey {
+    pub x25519: [u8; 32],
+    #[serde_as(as = "[_; 1184]")]
+    pub mlkem: [u8; 1184],
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct UnifiedPublicKey {
-    pub x25519: [u8; 32],
-    pub mlkem: Vec<u8>,
+    pub hybrid: HybridPublicKey,
+    pub ed25519: [u8; 32],
 }
 
-// TODO: we're using Vec here because serde doesn't support large fixed arrays
 /// Raw ML-KEM-768 ciphertext (1088 bytes) produced during encapsulation.
-pub type Encapsulated = Vec<u8>;
+pub type Encapsulated = [u8; 1088];
 
+#[serde_as]
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", tag = "state")]
 pub enum RelationshipState {
@@ -40,10 +50,12 @@ pub enum RelationshipState {
     },
     PendingKeyExchange {
         public_key: Option<UnifiedPublicKey>,
+        #[serde_as(as = "Option<[_; 1088]>")]
         encapsulated: Option<Encapsulated>,
     },
     Established {
         public_key: UnifiedPublicKey,
+        #[serde_as(as = "[_; 1088]")]
         encapsulated: Encapsulated,
         key_id: String,
     },
@@ -77,6 +89,7 @@ pub struct UserProfile {
 pub struct CurrentUserResponse {
     pub id: String,
     pub encrypted_keys: Option<Vec<u8>>,
+    pub keystore_generation: u64,
     pub presence: Presence,
 }
 
@@ -99,14 +112,17 @@ pub struct GetUserResponse {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetKeyPackageMethod {
-    /// TODO: race condition
     pub encrypted_keys: Vec<u8>,
+    pub expected_generation: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SetKeyPackageResponse {}
+pub struct SetKeyPackageResponse {
+    pub generation: u64,
+}
 
+#[serde_as]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", tag = "action")]
 pub enum AddContactStage {
@@ -119,13 +135,15 @@ pub enum AddContactStage {
     Accept {
         user_id: String,
         public_key: UnifiedPublicKey,
-        encapsulated: Encapsulated,
+        #[serde_as(as = "[_; 1088]")]
+        encapsulated: [u8; 1088],
     },
     // 3. finalize and send our ML-KEM encapsulation back to the acceptor
     Finalize {
         user_id: String,
         public_key: UnifiedPublicKey,
-        encapsulated: Encapsulated,
+        #[serde_as(as = "[_; 1088]")]
+        encapsulated: [u8; 1088],
     },
 }
 

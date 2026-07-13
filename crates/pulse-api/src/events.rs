@@ -1,4 +1,21 @@
-use pulse_types::AvailableTrack;
+use pulse_types::{AvailableTrack, MediaHint};
+
+use crate::error::PulseError;
+
+/// One authenticated member of the call's MLS group.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CallMember {
+    pub session_id: String,
+    pub user_id: String,
+    pub state: CallMemberState,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CallMemberState {
+    Verified,
+    Unverified,
+    Warning,
+}
 
 /// Events emitted by `PulseClient` for the consumer to handle.
 ///
@@ -6,28 +23,33 @@ use pulse_types::AvailableTrack;
 /// are handled internally by the client and are not surfaced here.
 #[derive(Clone, Debug)]
 pub enum PulseEvent {
-    /// Successfully connected to the call. Contains the assigned session ID
-    /// and a list of tracks already being produced by other participants.
     Connected {
         id: String,
         available_tracks: Vec<AvailableTrack>,
     },
+    Reconnecting {
+        attempt: u32,
+    },
+    Disconnected {
+        reason: String,
+    },
 
-    /// Disconnected from the server. If `reconnect` is `Some`, the client
-    /// should reconnect to the provided `(server_address, token)`.
-    Disconnected { reconnect: Option<(String, String)> },
-
-    /// A new track from another participant has become available for consumption.
     TrackAvailable(AvailableTrack),
-
-    /// A previously available track is no longer available.
     TrackUnavailable(String),
-
-    /// A new MLS epoch has been reached by all members.
     EpochReady(u64),
+    // TODO:
+    MembershipChanged {
+        epoch: u64,
+        members: Vec<CallMember>,
+    },
 
-    /// A consumer (or the relay, on a new consumer joining) requested a
-    /// keyframe for a track this client produces. The producer should have its
-    /// encoder emit an IDR. Carries the producer-local track id.
-    KeyFrameRequested(String),
+    KeyFrameRequested(MediaHint),
+    ReceiverReport {
+        media_hint: MediaHint,
+        lost: u32,
+        received: u32,
+        jitter_ms: u32,
+    },
+
+    Error(PulseError),
 }

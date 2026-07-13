@@ -16,8 +16,10 @@ pub async fn set_key_package(
 ) -> impl RpcResponder {
     let user = check_authenticated(&state).await?;
     let data = data.into_inner();
-    user.set_key_package(data.encrypted_keys).await?;
-    Ok::<_, Error>(RpcValue(SetKeyPackageResponse {}))
+    let generation = user
+        .set_key_package(data.encrypted_keys, data.expected_generation)
+        .await?;
+    Ok::<_, Error>(RpcValue(SetKeyPackageResponse { generation }))
 }
 
 pub async fn get_user(state: RpcState, data: RpcValue<GetUserMethod>) -> impl RpcResponder {

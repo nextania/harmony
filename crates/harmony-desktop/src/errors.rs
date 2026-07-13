@@ -26,6 +26,12 @@ impl RenderableError {
 impl From<HarmonyError> for RenderableError {
     fn from(error: HarmonyError) -> Self {
         match error {
+            HarmonyError::Crypto(e) => RenderableError::CryptoError(e.to_string()),
+            HarmonyError::NotConnected
+            | HarmonyError::ConnectionLost
+            | HarmonyError::Timeout
+            | HarmonyError::Reconnecting
+            | HarmonyError::ReconnectionFailed { .. } => RenderableError::NetworkError,
             _ => RenderableError::UnknownError(error.to_string()),
         }
     }

@@ -1,28 +1,41 @@
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
 
+use ciborium::value::Value;
 use dashmap::DashMap;
 use futures_util::StreamExt;
-use rmpv::Value;
 use serde::{Deserialize, Serialize};
 
 use async_tungstenite::{tokio::connect_async, tungstenite::protocol::Message};
 use tokio::sync::mpsc::UnboundedReceiver;
-use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::time::timeout;
 use url::Url;
 use uuid::Uuid;
 
 use crate::error::{ApiError, HarmonyError, Result};
-use crate::events::{Event, RpcMessageS2C};
+use crate::events::{ClientEvent, Event, LifecycleEvent, RpcMessageS2C};
+
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
+
+const EVENT_CHANNEL_CAPACITY: usize = 1024;
+
+// TODO: finish designing account refresh system?
+/// Supplies a fresh authentication token whenever the client authenticates.
+pub trait TokenProvider: Send + Sync {
+    fn fetch_token(&self) -> Pin<Box<dyn Future<Output = Result<String>> + Send + '_>>;
+}
 
 /// Configuration for the Harmony client
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ClientOptions {
     /// WebSocket server URL
     pub server_url: String,
-    /// Authentication token issued by AS
+    /// Authentication token issued by AS. Used as the token when no
+    /// [`TokenProvider`] is configured, and as the initial fallback otherwise.
     pub token: String,
     /// Connection timeout
     pub timeout: Duration,
@@ -30,6 +43,21 @@ pub struct ClientOptions {
     pub auto_reconnect: bool,
     /// Maximum number of reconnection attempts
     pub max_reconnect_attempts: u32,
+    /// Optional hook to obtain a fresh token on each authentication.
+    pub token_provider: Option<Arc<dyn TokenProvider>>,
+}
+
+impl std::fmt::Debug for ClientOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClientOptions")
+            .field("server_url", &self.server_url)
+            .field("token", &"<redacted>")
+            .field("timeout", &self.timeout)
+            .field("auto_reconnect", &self.auto_reconnect)
+            .field("max_reconnect_attempts", &self.max_reconnect_attempts)
+            .field("token_provider", &self.token_provider.is_some())
+            .finish()
+    }
 }
 
 impl ClientOptions {
@@ -40,6 +68,7 @@ impl ClientOptions {
             timeout: Duration::from_secs(30),
             auto_reconnect: true,
             max_reconnect_attempts: 5,
+            token_provider: None,
         }
     }
 
@@ -55,6 +84,11 @@ impl ClientOptions {
 
     pub fn with_max_reconnect_attempts(mut self, attempts: u32) -> Self {
         self.max_reconnect_attempts = attempts;
+        self
+    }
+
+    pub fn with_token_provider(mut self, provider: Arc<dyn TokenProvider>) -> Self {
+        self.token_provider = Some(provider);
         self
     }
 }
@@ -79,22 +113,28 @@ enum RpcMessageC2S {
 pub struct HarmonyClient {
     options: ClientOptions,
     websocket_tx: mpsc::UnboundedSender<Message>,
-    evt_tx: mpsc::UnboundedSender<Event>,
+    evt_tx: broadcast::Sender<ClientEvent>,
     connected: Arc<AtomicBool>,
     reconnecting: Arc<AtomicBool>,
     reconnect_attempts: Arc<AtomicU32>,
     manually_disconnected: Arc<AtomicBool>,
-    pending_requests: Arc<DashMap<String, oneshot::Sender<Value>>>,
-    auth_request: Arc<Mutex<Option<oneshot::Sender<()>>>>,
+    pending_requests: Arc<DashMap<String, oneshot::Sender<RpcResponse>>>,
+}
+
+type RpcResponse = std::result::Result<Value, Value>;
+
+fn emit(evt_tx: &broadcast::Sender<ClientEvent>, event: impl Into<ClientEvent>) {
+    if evt_tx.send(event.into()).is_err() {
+        tracing::debug!("no event receivers; dropping event");
+    }
 }
 
 impl HarmonyClient {
     pub async fn new_with_recv(
         options: ClientOptions,
-        evt_tx: mpsc::UnboundedSender<Event>,
+        evt_tx: broadcast::Sender<ClientEvent>,
     ) -> Result<Self> {
         let (ws_tx, ws_rx) = mpsc::unbounded_channel();
-        let (auth_tx, auth_rx) = oneshot::channel();
 
         let client = Self {
             options: options.clone(),
@@ -105,16 +145,21 @@ impl HarmonyClient {
             evt_tx,
             pending_requests: Arc::new(DashMap::new()),
             manually_disconnected: Arc::new(AtomicBool::new(false)),
-            auth_request: Arc::new(Mutex::new(Some(auth_tx))),
         };
 
-        client.connect(ws_rx, auth_rx).await?;
+        client.connect(ws_rx).await?;
         Ok(client)
     }
 
-    pub async fn new(options: ClientOptions) -> Result<(Self, mpsc::UnboundedReceiver<Event>)> {
-        let (evt_tx, evt_rx) = mpsc::unbounded_channel();
+    pub async fn new(options: ClientOptions) -> Result<(Self, broadcast::Receiver<ClientEvent>)> {
+        let (evt_tx, evt_rx) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
         Ok((Self::new_with_recv(options, evt_tx).await?, evt_rx))
+    }
+
+    /// Subscribe an additional consumer to the event stream. Each receiver
+    /// gets every event emitted after the point of subscription.
+    pub fn subscribe_events(&self) -> broadcast::Receiver<ClientEvent> {
+        self.evt_tx.subscribe()
     }
 
     pub(crate) async fn send_request<T, R>(&self, method: &str, params: T) -> Result<R>
@@ -124,8 +169,8 @@ impl HarmonyClient {
     {
         let request_id = Uuid::new_v4().to_string();
 
-        let params_value = rmpv::ext::to_value(params)
-            .map_err(|e| HarmonyError::Internal(format!("Params serialization error: {}", e)))?;
+        let params_value =
+            Value::serialized(&params).map_err(|e| HarmonyError::Serialization(Box::new(e)))?;
 
         let request = RpcMessageC2S::Message {
             id: request_id.clone(),
@@ -134,9 +179,8 @@ impl HarmonyClient {
         };
 
         let mut buf = Vec::new();
-        request
-            .serialize(&mut rmp_serde::Serializer::new(&mut buf).with_struct_map())
-            .map_err(|e| HarmonyError::Internal(format!("Serialization error: {}", e)))?;
+        ciborium::into_writer(&request, &mut buf)
+            .map_err(|e| HarmonyError::Serialization(Box::new(e)))?;
 
         let (tx, rx) = oneshot::channel();
 
@@ -148,31 +192,23 @@ impl HarmonyClient {
         self.websocket_tx
             .send(Message::binary(buf))
             .map_err(|_| HarmonyError::ConnectionLost)?;
-        let response_value = timeout(self.options.timeout, rx)
+        let response = timeout(self.options.timeout, rx)
             .await
             .map_err(|_| {
                 self.pending_requests.remove(&request_id);
-                HarmonyError::Internal("Request timeout".to_string())
+                HarmonyError::Timeout
             })?
-            .or_else(|_| {
-                Err(HarmonyError::Internal(
-                    "Response channel closed".to_string(),
-                ))
-            })?;
+            .map_err(|_| HarmonyError::ConnectionLost)?;
 
-        let is_error = response_value
-            .as_map()
-            .map(|entries| entries.iter().any(|(k, _)| k.as_str() == Some("error")))
-            .unwrap_or(false);
-
-        if is_error {
-            match rmpv::ext::from_value::<ApiError>(response_value) {
-                Ok(api_error) => return Err(HarmonyError::Api(api_error)),
-                Err(e) => return Err(HarmonyError::MessagePackExt(e)),
-            }
+        match response {
+            Ok(value) => value
+                .deserialized::<R>()
+                .map_err(|e| HarmonyError::Serialization(Box::new(e))),
+            Err(error_value) => match error_value.deserialized::<ApiError>() {
+                Ok(api_error) => Err(HarmonyError::Api(api_error)),
+                Err(e) => Err(HarmonyError::Serialization(Box::new(e))),
+            },
         }
-
-        rmpv::ext::from_value::<R>(response_value).map_err(HarmonyError::MessagePackExt)
     }
 
     pub fn is_connected(&self) -> bool {
@@ -194,196 +230,282 @@ impl HarmonyClient {
         Ok(())
     }
 
-    async fn connect(
-        &self,
-        mut receiver: UnboundedReceiver<Message>,
-        auth_rx: oneshot::Receiver<()>,
-    ) -> Result<()> {
+    async fn connect(&self, receiver: UnboundedReceiver<Message>) -> Result<()> {
         let url = Url::parse(&self.options.server_url)
-            .map_err(|e| HarmonyError::InvalidInput(format!("Invalid server URL: {}", e)))?;
+            .map_err(|e| HarmonyError::InvalidServerUrl(Box::new(e)))?;
 
-        let evt_tx = self.evt_tx.clone();
-        let connected = self.connected.clone();
-        let reconnecting = self.reconnecting.clone();
-        let reconnect_attempts = self.reconnect_attempts.clone();
-        let pending_requests = self.pending_requests.clone();
-        let manually_disconnected = self.manually_disconnected.clone();
-        let auth_request = self.auth_request.clone();
-        let max_attempts = self.options.max_reconnect_attempts;
-        let auto_reconnect = self.options.auto_reconnect;
-        let timeout_duration = self.options.timeout;
+        let (first_tx, first_rx) = oneshot::channel::<Result<()>>();
 
-        tokio::spawn(async move {
-            let mut attempts = 0;
-            loop {
-                let result = timeout(timeout_duration, connect_async(url.to_string()))
-                    .await
-                    .map_err(|_| HarmonyError::Internal("Connection timeout".to_string()))
-                    .and_then(|i| i.map_err(HarmonyError::WebSocket));
-                match result {
-                    Ok((stream, _)) => {
-                        attempts = 0;
-                        reconnect_attempts.store(0, Ordering::SeqCst);
-                        connected.store(true, Ordering::SeqCst);
-                        if reconnecting.swap(false, Ordering::SeqCst) {
-                            evt_tx.send(Event::Reconnected).unwrap_or_else(|e| {
-                                eprintln!("Failed to send reconnected event: {}", e);
-                            });
-                        } else {
-                            evt_tx.send(Event::Connected).unwrap_or_else(|e| {
-                                eprintln!("Failed to send connected event: {}", e);
-                            });
-                        }
-                        let (mut ws_tx, mut ws_rx) = stream.split();
-                        let mut next_heartbeat =
-                            tokio::time::Instant::now() + Duration::from_secs(10);
-                        loop {
-                            tokio::select! {
-                                Some(msg) = receiver.recv() => {
-                                    if let Err(e) = ws_tx.send(msg).await {
-                                        eprintln!("Failed to send WebSocket message: {}", e);
-                                        break;
-                                    }
-                                }
-                                Some(message) = ws_rx.next() => {
-                                    match message {
-                                        Ok(Message::Binary(data)) => {
-                                            let mut deserializer = rmp_serde::Deserializer::new(data.as_ref());
-                                            let value: Value = match serde::Deserialize::deserialize(&mut deserializer) {
-                                                Ok(v) => v,
-                                                Err(e) => {
-                                                    eprintln!("Failed to deserialize MessagePack: {}", e);
-                                                    break;
-                                                }
-                                            };
+        tokio::spawn(Self::run_connection_task(ConnectionTask {
+            url,
+            receiver,
+            evt_tx: self.evt_tx.clone(),
+            connected: self.connected.clone(),
+            reconnecting: self.reconnecting.clone(),
+            reconnect_attempts: self.reconnect_attempts.clone(),
+            pending_requests: self.pending_requests.clone(),
+            manually_disconnected: self.manually_disconnected.clone(),
+            static_token: self.options.token.clone(),
+            token_provider: self.options.token_provider.clone(),
+            max_attempts: self.options.max_reconnect_attempts,
+            auto_reconnect: self.options.auto_reconnect,
+            timeout_duration: self.options.timeout,
+            first_outcome: first_tx,
+        }));
 
-                                            if let Ok(event_wrapper) = rmpv::ext::from_value::<RpcMessageS2C>(value.clone()) {
-                                                match event_wrapper {
-                                                    RpcMessageS2C::Identify {} => {
-                                                        println!("Authentication successful");
-                                                        auth_request.lock().await.take().map(|tx| {
-                                                            let _ = tx.send(());
-                                                        });
-                                                    }
-                                                    RpcMessageS2C::Event { event } => {
-                                                        if let Ok(event) = rmpv::ext::from_value::<Event>(event) {
-                                                            evt_tx.send(event).unwrap_or_else(|e| {
-                                                                eprintln!("Failed to send event: {}", e);
-                                                            });
-                                                        } else {
-                                                            eprintln!("Failed to parse event: {:?}", value);
-                                                            break;
-                                                        }
-                                                    }
-                                                    RpcMessageS2C::Message { id, data } => {
-                                                        if let Some((_, sender)) = pending_requests.remove(&id) {
-                                                            let _ = sender.send(data);
-                                                        } else {
-                                                            eprintln!("Received response for unknown request ID: {}", id);
-                                                        }
-                                                    }
-                                                    _ => {}
-                                                }
-                                            } else {
-                                                eprintln!("Received unknown message format: {:?}", value);
-                                            }
-                                        }
-                                        Ok(Message::Close(_)) | Err(_) => {
-                                            connected.store(false, Ordering::SeqCst);
-                                            eprintln!("Disconnected");
-                                            break;
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                                _ = tokio::time::sleep_until(next_heartbeat) => {
-                                    let mut buf = Vec::new();
-                                    let mut serializer = rmp_serde::Serializer::new(&mut buf).with_struct_map();
-                                    RpcMessageC2S::Heartbeat {}
-                                        .serialize(&mut serializer)
-                                        .expect("Failed to serialize heartbeat");
-                                    if let Err(e) = ws_tx.send(Message::binary(buf)).await {
-                                        eprintln!("Failed to send heartbeat: {}", e);
-                                        break;
-                                    }
-                                    next_heartbeat = tokio::time::Instant::now() + Duration::from_secs(10);
-                                }
+        match first_rx.await {
+            Ok(result) => result,
+            Err(_) => Err(HarmonyError::ConnectionLost),
+        }
+    }
+
+    async fn run_connection_task(task: ConnectionTask) {
+        let ConnectionTask {
+            url,
+            mut receiver,
+            evt_tx,
+            connected,
+            reconnecting,
+            reconnect_attempts,
+            pending_requests,
+            manually_disconnected,
+            static_token,
+            token_provider,
+            max_attempts,
+            auto_reconnect,
+            timeout_duration,
+            first_outcome,
+        } = task;
+
+        let mut first_outcome = Some(first_outcome);
+        let mut attempts: u32 = 0;
+
+        loop {
+            let mut break_after = false;
+            let mut authed_this_session = false;
+
+            'establish: {
+                // 1. get token
+                let token = if let Some(provider) = &token_provider {
+                    match provider.fetch_token().await {
+                        Ok(t) => t,
+                        Err(e) => {
+                            tracing::error!("failed to obtain auth token: {}", e);
+                            if let Some(tx) = first_outcome.take() {
+                                let _ = tx.send(Err(e));
+                                break_after = true;
                             }
+                            break 'establish;
                         }
-                    }
-                    Err(e) => {
-                        attempts += 1;
-                        eprintln!("Connection attempt {} failed: {}", attempts, e);
-                    }
-                }
-                evt_tx
-                    .send(Event::Disconnected)
-                    .unwrap_or_else(|e| eprintln!("Failed to send disconnected event: {}", e));
-                if !auto_reconnect || manually_disconnected.load(Ordering::SeqCst) {
-                    break;
-                }
-                reconnecting.store(true, Ordering::SeqCst);
-
-                if attempts <= max_attempts {
-                    reconnect_attempts.store(attempts, Ordering::SeqCst);
-                    evt_tx
-                        .send(Event::Reconnecting {
-                            attempt: attempts,
-                            max_attempts,
-                        })
-                        .unwrap_or_else(|e| {
-                            eprintln!("Failed to send reconnecting event: {}", e);
-                        });
-
-                    // Calculate backoff delay: 2^(attempt-1) seconds, max 30 seconds
-                    if attempts > 1 {
-                        let delay = Duration::from_secs((2_u64.pow((attempts - 1).min(5))).min(30));
-                        tokio::time::sleep(delay).await;
                     }
                 } else {
-                    reconnecting.store(false, Ordering::SeqCst);
-                    evt_tx
-                        .send(Event::ReconnectionFailed { attempts })
-                        .unwrap_or_else(|e| {
-                            eprintln!("Failed to send reconnect failed event: {}", e);
-                        });
+                    static_token.clone()
+                };
+
+                // 2. connect socket
+                let conn = timeout(timeout_duration, connect_async(url.to_string()))
+                    .await
+                    .map_err(|_| HarmonyError::Timeout)
+                    .and_then(|i| i.map_err(|e| HarmonyError::WebSocket(Box::new(e))));
+                let (mut ws_tx, mut ws_rx) = match conn {
+                    Ok((stream, _)) => stream.split(),
+                    Err(e) => {
+                        tracing::warn!("connection attempt failed: {}", e);
+                        if let Some(tx) = first_outcome.take() {
+                            let _ = tx.send(Err(e));
+                            break_after = true;
+                        }
+                        break 'establish;
+                    }
+                };
+
+                // 3. authenticate
+                let identify = {
+                    let msg = RpcMessageC2S::Identify {
+                        token: token.clone(),
+                    };
+                    let mut buf = Vec::new();
+                    if ciborium::into_writer(&msg, &mut buf).is_err() {
+                        tracing::error!("failed to serialize identify");
+                    }
+                    buf
+                };
+                if let Err(e) = ws_tx.send(Message::binary(identify)).await {
+                    tracing::warn!("failed to send identify: {}", e);
+                    if let Some(tx) = first_outcome.take() {
+                        let _ = tx.send(Err(HarmonyError::NotConnected));
+                        break_after = true;
+                    }
+                    break 'establish;
+                }
+
+                // 4. run session loop
+                let mut authed = false;
+                let auth_deadline = tokio::time::Instant::now() + timeout_duration;
+                let mut next_heartbeat = tokio::time::Instant::now() + HEARTBEAT_INTERVAL;
+
+                loop {
+                    tokio::select! {
+                        msg = receiver.recv() => {
+                            let Some(msg) = msg else {
+                                // client has been dropped
+                                break_after = true;
+                                break;
+                            };
+                            if let Err(e) = ws_tx.send(msg).await {
+                                tracing::warn!("failed to send message: {}", e);
+                                break;
+                            }
+                        }
+                        Some(message) = ws_rx.next() => {
+                            match message {
+                                Ok(Message::Binary(data)) => {
+                                    let value: Value = match ciborium::from_reader(data.as_ref()) {
+                                        Ok(v) => v,
+                                        Err(e) => {
+                                            tracing::warn!("failed to deserialize frame: {}", e);
+                                            break;
+                                        }
+                                    };
+                                    match value.deserialized::<RpcMessageS2C>() {
+                                        Ok(RpcMessageS2C::Identify {}) => {
+                                            if !authed {
+                                                authed = true;
+                                                authed_this_session = true;
+                                                attempts = 0;
+                                                reconnect_attempts.store(0, Ordering::SeqCst);
+                                                connected.store(true, Ordering::SeqCst);
+                                                let was_reconnecting =
+                                                    reconnecting.swap(false, Ordering::SeqCst);
+                                                tracing::debug!("authentication successful");
+                                                if was_reconnecting {
+                                                    emit(&evt_tx, LifecycleEvent::Reconnected);
+                                                } else {
+                                                    emit(&evt_tx, LifecycleEvent::Connected);
+                                                }
+                                                if let Some(tx) = first_outcome.take() {
+                                                    let _ = tx.send(Ok(()));
+                                                }
+                                            }
+                                        }
+                                        Ok(RpcMessageS2C::Event { event }) => {
+                                            match event.deserialized::<Event>() {
+                                                Ok(event) => emit(&evt_tx, event),
+                                                Err(e) => {
+                                                    tracing::warn!("failed to parse event: {}", e);
+                                                }
+                                            }
+                                        }
+                                        Ok(RpcMessageS2C::Message { id, ok, data }) => {
+                                            if let Some((_, sender)) = pending_requests.remove(&id) {
+                                                let _ =
+                                                    sender.send(if ok { Ok(data) } else { Err(data) });
+                                            } else {
+                                                tracing::debug!(
+                                                    "response for unknown request id: {}",
+                                                    id
+                                                );
+                                            }
+                                        }
+                                        Ok(_) => {}
+                                        Err(_) => {
+                                            tracing::warn!("unknown message format");
+                                        }
+                                    }
+                                }
+                                Ok(Message::Close(_)) | Err(_) => {
+                                    tracing::debug!("connection closed");
+                                    break;
+                                }
+                                _ => {}
+                            }
+                        }
+                        _ = tokio::time::sleep_until(next_heartbeat) => {
+                            let mut buf = Vec::new();
+                            let heartbeat = RpcMessageC2S::Heartbeat {};
+                            if ciborium::into_writer(&heartbeat, &mut buf).is_err() {
+                                tracing::error!("failed to serialize heartbeat");
+                                break;
+                            }
+                            if let Err(e) = ws_tx.send(Message::binary(buf)).await {
+                                tracing::warn!("failed to send heartbeat: {}", e);
+                                break;
+                            }
+                            next_heartbeat = tokio::time::Instant::now() + HEARTBEAT_INTERVAL;
+                        }
+                        _ = tokio::time::sleep_until(auth_deadline), if !authed => {
+                            tracing::warn!("authentication timed out");
+                            break;
+                        }
+                    }
+                }
+
+                connected.store(false, Ordering::SeqCst);
+                pending_requests.clear();
+                if authed_this_session {
+                    emit(&evt_tx, LifecycleEvent::Disconnected);
+                } else if let Some(tx) = first_outcome.take() {
+                    let _ = tx.send(Err(HarmonyError::AuthenticationClosed));
+                    break_after = true;
                 }
             }
-        });
 
-        self.authenticate(auth_rx).await?;
+            if break_after {
+                break;
+            }
+            if !auto_reconnect || manually_disconnected.load(Ordering::SeqCst) {
+                break;
+            }
 
-        Ok(())
-    }
+            attempts = attempts.saturating_add(1);
+            if attempts > max_attempts {
+                reconnecting.store(false, Ordering::SeqCst);
+                emit(&evt_tx, LifecycleEvent::ReconnectionFailed { attempts });
+                break;
+            }
 
-    async fn authenticate(&self, mut rx: oneshot::Receiver<()>) -> Result<()> {
-        let identify_request = RpcMessageC2S::Identify {
-            token: self.options.token.clone(),
-        };
+            reconnecting.store(true, Ordering::SeqCst);
+            reconnect_attempts.store(attempts, Ordering::SeqCst);
+            emit(
+                &evt_tx,
+                LifecycleEvent::Reconnecting {
+                    attempt: attempts,
+                    max_attempts,
+                },
+            );
 
-        let mut buf = Vec::new();
-        identify_request
-            .serialize(&mut rmp_serde::Serializer::new(&mut buf).with_struct_map())
-            .map_err(|e| {
-                HarmonyError::Internal(format!("Authentication serialization error: {}", e))
-            })?;
-
-        self.websocket_tx
-            .send(Message::binary(buf))
-            .map_err(|_| HarmonyError::NotConnected)?;
-
-        let auth_result = timeout(self.options.timeout, &mut rx)
-            .await
-            .map_err(|_| HarmonyError::Authentication("Authentication timed out".to_string()))
-            .map(|r| {
-                r.map_err(|_| HarmonyError::Authentication("Authentication failed".to_string()))
-            })
-            .flatten();
-        if let Err(e) = auth_result {
-            self.disconnect()?;
-            return Err(e);
+            // exponential backoff (2^(attempt-1)s, capped at 30s)
+            if attempts > 1 {
+                let delay = Duration::from_secs(2_u64.pow((attempts - 1).min(5)).min(30));
+                tokio::select! {
+                    _ = tokio::time::sleep(delay) => {}
+                    msg = receiver.recv() => {
+                        if msg.is_none() {
+                            // this client has been dropped
+                            break;
+                        }
+                        // dropping this is safe because send_request does not send
+                        // when not connected
+                    }
+                }
+            }
         }
-
-        Ok(())
     }
+}
+
+struct ConnectionTask {
+    url: Url,
+    receiver: UnboundedReceiver<Message>,
+    evt_tx: broadcast::Sender<ClientEvent>,
+    connected: Arc<AtomicBool>,
+    reconnecting: Arc<AtomicBool>,
+    reconnect_attempts: Arc<AtomicU32>,
+    pending_requests: Arc<DashMap<String, oneshot::Sender<RpcResponse>>>,
+    manually_disconnected: Arc<AtomicBool>,
+    static_token: String,
+    token_provider: Option<Arc<dyn TokenProvider>>,
+    max_attempts: u32,
+    auto_reconnect: bool,
+    timeout_duration: Duration,
+    first_outcome: oneshot::Sender<Result<()>>,
 }

@@ -69,7 +69,6 @@ impl Primitive for ScreenPrimitive {
 
         let frame_id = capture_frame.frame_id();
 
-        // Same CaptureFrame clone as last prepare — nothing to do.
         if pipeline.last_imported_frame_id == Some(frame_id) {
             return;
         }

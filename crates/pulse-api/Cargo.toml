@@ -9,15 +9,19 @@ moq-native = "0.17.8"
 moq-net = "0.1.16"
 url = "2.5"
 bytes = "1"
-rkyv = { version = "0.8.14", features = ["unaligned"] }
+ciborium = "0.2"
+serde = { version = "1.0.228", features = ["derive"] }
 tokio = { version = "1.45.1", features = ["macros", "rt-multi-thread", "sync", "time"], default-features = false }
 openmls = "0.8.1"
 openmls_rust_crypto = "0.5.1"
 openmls_traits = "0.5.0"
 openmls_basic_credential = "0.5.0"
 tls_codec = "0.4"
-anyhow = "1.0.100"
 thiserror = "2"
 tracing = "0.1.37"
 dashmap = "6.1.0"
 chacha20poly1305 = { version = "0.10", features = ["std"] }
+ed25519-dalek = "2.2"
+hkdf = "0.12"
+sha2 = "0.10"
+serde_with = "3.21.0"

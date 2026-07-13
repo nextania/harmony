@@ -2,7 +2,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use dashmap::DashMap;
 use opentelemetry::KeyValue;
-use pulse_types::{AvailableTrack, WtMessageS2C};
+use pulse_types::{AvailableTrack, ControlS2C};
 use tokio::sync::Mutex;
 
 use crate::{
@@ -68,7 +68,7 @@ impl Call {
             let Some(session) = GLOBAL_SESSIONS.get(member.key()) else {
                 continue;
             };
-            let _ = session.message_tx.send(WtMessageS2C::TrackAvailable {
+            let _ = session.message_tx.send(ControlS2C::TrackAvailable {
                 track: AvailableTrack {
                     id: track_id.clone(),
                     media_hint: media_hint.clone(),
@@ -88,17 +88,10 @@ impl Call {
             let Some(session) = GLOBAL_SESSIONS.get(member.key()) else {
                 continue;
             };
-            let _ = session.message_tx.send(WtMessageS2C::TrackUnavailable {
+            let _ = session.message_tx.send(ControlS2C::TrackUnavailable {
                 id: track_id.to_string(),
             });
         }
-    }
-
-    pub fn get_mapped_track_id(&self, track_id: &str, session_id: &str) -> Option<String> {
-        self.tracks
-            .iter()
-            .find(|t| t.client_track_id == track_id && t.session_id == session_id)
-            .map(|t| t.id.clone())
     }
 
     pub fn get_available_tracks(&self, excluding_session_id: &str) -> Vec<AvailableTrack> {

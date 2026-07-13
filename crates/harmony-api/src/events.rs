@@ -1,6 +1,6 @@
 //! Events that can be received from the Harmony server
 
-use rmpv::Value;
+use ciborium::value::Value;
 use serde::{Deserialize, Serialize};
 
 use crate::{Channel, Message, RelationshipState};
@@ -16,6 +16,7 @@ pub enum RpcMessageS2C {
     Heartbeat {},
     Message {
         id: String,
+        ok: bool,
         data: Value,
     },
     Event {
@@ -23,7 +24,7 @@ pub enum RpcMessageS2C {
     },
 }
 
-// TODO: use one enum
+/// A server-originated event.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", content = "data", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum Event {
@@ -77,17 +78,42 @@ pub enum Event {
         call_id: String,
         server_address: String,
     },
+}
 
-    /// Connection was established
+/// Client-generated transport lifecycle events.
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum LifecycleEvent {
+    /// Connection was established (and authenticated)
     Connected,
     /// Connection was lost
     Disconnected,
     /// Reconnection attempt started
     Reconnecting { attempt: u32, max_attempts: u32 },
-    /// Reconnection successful
+    /// Reconnection successful (and re-authenticated)
     Reconnected,
     /// Reconnection failed permanently
     ReconnectionFailed { attempts: u32 },
+}
+
+/// The unified event delivered to consumers of the client event stream.
+#[derive(Clone, Debug, Serialize)]
+#[serde(untagged)]
+pub enum ClientEvent {
+    Event(Event),
+    Lifecycle(LifecycleEvent),
+}
+
+impl From<Event> for ClientEvent {
+    fn from(event: Event) -> Self {
+        ClientEvent::Event(event)
+    }
+}
+
+impl From<LifecycleEvent> for ClientEvent {
+    fn from(event: LifecycleEvent) -> Self {
+        ClientEvent::Lifecycle(event)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -135,27 +161,4 @@ pub struct MemberJoinedEvent {
 pub struct MemberLeftEvent {
     pub channel_id: String,
     pub user_id: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MlsProposalEvent {
-    pub channel_id: String,
-    pub proposal: Vec<u8>,
-    pub epoch: u64,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MlsCommitEvent {
-    pub channel_id: String,
-    pub commit: Vec<u8>,
-    pub epoch: u64,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MlsWelcomeEvent {
-    pub channel_id: String,
-    pub welcome: Vec<u8>,
 }

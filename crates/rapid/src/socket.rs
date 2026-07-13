@@ -1,16 +1,12 @@
 use std::{future::Future, pin::Pin, sync::Arc};
 
 use async_tungstenite::{accept_async, tokio::TokioAdapter, tungstenite::Message};
+use ciborium::value::Value;
 use dashmap::DashMap;
 use futures::{
     SinkExt, StreamExt,
     channel::mpsc::{UnboundedSender, unbounded},
     future::BoxFuture,
-};
-use rmp_serde::{Deserializer, Serializer};
-use rmpv::{
-    Value,
-    ext::{from_value, to_value},
 };
 use serde::{Deserialize, Serialize};
 use tokio::{
@@ -118,7 +114,7 @@ impl RpcClient {
 
     pub fn emit<T: Serialize + Send + Clone + 'static>(&self, data: T) {
         let bytes = serialize(&RpcMessageS2C::Event {
-            event: to_value(&data).expect("Failed to serialize"),
+            event: Value::serialized(&data).expect("Failed to serialize"),
         })
         .expect("Failed to serialize");
         self.emit_raw(bytes);
@@ -135,28 +131,42 @@ impl RpcClient {
     }
 }
 
+#[derive(Debug)]
+pub enum RpcResponse {
+    Success(Value),
+    Error(Value),
+}
+
 pub trait RpcResponder {
-    fn into_value(self) -> Value;
+    fn into_response(self) -> RpcResponse;
 }
 
 pub struct RpcValue<T>(pub T);
 
 impl<T: Serialize> RpcResponder for RpcValue<T> {
-    fn into_value(self) -> Value {
-        to_value(&self.0).unwrap()
+    fn into_response(self) -> RpcResponse {
+        RpcResponse::Success(Value::serialized(&self.0).unwrap())
     }
 }
 impl<T: RpcResponder, U: RpcResponder> RpcResponder for Result<T, U> {
-    fn into_value(self) -> Value {
+    fn into_response(self) -> RpcResponse {
         match self {
-            Ok(value) => value.into_value(),
-            Err(error) => error.into_value(),
+            Ok(value) => value.into_response(),
+            Err(error) => match error.into_response() {
+                RpcResponse::Success(v) | RpcResponse::Error(v) => RpcResponse::Error(v),
+            },
         }
     }
 }
 
+impl RpcResponder for Error {
+    fn into_response(self) -> RpcResponse {
+        RpcResponse::Error(Value::serialized(&self).unwrap())
+    }
+}
+
 impl RpcResponder for () {
-    fn into_value(self) -> Value {
+    fn into_response(self) -> RpcResponse {
         unreachable!()
     }
 }
@@ -175,7 +185,7 @@ impl<T> RpcValue<T> {
 
 impl<T: for<'a> Deserialize<'a>> RpcRequest for RpcValue<T> {
     fn from_value(value: Value) -> Result<Self, Error> {
-        let val = from_value::<T>(value);
+        let val = value.deserialized::<T>();
         match val {
             Ok(v) => Ok(RpcValue(v)),
             Err(e) => Err(e.into()),
@@ -208,14 +218,14 @@ impl<'a> Clone for Box<dyn 'a + CloneableAuthenticateFn> {
     }
 }
 
-pub trait MethodFn: Fn(RpcState, Value) -> BoxFuture<'static, Value> + Send + Sync {
+pub trait MethodFn: Fn(RpcState, Value) -> BoxFuture<'static, RpcResponse> + Send + Sync {
     fn clone_box<'a>(&self) -> Box<dyn 'a + MethodFn>
     where
         Self: 'a;
 }
 impl<F> MethodFn for F
 where
-    F: Fn(RpcState, Value) -> BoxFuture<'static, Value> + Clone + Send + Sync,
+    F: Fn(RpcState, Value) -> BoxFuture<'static, RpcResponse> + Clone + Send + Sync,
 {
     fn clone_box<'a>(&self) -> Box<dyn 'a + MethodFn>
     where
@@ -254,7 +264,7 @@ pub struct RpcClients(Arc<DashMap<String, RpcClient>>);
 impl RpcClients {
     pub fn emit_all<T: Serialize + Send + Clone + 'static>(&self, data: T) {
         let bytes = serialize(&RpcMessageS2C::Event {
-            event: to_value(&data).expect("Failed to serialize"),
+            event: Value::serialized(&data).expect("Failed to serialize"),
         })
         .expect("Failed to serialize");
         for client in self.0.iter() {
@@ -268,7 +278,7 @@ impl RpcClients {
         filter: F,
     ) {
         let bytes = serialize(&RpcMessageS2C::Event {
-            event: to_value(&data).expect("Failed to serialize"),
+            event: Value::serialized(&data).expect("Failed to serialize"),
         })
         .expect("Failed to serialize");
         for client in self.0.iter().filter(|c| filter(c.value())) {
@@ -344,14 +354,14 @@ impl RpcServer {
         info!("Registering method: {}", name);
         let x = Box::new(move |state: RpcState, val: Value| {
             let method = method.clone();
-            let n: Pin<Box<dyn Future<Output = Value> + Send>> = Box::pin(async move {
+            let n: Pin<Box<dyn Future<Output = RpcResponse> + Send>> = Box::pin(async move {
                 let g = G::from_value(val);
                 let g = match g {
                     Ok(g) => g,
-                    Err(e) => return RpcValue(e).into_value(),
+                    Err(e) => return e.into_response(),
                 };
                 let res = method.call(state, g).await;
-                res.into_value()
+                res.into_response()
             });
             n
         });
@@ -400,6 +410,7 @@ pub enum RpcMessageS2C {
     },
     Message {
         id: String,
+        ok: bool,
         data: Value,
     },
     Event {
@@ -563,7 +574,9 @@ pub async fn handle_packet(
                             rpc_rate_limited().add(1, &[KeyValue::new("method", method.clone())]);
                             return RpcMessageS2C::Message {
                                 id,
-                                data: to_value(&Error::RateLimited).expect("Failed to serialize"),
+                                ok: false,
+                                data: Value::serialized(&Error::RateLimited)
+                                    .expect("Failed to serialize"),
                             };
                         }
                     }
@@ -593,7 +606,14 @@ pub async fn handle_packet(
                 .await;
                 #[cfg(feature = "otel")]
                 rpc_duration_ms().record(start.elapsed().as_secs_f64() * 1000.0, &method_attrs);
-                RpcMessageS2C::Message { id, data: result }
+                match result {
+                    RpcResponse::Success(data) => RpcMessageS2C::Message { id, ok: true, data },
+                    RpcResponse::Error(data) => RpcMessageS2C::Message {
+                        id,
+                        ok: false,
+                        data,
+                    },
+                }
             }
         }
     } else {
@@ -603,13 +623,14 @@ pub async fn handle_packet(
     }
 }
 
-pub fn serialize<T: Serialize>(value: &T) -> Result<Vec<u8>, rmp_serde::encode::Error> {
+pub fn serialize<T: Serialize>(value: &T) -> Result<Vec<u8>, ciborium::ser::Error<std::io::Error>> {
     let mut buf = Vec::new();
-    value.serialize(&mut Serializer::new(&mut buf).with_struct_map())?;
+    ciborium::into_writer(value, &mut buf)?;
     Ok(buf)
 }
 
-pub fn deserialize<T: for<'a> Deserialize<'a>>(buf: &[u8]) -> Result<T, rmp_serde::decode::Error> {
-    let mut deserializer = Deserializer::new(buf);
-    Deserialize::deserialize(&mut deserializer)
+pub fn deserialize<T: for<'a> Deserialize<'a>>(
+    buf: &[u8],
+) -> Result<T, ciborium::de::Error<std::io::Error>> {
+    ciborium::from_reader(buf)
 }

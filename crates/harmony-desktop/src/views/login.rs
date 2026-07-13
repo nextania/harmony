@@ -1,5 +1,5 @@
 use async_stream::stream;
-use harmony_api::Event;
+use harmony_api::ClientEvent;
 use iced::{
     Border, Color, Element, Font, Length, Padding, Shadow, Task, Theme, Vector, alignment, color,
     widget::{
@@ -9,7 +9,7 @@ use iced::{
 };
 use iced_aw::{DropDown, drop_down::Alignment as DropDownAlignment};
 use rust_i18n::t;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::broadcast::{Receiver, error::RecvError};
 
 use crate::{
     Message,
@@ -33,7 +33,7 @@ enum LoginFlow {
         Arc<ApiClient>,
         CurrentUser,
         HashMap<String, Channel>,
-        UnboundedReceiver<Event>,
+        Receiver<ClientEvent>,
     ),
     NeedsMfa(account::LoginMfa),
 }
@@ -120,8 +120,14 @@ impl LoginView {
                     match result {
                         Ok(LoginFlow::Done(client, user, convs, mut stream)) => {
                             yield Message::LoginFinished((client, user, convs));
-                            while let Some(event) = stream.recv().await {
-                                yield Message::Main(MainMessage::ServerEvent(event));
+                            loop {
+                                match stream.recv().await {
+                                    Ok(event) => yield Message::Main(MainMessage::ServerEvent(event)),
+                                    Err(RecvError::Lagged(missed)) => {
+                                        tracing::warn!("event stream lagged; {missed} events dropped");
+                                    }
+                                    Err(RecvError::Closed) => break,
+                                }
                             }
                         }
                         Ok(LoginFlow::NeedsMfa(mfa)) => yield Message::OpenMfa(mfa, password),

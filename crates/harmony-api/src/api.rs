@@ -16,9 +16,9 @@ use harmony_types::messages::{
 use harmony_types::users::{
     AddContactMethod, AddContactResponse, AddContactStage, BlockContactMethod,
     BlockContactResponse, ContactExtended, CurrentUserResponse, GetContactsMethod,
-    GetContactsResponse, GetCurrentUserMethod, GetUserMethod, GetUserResponse, RelationshipState,
-    RemoveContactMethod, RemoveContactResponse, SetKeyPackageMethod, SetKeyPackageResponse,
-    UnblockContactMethod, UnblockContactResponse,
+    GetContactsResponse, GetCurrentUserMethod, GetUserMethod, GetUserResponse, RemoveContactMethod,
+    RemoveContactResponse, SetKeyPackageMethod, SetKeyPackageResponse, UnblockContactMethod,
+    UnblockContactResponse,
 };
 use harmony_types::voice::{
     CreateCallTokenMethod, CreateCallTokenResponse, EndCallMethod, EndCallResponse,
@@ -364,13 +364,23 @@ impl HarmonyClient {
         Ok((response.pending, response.channel_id))
     }
 
-    /// Upload encrypted keystore blob
-    pub async fn set_key_package(&self, encrypted_keys: Vec<u8>) -> Result<()> {
-        let _: SetKeyPackageResponse = self
-            .send_request("SET_KEY_PACKAGE", SetKeyPackageMethod { encrypted_keys })
+    /// Upload the encrypted keystore blob
+    pub async fn set_key_package(
+        &self,
+        encrypted_keys: Vec<u8>,
+        expected_generation: u64,
+    ) -> Result<u64> {
+        let response: SetKeyPackageResponse = self
+            .send_request(
+                "SET_KEY_PACKAGE",
+                SetKeyPackageMethod {
+                    encrypted_keys,
+                    expected_generation,
+                },
+            )
             .await?;
 
-        Ok(())
+        Ok(response.generation)
     }
 
     /// Get a user's public profile

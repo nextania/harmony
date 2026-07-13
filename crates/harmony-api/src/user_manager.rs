@@ -1,12 +1,10 @@
-use std::sync::Arc;
-
-use iced::Color;
 use quick_cache::sync::Cache;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
-use crate::{api::UserProfile, errors::RenderableError};
+use crate::{Result, error::HarmonyError};
+
+// TODO: separate this into account
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,46 +24,26 @@ pub struct AvatarUrl {
     pub timestamp: u64,
 }
 
-impl From<PublicUser> for UserProfile {
-    fn from(user: PublicUser) -> Self {
-        // FIXME: placeholder
-        let hash = Sha256::digest(user.id.as_bytes());
-        let r = hash[0] as f32 / 255.0;
-        let g = hash[1] as f32 / 255.0;
-        let b = hash[2] as f32 / 255.0;
-        let r2 = hash[3] as f32 / 255.0;
-        let g2 = hash[4] as f32 / 255.0;
-        let b2 = hash[5] as f32 / 255.0;
-        UserProfile {
-            id: user.id,
-            display_name: user.display_name,
-            username: user.username,
-            avatar_color_start: Color::from_rgb(r, g, b),
-            avatar_color_end: Color::from_rgb(r2, g2, b2),
-        }
-    }
-}
-
 const CACHE_CAPACITY: usize = 512;
 
 pub struct UserManager {
-    cache: Cache<String, UserProfile>,
+    cache: Cache<String, PublicUser>,
     http: Client,
     base_url: String,
     token: String,
 }
 
 impl UserManager {
-    pub fn new(http: Client, base_url: impl Into<String>, token: impl Into<String>) -> Arc<Self> {
-        Arc::new(Self {
+    pub fn new(http: Client, base_url: impl Into<String>, token: impl Into<String>) -> Self {
+        Self {
             cache: Cache::new(CACHE_CAPACITY),
             http,
             base_url: base_url.into(),
             token: token.into(),
-        })
+        }
     }
 
-    pub async fn get_user(&self, user_id: &str) -> Result<UserProfile, RenderableError> {
+    pub async fn get_user(&self, user_id: &str) -> Result<PublicUser> {
         if let Some(profile) = self.cache.get(user_id) {
             return Ok(profile.clone());
         }
@@ -76,48 +54,40 @@ impl UserManager {
             .header("Authorization", self.token.clone())
             .send()
             .await
-            .map_err(|_| RenderableError::NetworkError)?;
+            .map_err(|_| HarmonyError::NotConnected)?;
 
         let public_user: PublicUser = resp
             .json()
             .await
-            .map_err(|e| RenderableError::UnknownError(e.to_string()))?;
+            .map_err(|e| HarmonyError::Http(Box::new(e)))?;
 
-        let profile = UserProfile::from(public_user);
+        self.cache
+            .insert(public_user.id.clone(), public_user.clone());
 
-        self.cache.insert(profile.id.clone(), profile.clone());
-
-        Ok(profile)
+        Ok(public_user)
     }
-    pub async fn get_user_by_username(
-        &self,
-        username: &str,
-    ) -> Result<UserProfile, RenderableError> {
+    pub async fn get_user_by_username(&self, username: &str) -> Result<PublicUser> {
         let resp = self
             .http
             .get(format!("{}/api/user/username/{}", self.base_url, username))
             .header("Authorization", self.token.clone())
             .send()
             .await
-            .map_err(|_| RenderableError::NetworkError)?;
+            .map_err(|_| HarmonyError::NotConnected)?;
 
         let public_user: PublicUser = resp
             .json()
             .await
-            .map_err(|e| RenderableError::UnknownError(e.to_string()))?;
+            .map_err(|e| HarmonyError::Http(Box::new(e)))?;
 
-        let profile = UserProfile::from(public_user);
+        self.cache
+            .insert(public_user.id.clone(), public_user.clone());
 
-        self.cache.insert(profile.id.clone(), profile.clone());
-
-        Ok(profile)
+        Ok(public_user)
     }
 
-    pub async fn get_users(
-        &self,
-        user_ids: Vec<String>,
-    ) -> Result<Vec<UserProfile>, RenderableError> {
-        let mut fetched: Vec<(String, UserProfile)> = Vec::new();
+    pub async fn get_users(&self, user_ids: Vec<String>) -> Result<Vec<PublicUser>> {
+        let mut fetched: Vec<(String, PublicUser)> = Vec::new();
         let mut missing: Vec<String> = Vec::new();
 
         for id in &user_ids {
@@ -136,17 +106,16 @@ impl UserManager {
                 .json(chunk)
                 .send()
                 .await
-                .map_err(|_| RenderableError::NetworkError)?;
+                .map_err(|_| HarmonyError::NotConnected)?;
 
             let users: Vec<PublicUser> = resp
                 .json()
                 .await
-                .map_err(|e| RenderableError::UnknownError(e.to_string()))?;
+                .map_err(|e| HarmonyError::Http(Box::new(e)))?;
 
             for user in users {
-                let profile = UserProfile::from(user);
-                self.cache.insert(profile.id.clone(), profile.clone());
-                fetched.push((profile.id.clone(), profile));
+                self.cache.insert(user.id.clone(), user.clone());
+                fetched.push((user.id.clone(), user));
             }
         }
 

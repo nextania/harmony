@@ -17,10 +17,14 @@ pub enum Error {
     InvalidMethod,
     #[error("Invalid request id")]
     InvalidRequestId,
+    #[error("Rate limit exceeded")]
+    RateLimit,
     #[error("Internal error")]
     InternalError,
     #[error("Missing permission")]
     MissingPermission,
+    #[error("Version conflict")]
+    KeystoreConflict,
 
     // Authentication errors
     #[error("Invalid token")]
@@ -106,7 +110,7 @@ impl From<redis::RedisError> for Error {
 
 #[cfg(feature = "server")]
 impl rapid::socket::RpcResponder for Error {
-    fn into_value(self) -> rmpv::Value {
-        rmpv::ext::to_value(self).unwrap()
+    fn into_response(self) -> rapid::socket::RpcResponse {
+        rapid::socket::RpcResponse::Error(ciborium::value::Value::serialized(&self).unwrap())
     }
 }

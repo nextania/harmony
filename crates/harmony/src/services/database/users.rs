@@ -30,6 +30,8 @@ pub struct AddContactResult {
 pub struct KeyPackage {
     // encrypted local keystore blob (encrypted by a key derived from the user's password)
     pub encrypted_keys: Vec<u8>,
+    // monotonically increasing generation for compare-and-swap uploads (starts at 1)
+    pub generation: u64,
 }
 
 pub async fn get_presentable_presence(user: &User) -> Result<Presence> {
@@ -267,7 +269,7 @@ impl User {
                 };
                 let acceptor_state = RelationshipState::Established {
                     public_key,
-                    encapsulated,
+                    encapsulated: encapsulated.into(),
                     key_id: key_id.clone(),
                 };
 
@@ -470,21 +472,46 @@ impl User {
         Ok(channels)
     }
 
-    pub async fn set_key_package(&self, encrypted_keys: Vec<u8>) -> Result<()> {
+    pub async fn set_key_package(
+        &self,
+        encrypted_keys: Vec<u8>,
+        expected_generation: u64,
+    ) -> Result<u64> {
         let users = super::get_database().collection::<User>("users");
-        users
+        // Match only the document whose current generation is what the client
+        // expects. For the first upload (expected 0) the field is absent/null.
+        let filter = if expected_generation == 0 {
+            doc! {
+                "id": &self.id,
+                "$or": [
+                    { "key_package": { "$exists": false } },
+                    { "key_package": bson::Bson::Null },
+                ],
+            }
+        } else {
+            doc! {
+                "id": &self.id,
+                "key_package.generation": expected_generation as i64,
+            }
+        };
+        let new_generation = expected_generation + 1;
+        let result = users
             .update_one(
-                doc! { "id": &self.id },
+                filter,
                 doc! {
                     "$set": {
                         "key_package": bson::to_bson(&KeyPackage {
                             encrypted_keys,
+                            generation: new_generation,
                         })?
                     }
                 },
             )
             .await?;
-        Ok(())
+        if result.matched_count == 0 {
+            return Err(Error::KeystoreConflict);
+        }
+        Ok(new_generation)
     }
 
     pub async fn can_dm(&self, other: &User) -> Result<Option<String>> {

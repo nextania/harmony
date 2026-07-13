@@ -12,3 +12,5 @@ tokio = { version = "1", features = ["rt"] }
 thiserror = "2.0.12"
 serde = { workspace = true }
 harmony-api = { path = "../harmony-api" }
+reqwest = { version = "0.13.2", features = ["json"] }
+tracing = { workspace = true }

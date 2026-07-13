@@ -1,4 +1,5 @@
 // implements the AS account API
+// TODO: pull this from nextania/account in the future
 
 use std::sync::LazyLock;
 

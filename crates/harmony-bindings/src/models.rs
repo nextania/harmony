@@ -67,16 +67,55 @@ impl From<harmony_api::Presence> for Presence {
 }
 
 #[derive(Clone, Debug, uniffi::Record)]
-pub struct UnifiedPublicKey {
+pub struct HybridPublicKey {
     pub x25519: Vec<u8>,
     pub mlkem: Vec<u8>,
+}
+
+impl From<harmony_api::HybridPublicKey> for HybridPublicKey {
+    fn from(pk: harmony_api::HybridPublicKey) -> Self {
+        Self {
+            x25519: pk.x25519.to_vec(),
+            mlkem: pk.mlkem.to_vec(),
+        }
+    }
+}
+
+impl From<HybridPublicKey> for harmony_api::HybridPublicKey {
+    fn from(pk: HybridPublicKey) -> Self {
+        let mut x25519 = [0u8; 32];
+        let n = pk.x25519.len().min(32);
+        x25519[..n].copy_from_slice(&pk.x25519[..n]);
+        Self {
+            x25519,
+            mlkem: pk.mlkem.try_into().unwrap(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct UnifiedPublicKey {
+    pub hybrid: HybridPublicKey,
+    pub ed25519: Vec<u8>,
 }
 
 impl From<harmony_api::UnifiedPublicKey> for UnifiedPublicKey {
     fn from(pk: harmony_api::UnifiedPublicKey) -> Self {
         Self {
-            x25519: pk.x25519.to_vec(),
-            mlkem: pk.mlkem,
+            hybrid: pk.hybrid.into(),
+            ed25519: pk.ed25519.to_vec(),
+        }
+    }
+}
+
+impl From<UnifiedPublicKey> for harmony_api::UnifiedPublicKey {
+    fn from(pk: UnifiedPublicKey) -> Self {
+        let mut ed25519 = [0u8; 32];
+        let n = pk.ed25519.len().min(32);
+        ed25519[..n].copy_from_slice(&pk.ed25519[..n]);
+        Self {
+            hybrid: pk.hybrid.into(),
+            ed25519,
         }
     }
 }
@@ -113,7 +152,7 @@ impl From<harmony_api::RelationshipState> for RelationshipState {
                 encapsulated,
             } => RelationshipState::PendingKeyExchange {
                 public_key: public_key.map(Into::into),
-                encapsulated,
+                encapsulated: encapsulated.map(|e| e.to_vec()),
             },
             harmony_api::RelationshipState::Established {
                 public_key,
@@ -121,7 +160,7 @@ impl From<harmony_api::RelationshipState> for RelationshipState {
                 key_id,
             } => RelationshipState::Established {
                 public_key: public_key.into(),
-                encapsulated,
+                encapsulated: encapsulated.to_vec(),
                 key_id,
             },
             harmony_api::RelationshipState::Blocked => RelationshipState::Blocked,
@@ -206,6 +245,121 @@ impl From<harmony_api::EncryptionHint> for EncryptionHint {
     }
 }
 
+impl From<EncryptionHint> for harmony_api::EncryptionHint {
+    fn from(hint: EncryptionHint) -> Self {
+        match hint {
+            EncryptionHint::Mls => harmony_api::EncryptionHint::Mls,
+            EncryptionHint::Persistent => harmony_api::EncryptionHint::Persistent,
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct AvatarUrl {
+    pub id: String,
+    pub signature: String,
+    pub timestamp: u64,
+}
+
+impl From<harmony_api::AvatarUrl> for AvatarUrl {
+    fn from(avatar: harmony_api::AvatarUrl) -> Self {
+        Self {
+            id: avatar.id,
+            signature: avatar.signature,
+            timestamp: avatar.timestamp,
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct PublicUser {
+    pub id: String,
+    pub username: String,
+    pub display_name: String,
+    pub description: String,
+    pub avatar: Option<AvatarUrl>,
+}
+
+impl From<harmony_api::PublicUser> for PublicUser {
+    fn from(user: harmony_api::PublicUser) -> Self {
+        Self {
+            id: user.id,
+            username: user.username,
+            display_name: user.display_name,
+            description: user.description,
+            avatar: user.avatar.map(Into::into),
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Enum)]
+pub enum AddContactStage {
+    Request {
+        id: String,
+        public_key: UnifiedPublicKey,
+    },
+    Accept {
+        user_id: String,
+        public_key: UnifiedPublicKey,
+        encapsulated: Vec<u8>,
+    },
+    Finalize {
+        user_id: String,
+        public_key: UnifiedPublicKey,
+        encapsulated: Vec<u8>,
+    },
+}
+
+impl From<AddContactStage> for harmony_api::AddContactStage {
+    fn from(stage: AddContactStage) -> Self {
+        match stage {
+            AddContactStage::Request { id, public_key } => harmony_api::AddContactStage::Request {
+                id,
+                public_key: public_key.into(),
+            },
+            AddContactStage::Accept {
+                user_id,
+                public_key,
+                encapsulated,
+            } => harmony_api::AddContactStage::Accept {
+                user_id,
+                public_key: public_key.into(),
+                encapsulated: encapsulated.try_into().unwrap(),
+            },
+            AddContactStage::Finalize {
+                user_id,
+                public_key,
+                encapsulated,
+            } => harmony_api::AddContactStage::Finalize {
+                user_id,
+                public_key: public_key.into(),
+                encapsulated: encapsulated.try_into().unwrap(),
+            },
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct AddContactResponse {
+    pub profile: UserProfile,
+    pub state: RelationshipState,
+}
+
+impl From<harmony_api::AddContactResponse> for AddContactResponse {
+    fn from(response: harmony_api::AddContactResponse) -> Self {
+        Self {
+            profile: response.profile.into(),
+            state: response.state.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct AcceptInviteResult {
+    pub pending: bool,
+    pub channel_id: String,
+}
+
 #[derive(Clone, Debug, uniffi::Enum)]
 pub enum Channel {
     PrivateChannel {
@@ -276,6 +430,88 @@ impl From<harmony_api::Message> for Message {
             edited_at: message.edited_at,
             channel_id: message.channel_id,
             key_id: message.key_id,
+        }
+    }
+}
+
+impl From<Message> for harmony_api::Message {
+    fn from(message: Message) -> Self {
+        Self {
+            id: message.id,
+            content: message.content,
+            author_id: message.author_id,
+            edited_at: message.edited_at,
+            channel_id: message.channel_id,
+            key_id: message.key_id,
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Enum)]
+pub enum ContactAction {
+    Request {
+        user_id: String,
+    },
+    Accept {
+        user_id: String,
+    },
+    Finalize {
+        user_id: String,
+        public_key: UnifiedPublicKey,
+        encapsulated: Vec<u8>,
+    },
+    HandleEstablished {
+        user_id: String,
+        public_key: UnifiedPublicKey,
+        encapsulated: Vec<u8>,
+        key_id: String,
+    },
+}
+
+impl From<ContactAction> for harmony_api::ContactAction {
+    fn from(action: ContactAction) -> Self {
+        match action {
+            ContactAction::Request { user_id } => harmony_api::ContactAction::Request { user_id },
+            ContactAction::Accept { user_id } => harmony_api::ContactAction::Accept { user_id },
+            ContactAction::Finalize {
+                user_id,
+                public_key,
+                encapsulated,
+            } => harmony_api::ContactAction::Finalize {
+                user_id,
+                public_key: public_key.into(),
+                encapsulated: encapsulated.try_into().unwrap(),
+            },
+            ContactAction::HandleEstablished {
+                user_id,
+                public_key,
+                encapsulated,
+                key_id,
+            } => harmony_api::ContactAction::HandleEstablished {
+                user_id,
+                public_key: public_key.into(),
+                encapsulated: encapsulated.try_into().unwrap(),
+                key_id,
+            },
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Enum)]
+pub enum AddContactOutcome {
+    Response { response: AddContactResponse },
+    Established { user_id: String },
+}
+
+impl From<harmony_api::AddContactOutcome> for AddContactOutcome {
+    fn from(outcome: harmony_api::AddContactOutcome) -> Self {
+        match outcome {
+            harmony_api::AddContactOutcome::Response(response) => AddContactOutcome::Response {
+                response: response.into(),
+            },
+            harmony_api::AddContactOutcome::Established { user_id } => {
+                AddContactOutcome::Established { user_id }
+            }
         }
     }
 }
@@ -519,6 +755,35 @@ pub enum Event {
     },
 }
 
+impl From<harmony_api::ClientEvent> for Event {
+    fn from(event: harmony_api::ClientEvent) -> Self {
+        match event {
+            harmony_api::ClientEvent::Event(e) => e.into(),
+            harmony_api::ClientEvent::Lifecycle(l) => l.into(),
+        }
+    }
+}
+
+impl From<harmony_api::LifecycleEvent> for Event {
+    fn from(event: harmony_api::LifecycleEvent) -> Self {
+        match event {
+            harmony_api::LifecycleEvent::Connected => Event::Connected,
+            harmony_api::LifecycleEvent::Disconnected => Event::Disconnected,
+            harmony_api::LifecycleEvent::Reconnecting {
+                attempt,
+                max_attempts,
+            } => Event::Reconnecting {
+                attempt,
+                max_attempts,
+            },
+            harmony_api::LifecycleEvent::Reconnected => Event::Reconnected,
+            harmony_api::LifecycleEvent::ReconnectionFailed { attempts } => {
+                Event::ReconnectionFailed { attempts }
+            }
+        }
+    }
+}
+
 impl From<harmony_api::Event> for Event {
     fn from(event: harmony_api::Event) -> Self {
         match event {
@@ -554,19 +819,6 @@ impl From<harmony_api::Event> for Event {
                 channel_id: e.channel_id,
                 user_id: e.user_id,
             },
-            harmony_api::Event::Connected => Event::Connected,
-            harmony_api::Event::Disconnected => Event::Disconnected,
-            harmony_api::Event::Reconnecting {
-                attempt,
-                max_attempts,
-            } => Event::Reconnecting {
-                attempt,
-                max_attempts,
-            },
-            harmony_api::Event::Reconnected => Event::Reconnected,
-            harmony_api::Event::ReconnectionFailed { attempts } => {
-                Event::ReconnectionFailed { attempts }
-            }
             harmony_api::Event::UserJoinedCall {
                 call_id,
                 user_id,

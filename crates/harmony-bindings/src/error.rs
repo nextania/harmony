@@ -13,14 +13,11 @@ pub enum HarmonyBindingError {
     #[error("API error: {reason}")]
     Api { reason: String },
 
-    #[error("Resource not found")]
-    NotFound,
-
-    #[error("Permission denied")]
-    PermissionDenied,
-
     #[error("Invalid input: {reason}")]
     InvalidInput { reason: String },
+
+    #[error("Request timed out")]
+    Timeout,
 
     #[error("Not connected")]
     NotConnected,
@@ -34,11 +31,11 @@ pub enum HarmonyBindingError {
     #[error("Connection is reconnecting")]
     Reconnecting,
 
-    #[error("Rate limit exceeded")]
-    RateLimit,
-
     #[error("Internal error: {reason}")]
     Internal { reason: String },
+
+    #[error("Crypto error: {reason}")]
+    Crypto { reason: String },
 }
 
 impl From<harmony_api::HarmonyError> for HarmonyBindingError {
@@ -47,41 +44,48 @@ impl From<harmony_api::HarmonyError> for HarmonyBindingError {
             harmony_api::HarmonyError::WebSocket(e) => HarmonyBindingError::WebSocket {
                 reason: e.to_string(),
             },
-            harmony_api::HarmonyError::MessagePackSerialization(e) => {
-                HarmonyBindingError::Serialization {
-                    reason: e.to_string(),
-                }
-            }
-            harmony_api::HarmonyError::MessagePackDeserialization(e) => {
-                HarmonyBindingError::Serialization {
-                    reason: e.to_string(),
-                }
-            }
-            harmony_api::HarmonyError::MessagePackValue(e) => HarmonyBindingError::Serialization {
+            harmony_api::HarmonyError::Serialization(e) => HarmonyBindingError::Serialization {
                 reason: e.to_string(),
             },
-            harmony_api::HarmonyError::MessagePackExt(e) => HarmonyBindingError::Serialization {
+            harmony_api::HarmonyError::Http(e) => HarmonyBindingError::Internal {
                 reason: e.to_string(),
             },
-            harmony_api::HarmonyError::Authentication(reason) => {
-                HarmonyBindingError::Authentication { reason }
-            }
+            harmony_api::HarmonyError::AuthenticationClosed => HarmonyBindingError::Authentication {
+                reason: "connection closed before authentication".to_string(),
+            },
             harmony_api::HarmonyError::Api(api_error) => HarmonyBindingError::Api {
                 reason: format!("{:?}", api_error),
             },
-            harmony_api::HarmonyError::NotFound => HarmonyBindingError::NotFound,
-            harmony_api::HarmonyError::PermissionDenied => HarmonyBindingError::PermissionDenied,
-            harmony_api::HarmonyError::InvalidInput(reason) => {
-                HarmonyBindingError::InvalidInput { reason }
+            harmony_api::HarmonyError::InvalidServerUrl(e) => HarmonyBindingError::InvalidInput {
+                reason: format!("invalid server URL: {e}"),
+            },
+            harmony_api::HarmonyError::InvalidGroupKeyLength(len) => {
+                HarmonyBindingError::InvalidInput {
+                    reason: format!("group key must be exactly 32 bytes, got {len}"),
+                }
             }
+            harmony_api::HarmonyError::Timeout => HarmonyBindingError::Timeout,
             harmony_api::HarmonyError::NotConnected => HarmonyBindingError::NotConnected,
             harmony_api::HarmonyError::ConnectionLost => HarmonyBindingError::ConnectionLost,
-            harmony_api::HarmonyError::ReconnectionFailed { attempts } => {
+            harmony_api::HarmonyError::ReconnectionFailed { .. } => {
                 HarmonyBindingError::ReconnectionFailed
             }
             harmony_api::HarmonyError::Reconnecting => HarmonyBindingError::Reconnecting,
-            harmony_api::HarmonyError::RateLimit => HarmonyBindingError::RateLimit,
-            harmony_api::HarmonyError::Internal(reason) => HarmonyBindingError::Internal { reason },
+            harmony_api::HarmonyError::KeystoreSyncFailed { attempts } => {
+                HarmonyBindingError::Internal {
+                    reason: format!("keystore sync failed after {attempts} conflicting writes"),
+                }
+            }
+            error @ (harmony_api::HarmonyError::ContactNotFound
+            | harmony_api::HarmonyError::RequesterPublicKeyUnavailable
+            | harmony_api::HarmonyError::UnexpectedRelationshipState) => {
+                HarmonyBindingError::Internal {
+                    reason: error.to_string(),
+                }
+            }
+            harmony_api::HarmonyError::Crypto(e) => HarmonyBindingError::Crypto {
+                reason: e.to_string(),
+            },
         }
     }
 }

@@ -25,20 +25,6 @@ impl fmt::Display for Error {
     }
 }
 
-impl From<rmp_serde::encode::Error> for Error {
-    fn from(e: rmp_serde::encode::Error) -> Self {
-        error!("{}", e);
-        Error::SerializeError
-    }
-}
-
-impl From<rmp_serde::decode::Error> for Error {
-    fn from(e: rmp_serde::decode::Error) -> Self {
-        error!("{}", e);
-        Error::SerializeError
-    }
-}
-
 impl From<tokio::io::Error> for Error {
     fn from(e: tokio::io::Error) -> Self {
         error!("{}", e);

@@ -70,6 +70,11 @@ pub async fn get_current_user(
             .key_package
             .as_ref()
             .map(|kp| kp.encrypted_keys.clone()),
+        keystore_generation: user
+            .key_package
+            .as_ref()
+            .map(|kp| kp.generation)
+            .unwrap_or(0),
         presence: user.presence.clone(),
     }))
 }

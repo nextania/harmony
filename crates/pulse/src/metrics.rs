@@ -1,9 +1,3 @@
-//! Lazy-initialised OpenTelemetry instruments for the pulse service.
-//!
-//! All instruments are created from the *global* MeterProvider, so they will
-//! export data only after `common::telemetry::init_telemetry` has registered
-//! the provider (which happens in `main()` before any connection is accepted).
-
 use std::sync::LazyLock;
 
 use opentelemetry::{global, metrics::UpDownCounter};

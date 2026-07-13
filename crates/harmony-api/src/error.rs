@@ -1,5 +1,3 @@
-//! Error types for the Harmony API client
-
 pub use harmony_types::errors::Error as ApiError;
 use thiserror::Error;
 

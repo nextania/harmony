@@ -72,7 +72,7 @@ use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::{
-    api::{ApiClient, Channel, CurrentUser, account},
+    api::{ApiClient, UserProfile, account},
     views::{
         login::{LoginMessage, LoginView},
         main::MainView,
@@ -81,7 +81,6 @@ use crate::{
 };
 use crate::{
     media::screen_capture::ScreenCaptureConfig,
-    theme::TEXT_PRIMARY,
     views::{
         dialogs::{
             backend::{BackendMessage, BackendView},
@@ -95,14 +94,6 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub struct ChatUser {
-    pub name: String,
-    pub avatar_color_start: Color,
-    #[allow(dead_code)]
-    pub avatar_color_end: Color,
-}
-
-#[derive(Debug, Clone)]
 pub enum MessageContent {
     Text(String),
     CallCard { channel: String, duration: String },
@@ -111,10 +102,30 @@ pub enum MessageContent {
 #[derive(Debug, Clone)]
 pub struct ChatMessage {
     pub id: String,
-    pub user: MessageAuthor,
+    pub author_id: String,
     pub time: i64,
     pub formatted_time: String,
     pub content: MessageContent,
+}
+
+impl ChatMessage {
+    pub fn new(msg: &harmony_api::Message, text: String) -> Self {
+        let time = ulid::Ulid::from_string(&msg.id)
+            .map(|u| {
+                u.datetime()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as i64
+            })
+            .unwrap_or_else(|_| chrono::Utc::now().timestamp_millis());
+        ChatMessage {
+            id: msg.id.clone(),
+            author_id: msg.author_id.clone(),
+            time,
+            formatted_time: format_message_time(time),
+            content: MessageContent::Text(text),
+        }
+    }
 }
 
 pub fn format_message_time(timestamp_millis: i64) -> String {
@@ -129,41 +140,6 @@ pub fn format_message_time(timestamp_millis: i64) -> String {
             }
         })
         .unwrap_or_else(|| "Invalid time".to_string())
-}
-
-#[derive(Debug, Clone)]
-pub enum MessageAuthor {
-    User {
-        id: String,
-        name: String,
-        avatar_color_start: Color,
-        avatar_color_end: Color,
-    },
-    System,
-}
-
-impl MessageAuthor {
-    pub fn id(&self) -> String {
-        match self {
-            MessageAuthor::User { id, .. } => id.clone(),
-            MessageAuthor::System => "SYSTEM".into(),
-            // this will never collide with actual ids since they are ulids
-        }
-    }
-    pub fn name(&self) -> String {
-        match self {
-            MessageAuthor::User { name, .. } => name.clone(),
-            MessageAuthor::System => "System".into(),
-        }
-    }
-    pub fn avatar_color(&self) -> Color {
-        match self {
-            MessageAuthor::User {
-                avatar_color_start, ..
-            } => *avatar_color_start,
-            MessageAuthor::System => TEXT_PRIMARY,
-        }
-    }
 }
 
 rust_i18n::i18n!("i18n");
@@ -216,7 +192,11 @@ struct App {
 
 pub type EventReceiver = UnboundedReceiver<harmony_api::Event>;
 
-pub type LoginResult = (Arc<ApiClient>, CurrentUser, HashMap<String, Channel>);
+pub type LoginResult = (
+    Arc<ApiClient>,
+    HashMap<String, harmony_api::Channel>,
+    HashMap<String, UserProfile>,
+);
 
 #[derive(Clone)]
 pub enum Message {
@@ -384,7 +364,7 @@ impl App {
                 tasks.push(close_splash);
                 return Task::batch(tasks);
             }
-            Message::LoginFinished((api, current_user, conversations)) => {
+            Message::LoginFinished((api, conversations, profiles)) => {
                 let (main_id, open_task) = window::open(window::Settings {
                     size: iced::Size::new(1100.0, 700.0),
                     position: window::Position::Centered,
@@ -414,8 +394,8 @@ impl App {
                     main_id,
                     AppWindow::new(AppWindowView::Main(MainView::new(
                         api,
-                        current_user,
                         conversations,
+                        profiles,
                     ))),
                 );
 
@@ -528,8 +508,8 @@ impl App {
             }
             Message::ScreenCaptureSelected(target, config) => {
                 let close = self.close_dialog(|v| matches!(v, AppWindowView::ScreenCapture(_)));
-                let start = Task::done(Message::Main(MainMessage::StartScreenCapture(
-                    target, config,
+                let start = Task::done(Message::Main(MainMessage::Call(
+                    views::main::call::CallMessage::StartScreenCapture(target, config),
                 )));
                 return Task::batch([close, start]);
             }

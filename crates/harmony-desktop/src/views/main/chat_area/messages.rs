@@ -7,7 +7,7 @@ use iced::{
 use crate::{
     MessageContent,
     theme::{ACCENT_PURPLE_DIM, BG_APP, BG_CALL_CARD, BORDER, DM_SANS, TEXT_MUTED, TEXT_PRIMARY},
-    views::main::{MainMessage, MainView},
+    views::main::{MainMessage, MainView, call::CallMessage},
     widgets::button::ButtonExt,
 };
 
@@ -31,7 +31,7 @@ pub fn main_chat(state: &MainView) -> Element<MainMessage> {
         let is_continuation = !matches!(&msg.content, MessageContent::CallCard { .. })
             && match (group_user.as_ref(), group_start_minutes) {
                 (Some(gu), Some(gs)) => {
-                    *gu == msg.user.id()
+                    *gu == msg.author_id
                         && msg_ts.signed_duration_since(gs).num_minutes()
                             <= GROUP_TIME_LIMIT_MINUTES as i64
                 }
@@ -43,7 +43,7 @@ pub fn main_chat(state: &MainView) -> Element<MainMessage> {
                 messages_col = messages_col.push(Space::new().height(11));
             }
             first_group = false;
-            group_user = Some(msg.user.id());
+            group_user = Some(msg.author_id.clone());
             group_start_minutes = Some(msg_ts);
         }
 
@@ -98,7 +98,7 @@ pub fn main_chat(state: &MainView) -> Element<MainMessage> {
                 .center_x(Length::Fill),
             )
             .width(Length::Shrink)
-            .on_press(MainMessage::JoinCall)
+            .on_press(MainMessage::Call(CallMessage::Join))
             .padding(Padding::from([4, 24]))
             .style(|_theme, _status| button::Style {
                 background: Some(iced::Background::Color(ACCENT_PURPLE_DIM)),
@@ -159,7 +159,8 @@ pub fn main_chat(state: &MainView) -> Element<MainMessage> {
                 .align_y(alignment::Vertical::Top)
                 .into()
         } else {
-            let avatar_color = msg.user.avatar_color();
+            let profile = state.profile(&msg.author_id);
+            let avatar_color = profile.avatar_color_start;
             let avatar = container(text("").size(1))
                 .width(40)
                 .height(40)
@@ -169,7 +170,7 @@ pub fn main_chat(state: &MainView) -> Element<MainMessage> {
                     ..Default::default()
                 });
 
-            let username = text(msg.user.name())
+            let username = text(profile.display_name)
                 .size(16)
                 .color(TEXT_PRIMARY)
                 .font(Font {

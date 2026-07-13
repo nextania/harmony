@@ -8,6 +8,7 @@ use crate::{
     theme::{ACCENT_PURPLE, BG_SCREENSHARE_PANEL, DM_SANS, TEXT_PRIMARY},
     views::main::{
         ChatMode, MainMessage, MainView,
+        call::CallMessage,
         chat_area::{input::chat_frame, messages::main_chat, voice::voice_area},
     },
     widgets::{button::ButtonExt, styles},
@@ -41,7 +42,7 @@ fn screenshare_banner(state: &MainView) -> Option<Element<MainMessage>> {
                         )
                         .padding(Padding::from([2, 8])),
                     )
-                    .on_press(MainMessage::ToggleScreenShare)
+                    .on_press(MainMessage::Call(CallMessage::ToggleScreenShare))
                     .style(styles::accent_dim)
                     .cursor_default(),
                 ]
@@ -59,7 +60,7 @@ fn screenshare_banner(state: &MainView) -> Option<Element<MainMessage>> {
         )
     } else if let Some(participant) = state.remote_screenshare_available() {
         let is_consuming = state.is_consuming_remote_screenshare();
-        let name = &participant.profile.display_name;
+        let name = state.profile(&participant.user_id).display_name;
         let label = if is_consuming {
             format!("Viewing {name}'s screen")
         } else {
@@ -72,7 +73,9 @@ fn screenshare_banner(state: &MainView) -> Option<Element<MainMessage>> {
                     container(text("View").size(12).color(TEXT_PRIMARY).font(DM_SANS))
                         .padding(Padding::from([2, 8])),
                 )
-                .on_press(MainMessage::ConsumeScreenTrack(track_id.to_string()))
+                .on_press(MainMessage::Call(CallMessage::ConsumeScreenTrack(
+                    track_id.to_string(),
+                )))
                 .style(styles::accent_dim)
                 .cursor_default()
                 .into()
@@ -88,7 +91,7 @@ fn screenshare_banner(state: &MainView) -> Option<Element<MainMessage>> {
                     )
                     .padding(Padding::from([2, 8])),
                 )
-                .on_press(MainMessage::StopViewingScreenTrack)
+                .on_press(MainMessage::Call(CallMessage::StopViewingScreenTrack))
                 .style(styles::accent_dim)
                 .cursor_default()
                 .into(),

@@ -4,13 +4,16 @@ use iced::{
 };
 
 use crate::{
-    api::{Contact, ContactStatus},
+    api::UserProfile,
     icons::{FLUENT_ICONS, Icon},
     theme::{
         ACCENT_PURPLE, BG_HOVER, BG_PANEL, BG_SELECTED, BG_SUNKEN, BORDER, DANGER_RED, DM_SANS,
         TEXT_MUTED, TEXT_PRIMARY, TEXT_WHITE,
     },
-    views::main::{MainMessage, MainView},
+    views::main::{
+        MainMessage, MainView,
+        contacts::{Contact, ContactStatus, ContactsMessage},
+    },
     widgets::{button::ButtonExt, styles},
 };
 
@@ -20,9 +23,9 @@ pub fn people_list(state: &MainView) -> Element<MainMessage> {
         ..DM_SANS
     });
 
-    let add_input = text_input("Add by username...", &state.add_contact_input)
-        .on_input(MainMessage::AddContactInputChanged)
-        .on_submit(MainMessage::AddContactSubmit)
+    let add_input = text_input("Add by username...", &state.contacts.add_input)
+        .on_input(|s| MainMessage::Contacts(ContactsMessage::AddInputChanged(s)))
+        .on_submit(MainMessage::Contacts(ContactsMessage::AddSubmit))
         .size(14)
         .padding(Padding::from([6, 10]))
         .width(Length::Fill)
@@ -46,7 +49,7 @@ pub fn people_list(state: &MainView) -> Element<MainMessage> {
             .color(TEXT_PRIMARY)
             .font(FLUENT_ICONS),
     )
-    .on_press(MainMessage::AddContactSubmit)
+    .on_press(MainMessage::Contacts(ContactsMessage::AddSubmit))
     .padding(Padding::from([6, 8]))
     .style(styles::ghost)
     .cursor_default();
@@ -57,14 +60,14 @@ pub fn people_list(state: &MainView) -> Element<MainMessage> {
 
     let mut contact_items = Column::new().spacing(2).width(Length::Fill);
 
-    if !state.contacts_loaded {
+    if !state.contacts.loaded {
         contact_items = contact_items.push(
             text("Loading contacts...")
                 .size(14)
                 .color(TEXT_MUTED)
                 .font(DM_SANS),
         );
-    } else if state.contacts.is_empty() {
+    } else if state.contacts.list.is_empty() {
         contact_items = contact_items.push(
             text("No contacts yet")
                 .size(14)
@@ -72,9 +75,10 @@ pub fn people_list(state: &MainView) -> Element<MainMessage> {
                 .font(DM_SANS),
         );
     } else {
-        for contact in &state.contacts {
+        for contact in &state.contacts.list {
             if contact.status != ContactStatus::None {
-                contact_items = contact_items.push(contact_row(contact));
+                contact_items =
+                    contact_items.push(contact_row(contact, state.profile(&contact.user_id)));
             }
         }
     }
@@ -99,8 +103,7 @@ pub fn people_list(state: &MainView) -> Element<MainMessage> {
         .into()
 }
 
-fn contact_row(contact: &Contact) -> Element<MainMessage> {
-    let profile = &contact.profile;
+fn contact_row(contact: &Contact, profile: UserProfile) -> Element<'static, MainMessage> {
     let color_start = profile.avatar_color_start;
 
     let avatar = container(text("").size(1))
@@ -134,7 +137,7 @@ fn contact_row(contact: &Contact) -> Element<MainMessage> {
             icon_action_btn(
                 Icon::DeleteRegular,
                 DANGER_RED,
-                MainMessage::RemoveContact(profile.id.clone()),
+                MainMessage::Contacts(ContactsMessage::Remove(profile.id.clone())),
             ),
         ]
         .spacing(2)
@@ -142,23 +145,23 @@ fn contact_row(contact: &Contact) -> Element<MainMessage> {
         ContactStatus::PendingRemote => icon_action_btn(
             Icon::DismissRegular,
             TEXT_MUTED,
-            MainMessage::RemoveContact(profile.id.clone()),
+            MainMessage::Contacts(ContactsMessage::Remove(profile.id.clone())),
         ),
         ContactStatus::None => icon_action_btn(
             Icon::DismissRegular,
             TEXT_MUTED,
-            MainMessage::RemoveContact(profile.id.clone()),
+            MainMessage::Contacts(ContactsMessage::Remove(profile.id.clone())),
         ),
         ContactStatus::PendingLocal => row![
             icon_action_btn(
                 Icon::CheckmarkRegular,
                 ACCENT_PURPLE,
-                MainMessage::AcceptContact(profile.id.clone()),
+                MainMessage::Contacts(ContactsMessage::Accept(profile.id.clone())),
             ),
             icon_action_btn(
                 Icon::DismissRegular,
                 DANGER_RED,
-                MainMessage::RemoveContact(profile.id.clone()),
+                MainMessage::Contacts(ContactsMessage::Remove(profile.id.clone())),
             ),
         ]
         .spacing(2)
@@ -166,7 +169,7 @@ fn contact_row(contact: &Contact) -> Element<MainMessage> {
         ContactStatus::Blocked => icon_action_btn(
             Icon::PersonProhibitedRegular,
             TEXT_MUTED,
-            MainMessage::UnblockContact(profile.id.clone()),
+            MainMessage::Contacts(ContactsMessage::Unblock(profile.id.clone())),
         ),
     };
 

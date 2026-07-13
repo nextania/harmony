@@ -4,7 +4,6 @@ use iced::{
 };
 
 use crate::{
-    api::Channel,
     icons::{FLUENT_ICONS, Icon},
     theme::{ACCENT_PURPLE, BG_PANEL, BG_SUNKEN, BORDER, DM_SANS, TEXT_PLACEHOLDER, TEXT_PRIMARY},
     views::main::{ChatMode, MainMessage, MainView},
@@ -22,11 +21,22 @@ pub fn top_bar(state: &MainView) -> Element<MainMessage> {
         )
         .expect("This should be defined")
     {
-        Channel::Private { other, .. } => (other.avatar_color_start, other.display_name.clone()),
-        Channel::Group { name, .. } => (
-            color!(0x555555),
-            name.clone().unwrap_or("Unnamed Group".to_string()),
-        ),
+        harmony_api::Channel::PrivateChannel {
+            initiator_id,
+            target_id,
+            ..
+        } => {
+            let other_id = if *initiator_id == state.current_user_id {
+                target_id
+            } else {
+                initiator_id
+            };
+            let other = state.profile(other_id);
+            (other.avatar_color_start, other.display_name)
+        }
+        harmony_api::Channel::GroupChannel { .. } => {
+            (color!(0x555555), "Unnamed Group".to_string())
+        }
     };
 
     let avatar = container(text("").size(1))

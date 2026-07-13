@@ -1,3 +1,7 @@
+//! # Pulse API Client Library
+//!
+//! A Rust client library for interacting with the Harmony's voice server, Pulse.
+
 mod client;
 mod error;
 mod events;

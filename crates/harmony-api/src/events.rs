@@ -1,5 +1,3 @@
-//! Events that can be received from the Harmony server
-
 use ciborium::value::Value;
 use serde::{Deserialize, Serialize};
 

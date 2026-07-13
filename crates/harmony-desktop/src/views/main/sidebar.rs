@@ -181,15 +181,16 @@ pub fn sidebar(state: &MainView) -> Element<MainMessage> {
         })
         .cursor_default();
 
+    let current_profile = state.profile(&state.current_user_id);
     let profile_info = column![
-        text(state.current_user.profile.display_name.clone())
+        text(current_profile.display_name)
             .size(14)
             .color(TEXT_PRIMARY)
             .font(Font {
                 weight: iced::font::Weight::Bold,
                 ..DM_SANS
             }),
-        text(state.current_user.profile.username.clone())
+        text(current_profile.username)
             .size(12)
             .color(TEXT_MUTED)
             .font(DM_SANS),

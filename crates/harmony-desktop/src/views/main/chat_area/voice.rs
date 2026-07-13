@@ -6,13 +6,15 @@ use iced::{
 };
 
 use crate::{
-    api::CallState,
     icons::{FLUENT_ICONS, Icon},
     theme::{
         ACCENT_PURPLE, BG_APP, BG_CTRL_INACTIVE, BG_PARTICIPANT_CARD, BG_PARTICIPANT_LABEL,
         BG_SCREENSHARE_PANEL, DANGER_RED, DM_SANS, OVERLAY, TEXT_MUTED, TEXT_PRIMARY,
     },
-    views::main::{MainMessage, MainView},
+    views::main::{
+        MainMessage, MainView,
+        call::{CallMessage, CallState},
+    },
     widgets::{
         button::ButtonExt, remote_screen::RemoteScreenProgram, screen_share::ScreenShareProgram,
         styles,
@@ -20,9 +22,9 @@ use crate::{
 };
 
 pub fn voice_area(state: &MainView) -> Element<MainMessage> {
-    let current_user_id = &state.current_user.profile.id;
+    let current_user_id = &state.current_user_id;
 
-    match &state.current_call_state {
+    match &state.call.state {
         None => {
             let start_btn = button(
                 container(
@@ -35,7 +37,7 @@ pub fn voice_area(state: &MainView) -> Element<MainMessage> {
                 .center_x(Length::Fill),
             )
             .width(Length::Shrink)
-            .on_press(MainMessage::StartCall)
+            .on_press(MainMessage::Call(CallMessage::Start))
             .padding(Padding::from([6, 12]))
             .style(styles::accent_dim)
             .cursor_default();
@@ -62,13 +64,13 @@ pub fn voice_area(state: &MainView) -> Element<MainMessage> {
             let user_in_call = call
                 .participants
                 .iter()
-                .any(|p| p.profile.id == *current_user_id);
+                .any(|p| p.user_id == *current_user_id);
 
             if !user_in_call {
                 let names: Vec<String> = call
                     .participants
                     .iter()
-                    .map(|p| p.profile.display_name.clone())
+                    .map(|p| state.profile(&p.user_id).display_name)
                     .collect();
                 let in_call_label = text(format!(
                     "In call: {}",
@@ -93,7 +95,7 @@ pub fn voice_area(state: &MainView) -> Element<MainMessage> {
                     .center_x(Length::Fill),
                 )
                 .width(Length::Shrink)
-                .on_press(MainMessage::JoinCall)
+                .on_press(MainMessage::Call(CallMessage::Join))
                 .padding(Padding::from([6, 12]))
                 .style(styles::accent_dim)
                 .cursor_default();
@@ -118,12 +120,12 @@ pub fn voice_area(state: &MainView) -> Element<MainMessage> {
 }
 
 fn voice_in_call<'a>(state: &'a MainView, call: &'a CallState) -> Element<'a, MainMessage> {
-    let current_user_id = &state.current_user.profile.id;
+    let current_user_id = &state.current_user_id;
 
     let my_tracks = call
         .participants
         .iter()
-        .find(|p| p.profile.id == *current_user_id)
+        .find(|p| p.user_id == *current_user_id)
         .map(|p| &p.tracks);
 
     let mic_active = my_tracks.map_or(false, |t| t.audio);
@@ -135,11 +137,11 @@ fn voice_in_call<'a>(state: &'a MainView, call: &'a CallState) -> Element<'a, Ma
         .participants
         .iter()
         .find(|p| p.tracks.screen)
-        .map(|p| p.profile.display_name.as_str());
+        .map(|p| state.profile(&p.user_id).display_name);
 
-    if let Some(sharer_name) = screen_sharer {
+    if let Some(sharer_name) = screen_sharer.clone() {
         let video_view: Element<MainMessage> = if screen_active {
-            match &state.screen_capture_preview {
+            match &state.call.screen_capture_preview {
                 Some(frame_swap) => {
                     let program = ScreenShareProgram::new(Arc::clone(frame_swap));
                     shader(program)
@@ -158,7 +160,7 @@ fn voice_in_call<'a>(state: &'a MainView, call: &'a CallState) -> Element<'a, Ma
                 .into(),
             }
         } else if state.is_consuming_remote_screenshare() {
-            match &state.remote_screen_frame {
+            match &state.call.remote_screen_frame {
                 Some(frame_swap) => {
                     let program = RemoteScreenProgram::new(Arc::clone(frame_swap));
                     shader(program)
@@ -196,7 +198,9 @@ fn voice_in_call<'a>(state: &'a MainView, call: &'a CallState) -> Element<'a, Ma
                         )
                         .padding(Padding::from([4, 12])),
                     )
-                    .on_press(MainMessage::ConsumeScreenTrack(track_id.to_string()))
+                    .on_press(MainMessage::Call(CallMessage::ConsumeScreenTrack(
+                        track_id.to_string(),
+                    )))
                     .style(styles::accent_dim)
                     .cursor_default(),
                 );
@@ -252,7 +256,7 @@ fn voice_in_call<'a>(state: &'a MainView, call: &'a CallState) -> Element<'a, Ma
                 ..Default::default()
             }),
         )
-        .on_press(MainMessage::ToggleScreenshareFullscreen)
+        .on_press(MainMessage::Call(CallMessage::ToggleScreenshareFullscreen))
         .padding(0)
         .cursor_default()
         .into();
@@ -362,9 +366,10 @@ fn voice_in_call<'a>(state: &'a MainView, call: &'a CallState) -> Element<'a, Ma
 
     let mut participants_row_content = row![].spacing(10);
     for participant in call.participants.iter() {
+        let profile = state.profile(&participant.user_id);
         participants_row_content = participants_row_content.push(participant_card(
-            &participant.profile.display_name,
-            participant.profile.avatar_color_start,
+            &profile.display_name,
+            profile.avatar_color_start,
             participant.tracks.audio,
         ));
     }
@@ -372,7 +377,7 @@ fn voice_in_call<'a>(state: &'a MainView, call: &'a CallState) -> Element<'a, Ma
         .center_x(Length::Fill)
         .into();
 
-    if !state.screenshare_fullscreen {
+    if !state.call.screenshare_fullscreen {
         content.push(participants_row);
         if screen_sharer.is_none() {
             content.push(Space::new().height(Length::Fill).into());
@@ -425,16 +430,24 @@ fn voice_in_call<'a>(state: &'a MainView, call: &'a CallState) -> Element<'a, Ma
         BG_CTRL_INACTIVE
     };
 
-    if !state.screenshare_fullscreen {
+    if !state.call.screenshare_fullscreen {
         let controls = container(
             row![
-                ctrl_btn(cam_icon, cam_bg, MainMessage::ToggleCamera),
-                ctrl_btn(mic_icon, mic_bg, MainMessage::ToggleMic),
-                ctrl_btn(screen_icon, screen_bg, MainMessage::ToggleScreenShare),
+                ctrl_btn(
+                    cam_icon,
+                    cam_bg,
+                    MainMessage::Call(CallMessage::ToggleCamera)
+                ),
+                ctrl_btn(mic_icon, mic_bg, MainMessage::Call(CallMessage::ToggleMic)),
+                ctrl_btn(
+                    screen_icon,
+                    screen_bg,
+                    MainMessage::Call(CallMessage::ToggleScreenShare)
+                ),
                 ctrl_btn(
                     Icon::CallEndFilled.unicode(),
                     DANGER_RED,
-                    MainMessage::LeaveCall
+                    MainMessage::Call(CallMessage::Leave)
                 ),
             ]
             .spacing(8),

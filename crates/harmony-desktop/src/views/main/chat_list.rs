@@ -24,27 +24,36 @@ pub fn chat_list(state: &MainView) -> Element<MainMessage> {
             .as_ref()
             .map_or(false, |selected| selected == id);
         let (channel_name, channel_icon) = match conv {
-            crate::api::Channel::Private { other, .. } => {
+            harmony_api::Channel::PrivateChannel {
+                initiator_id,
+                target_id,
+                ..
+            } => {
+                let other_id = if *initiator_id == state.current_user_id {
+                    target_id
+                } else {
+                    initiator_id
+                };
+                let other = state.profile(other_id);
+                let avatar_color = other.avatar_color_start;
                 let avatar_placeholder =
                     container(text("").size(1))
                         .width(30)
                         .height(30)
                         .style(move |_theme| container::Style {
-                            background: Some(iced::Background::Color(other.avatar_color_start)),
+                            background: Some(iced::Background::Color(avatar_color)),
                             border: Border::default().rounded(8),
                             ..Default::default()
                         });
-                (other.display_name.as_str(), avatar_placeholder)
+                (other.display_name, avatar_placeholder)
             }
-            crate::api::Channel::Group {
-                name, participants, ..
-            } => {
+            harmony_api::Channel::GroupChannel { .. } => {
                 todo!("Group chat icons not implemented yet");
             }
         };
 
         let is_call_with_screenshare =
-            state.current_call.as_ref() == Some(id) && state.has_active_screenshare();
+            state.call.channel_id.as_ref() == Some(id) && state.has_active_screenshare();
         let screenshare_indicator: Option<Element<MainMessage>> = if is_call_with_screenshare {
             Some(
                 text(Icon::ShareScreenPersonFilled.unicode())
@@ -57,7 +66,7 @@ pub fn chat_list(state: &MainView) -> Element<MainMessage> {
             None
         };
 
-        let name = text(channel_name.to_string())
+        let name = text(channel_name)
             .size(16)
             .color(TEXT_PRIMARY)
             .font(Font {

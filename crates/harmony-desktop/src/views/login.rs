@@ -25,14 +25,14 @@ use crate::{
     widgets::{button::ButtonExt, styles},
 };
 
-use crate::api::{Channel, CurrentUser};
+use crate::api::UserProfile;
 use std::{collections::HashMap, sync::Arc};
 
 enum LoginFlow {
     Done(
         Arc<ApiClient>,
-        CurrentUser,
-        HashMap<String, Channel>,
+        HashMap<String, harmony_api::Channel>,
+        HashMap<String, UserProfile>,
         Receiver<ClientEvent>,
     ),
     NeedsMfa(account::LoginMfa),
@@ -107,10 +107,8 @@ impl LoginView {
                         match account::login(&backend_account, &email, &password).await? {
                             account::LoginResult::Success((token, encrypted_key)) => {
                                 let (client, stream) = ApiClient::connect(&backend_account, &backend_harmony, &token, &encrypted_key, &password).await?;
-                                let current_user = client.get_current_user().await?;
-                                let conversations = client.get_conversations().await?
-                                    .into_iter().map(|c| (c.id(), c)).collect();
-                                Ok::<_, RenderableError>(LoginFlow::Done(client, current_user, conversations, stream))
+                                let (conversations, profiles) = crate::api::load_session(&client).await?;
+                                Ok::<_, RenderableError>(LoginFlow::Done(client, conversations, profiles, stream))
                             }
                             account::LoginResult::RequiresContinuation(mfa) => {
                                 Ok::<_, RenderableError>(LoginFlow::NeedsMfa(mfa))
@@ -118,8 +116,8 @@ impl LoginView {
                         }
                     }.await;
                     match result {
-                        Ok(LoginFlow::Done(client, user, convs, mut stream)) => {
-                            yield Message::LoginFinished((client, user, convs));
+                        Ok(LoginFlow::Done(client, convs, profiles, mut stream)) => {
+                            yield Message::LoginFinished((client, convs, profiles));
                             loop {
                                 match stream.recv().await {
                                     Ok(event) => yield Message::Main(MainMessage::ServerEvent(event)),

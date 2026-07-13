@@ -6,8 +6,8 @@ use std::sync::{
 use argon2::Argon2;
 use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
 use chacha20poly1305::{
-    AeadCore, KeyInit, XChaCha20Poly1305,
-    aead::{Aead, OsRng},
+    Key, KeyInit, XChaCha20Poly1305, XNonce,
+    aead::{Aead, Generate},
 };
 use tokio::sync::Mutex;
 use zeroize::Zeroizing;
@@ -37,7 +37,7 @@ fn key_derivation(msg: impl Into<String>) -> HarmonyError {
 const MAX_KEYSTORE_SYNC_RETRIES: u32 = 5;
 
 fn encrypt_keystore(cipher: &XChaCha20Poly1305, ks: &Keystore) -> Vec<u8> {
-    let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
+    let nonce = XNonce::generate();
     let ciphertext = cipher
         .encrypt(&nonce, ks.to_bytes().as_ref())
         .expect("XChaCha20-Poly1305 encryption should not fail");
@@ -48,7 +48,7 @@ fn decrypt_keystore(cipher: &XChaCha20Poly1305, blob: &[u8]) -> Result<Keystore>
     if blob.len() < 24 {
         return Err(CryptoError::InvalidKeystore("stored blob too short".into()).into());
     }
-    let nonce = &blob[..24];
+    let nonce: &[u8; 24] = &blob[..24].try_into().unwrap();
     let ciphertext = &blob[24..];
     let decrypted = cipher
         .decrypt(nonce.into(), ciphertext)
@@ -103,7 +103,7 @@ pub fn derive_key_b(encrypted_key: &str, password: &str) -> Result<Zeroizing<[u8
         .hash_password_into(password.as_bytes(), salt, password_key_a.as_mut())
         .map_err(|e| key_derivation(format!("failed to derive key from password: {e}")))?;
     let cipher = XChaCha20Poly1305::new((&*password_key_a).into());
-    let nonce = &encrypted_key_bytes[16..40];
+    let nonce: &[u8; 24] = &encrypted_key_bytes[16..40].try_into().unwrap();
     let ciphertext = &encrypted_key_bytes[40..];
     let decrypted = Zeroizing::new(
         cipher
@@ -474,7 +474,7 @@ impl EncryptedClient {
     }
 
     pub async fn create_group_channel(&self, metadata_plaintext: &[u8]) -> Result<Channel> {
-        let gen_key = XChaCha20Poly1305::generate_key(OsRng);
+        let gen_key = Key::generate();
         let mut key = [0u8; 32];
         key.copy_from_slice(&gen_key);
         let encrypted_metadata =

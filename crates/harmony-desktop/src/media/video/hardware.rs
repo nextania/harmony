@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use vk_video::{
+use gpu_video::{
     BytesDecoder, EncodedInputChunk, VulkanDevice, VulkanInstance,
     parameters::{DecoderParameters, VulkanAdapterDescriptor, VulkanDeviceDescriptor},
 };
@@ -72,7 +72,7 @@ impl VideoDecoder for HardwareVideoDecoder {
         let decoder = self.decoder.get_or_insert_with(|| {
             tracing::info!("creating new Vulkan bytes decoder for H.264");
             self.device
-                .create_bytes_decoder(DecoderParameters::default())
+                .create_bytes_decoder_h264(DecoderParameters::default())
                 .expect("failed to create Vulkan bytes decoder")
         });
 

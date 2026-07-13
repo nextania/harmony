@@ -75,6 +75,7 @@ pub struct ApiClient {
     users: Arc<UserManager>,
 }
 
+// TODO: move more to harmony-api
 impl ApiClient {
     pub async fn connect(
         as_url: &str,

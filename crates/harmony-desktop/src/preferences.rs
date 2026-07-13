@@ -1,4 +1,4 @@
-use keyring::Entry;
+use keyring_core::Entry;
 use rkyv::{Archive, Deserialize, Serialize};
 // user preferences
 

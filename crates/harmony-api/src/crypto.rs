@@ -1,12 +1,13 @@
 use chacha20poly1305::{
-    KeyInit, XChaCha20Poly1305,
-    aead::{Aead, AeadCore, OsRng, Payload},
+    KeyInit, XChaCha20Poly1305, XNonce,
+    aead::{Aead, Payload},
 };
 use ed25519_dalek::SigningKey;
+use getrandom::{SysRng, rand_core::UnwrapErr};
 use hkdf::Hkdf;
 use ml_kem::{
-    Decapsulate, DecapsulationKey768, Encapsulate, EncapsulationKey768, Kem, KeyExport, MlKem768,
-    Seed, TryKeyInit,
+    Decapsulate, DecapsulationKey768, Encapsulate, EncapsulationKey768, Generate, Kem, KeyExport,
+    MlKem768, Seed, TryKeyInit,
 };
 use sha2::Sha256;
 use x25519_dalek::{PublicKey, StaticSecret};
@@ -100,7 +101,7 @@ pub struct PersistentEncryption {
 
 impl PersistentEncryption {
     pub fn generate() -> Self {
-        let x25519_secret = StaticSecret::random_from_rng(OsRng);
+        let x25519_secret = StaticSecret::random_from_rng(&mut UnwrapErr(SysRng));
         let x25519_public = PublicKey::from(&x25519_secret);
         let (mlkem_dk, mlkem_ek) = MlKem768::generate_keypair();
         Self {
@@ -221,7 +222,7 @@ impl PersistentEncryption {
     /// Encrypt `plaintext`, authenticating `aad`.
     pub fn encrypt_with_key(key: &[u8; 32], plaintext: &[u8], aad: &[u8]) -> Vec<u8> {
         let cipher = XChaCha20Poly1305::new(key.into());
-        let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
+        let nonce = XNonce::generate();
         let ciphertext = cipher
             .encrypt(
                 &nonce,
@@ -248,11 +249,11 @@ impl PersistentEncryption {
             return Err(CryptoError::InvalidCiphertext);
         }
         let (nonce_bytes, chacha_ct) = data.split_at(24);
-        let nonce = chacha20poly1305::XNonce::from_slice(nonce_bytes);
+        let nonce: &[u8; 24] = nonce_bytes.try_into().unwrap();
         let cipher = XChaCha20Poly1305::new(key.into());
         cipher
             .decrypt(
-                nonce,
+                nonce.into(),
                 Payload {
                     msg: chacha_ct,
                     aad,

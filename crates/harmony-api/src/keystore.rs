@@ -1,5 +1,9 @@
 use std::collections::HashMap;
 
+use getrandom::{
+    SysRng,
+    rand_core::{Rng, UnwrapErr},
+};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -69,8 +73,7 @@ impl Drop for Keystore {
 impl Keystore {
     pub fn new() -> Self {
         let mut ks = Self::default();
-        use chacha20poly1305::aead::rand_core::RngCore;
-        chacha20poly1305::aead::OsRng.fill_bytes(&mut ks.identity_seed);
+        UnwrapErr(SysRng).fill_bytes(&mut ks.identity_seed);
         ks
     }
 

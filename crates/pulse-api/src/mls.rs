@@ -1,5 +1,5 @@
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
-use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
+use chacha20poly1305::{ChaCha20Poly1305, Nonce};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use hkdf::Hkdf;
 use openmls::framing::MlsMessageBodyIn;
@@ -646,7 +646,7 @@ impl MlsClient {
 
         let header_bytes = encode_media_header(&header);
         let key = derive_media_key(&base, &self.session_id, track_name);
-        let cipher = ChaCha20Poly1305::new(Key::from_slice(&key));
+        let cipher = ChaCha20Poly1305::new(&key.into());
         let aad = media_aad(&header_bytes, &self.session_id, track_name);
 
         let ciphertext = cipher
@@ -700,7 +700,7 @@ impl MlsClient {
         }
 
         let key = derive_media_key(&base, sender_id, track_name);
-        let cipher = ChaCha20Poly1305::new(Key::from_slice(&key));
+        let cipher = ChaCha20Poly1305::new(&key.into());
         let aad = media_aad(header_bytes, sender_id, track_name);
 
         let plaintext = cipher
@@ -759,5 +759,5 @@ fn media_aad(header_bytes: &[u8], sender_id: &str, track_name: &str) -> Vec<u8> 
 fn nonce_for_sequence(sequence: u64) -> Nonce {
     let mut nonce = [0u8; MEDIA_NONCE_LEN];
     nonce[4..].copy_from_slice(&sequence.to_le_bytes());
-    *Nonce::from_slice(&nonce)
+    nonce.into()
 }

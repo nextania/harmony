@@ -5,7 +5,7 @@ use std::{
 
 use common::{NodeDescription, NodeEvent, NodeEventKind};
 use futures::StreamExt;
-use pulse_types::{MediaHint, ControlS2C};
+use pulse_types::{ControlS2C, MediaHint};
 use redis::{AsyncCommands, Client, aio::MultiplexedConnection};
 use tokio::{task, time};
 use ulid::Ulid;

@@ -6,8 +6,8 @@ use moq_native::moq_net::{
     self, BroadcastProducer, GroupProducer, Origin, OriginProducer, Track, TrackProducer,
 };
 use pulse_types::{
-    AvailableTrack, ControlC2S, ControlS2C, MediaHint, decode_control, encode_control,
-    priority_for_hint, track_name_for_hint, track_names,
+    AvailableTrack, ControlC2S, ControlS2C, MediaHint, priority_for_hint, track_name_for_hint,
+    track_names,
 };
 use tokio::sync::{Mutex, mpsc, oneshot};
 
@@ -1121,7 +1121,7 @@ async fn read_s2c(
         };
         loop {
             match group.read_frame().await {
-                Ok(Some(frame)) => match decode_control::<ControlS2C>(&frame) {
+                Ok(Some(frame)) => match serde_cbor_2::from_slice::<ControlS2C>(&frame) {
                     Ok(msg) => {
                         if tx.send(msg).is_err() {
                             return; // event loop gone
@@ -1141,7 +1141,7 @@ async fn read_s2c(
 
 fn write_ctl_frame(track: &mut TrackProducer, message: &ControlC2S) -> Result<(), PulseError> {
     let bytes =
-        encode_control(message).map_err(|e| PulseError::ControlSerialization(Arc::new(e)))?;
+        serde_cbor_2::to_vec(message).map_err(|e| PulseError::ControlSerialization(Arc::new(e)))?;
     track
         .write_frame(bytes)
         .map_err(|e| PulseError::Transport(Arc::new(e)))?;

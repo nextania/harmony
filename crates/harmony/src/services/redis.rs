@@ -29,31 +29,6 @@ pub async fn get_connection() -> MultiplexedConnection {
         .expect("Failed to get connection")
 }
 
-pub async fn get_pubsub() -> redis::aio::PubSub {
-    get_client()
-        .get_async_pubsub()
-        .await
-        .expect("Failed to get connection")
-}
-
-pub async fn create_streams() -> redis::RedisResult<()> {
-    let mut conn = get_connection().await;
-    let e = conn
-        .xgroup_create_mkstream::<&str, &str, &str, ()>(
-            "voice:events:user-lifecycle",
-            "harmony-servers",
-            "0",
-        )
-        .await;
-    if let Err(e) = e
-        && !e.to_string().contains("BUSYGROUP")
-    {
-        return Err(e);
-    }
-
-    Ok(())
-}
-
 pub async fn set_user_online(user_id: &str) -> redis::RedisResult<()> {
     let mut conn = get_connection().await;
     conn.set_ex(format!("user:{}:online", user_id), true, 60)

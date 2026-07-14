@@ -1,27 +1,26 @@
 use std::time::Duration;
 
+use async_nats::jetstream::consumer::{AckPolicy, pull};
+use common::nats::{STREAM_VOICE_LIFECYCLE, SUBJECT_NODES_ALL, subject_node};
 use common::{NodeDescription, NodeEvent, NodeEventKind, SessionData};
 use dashmap::DashMap;
 use futures_util::StreamExt;
 use lazy_static::lazy_static;
 use pulse_types::Region;
-use rapid::socket::RpcClients;
 use redis::{AsyncCommands, FromRedisValue, ToRedisArgs, ToSingleRedisArg};
 use serde::{Deserialize, Serialize};
 use tokio::{task, time};
 use tracing::info;
 
 use crate::{
-    RPC_CLIENTS,
     errors::{Error, Result},
-    methods::{CallMigratedEvent, Event, UserJoinedCallEvent, UserLeftCallEvent, emit_to_ids},
-    services::utilities::generate_token,
+    methods::{CallMigratedEvent, Event, UserJoinedCallEvent, UserLeftCallEvent},
+    services::{events, nats, utilities::generate_token},
 };
 
 use super::{
     database::calls::Call,
-    redis::{INSTANCE_ID, get_connection, get_pubsub},
-    utilities::{deserialize, serialize},
+    redis::{INSTANCE_ID, get_connection},
 };
 
 lazy_static! {
@@ -51,22 +50,32 @@ impl Node {
 pub fn spawn_voice_events() {
     // node events
     task::spawn(async move {
-        let mut pubsub = get_pubsub().await;
-        pubsub.subscribe("nodes").await.unwrap();
-        let mut connection = get_connection().await;
-        connection
-            .publish::<&str, NodeEvent, ()>(
-                "nodes",
-                NodeEvent {
-                    event: NodeEventKind::Query,
-                    id: INSTANCE_ID.clone(),
-                },
-            )
-            .await
-            .expect("Failed to publish");
-        while let Some(msg) = pubsub.on_message().next().await {
-            let payload: Vec<u8> = msg.get_payload().unwrap();
-            let payload: NodeEvent = deserialize(&payload).unwrap();
+        let client = nats::client();
+        let mut sub = match client.subscribe(SUBJECT_NODES_ALL).await {
+            Ok(sub) => sub,
+            Err(e) => {
+                tracing::error!("Failed to subscribe to {}: {:?}", SUBJECT_NODES_ALL, e);
+                return;
+            }
+        };
+        // request all available nodes to announce themselves
+        nats::publish_node_event(
+            SUBJECT_NODES_ALL.to_string(),
+            &NodeEvent {
+                event: NodeEventKind::Query,
+                id: INSTANCE_ID.clone(),
+            },
+        )
+        .await;
+
+        while let Some(msg) = sub.next().await {
+            let payload: NodeEvent = match serde_cbor_2::from_slice(&msg.payload) {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::error!("Failed to deserialize node event: {:?}", e);
+                    continue;
+                }
+            };
             match payload {
                 NodeEvent {
                     id,
@@ -104,85 +113,12 @@ pub fn spawn_voice_events() {
         }
     });
 
-    // stream for user lifecycle events
+    // user lifecycle events
     task::spawn(async move {
-        let mut connection = get_connection().await;
-        let consumer_name = INSTANCE_ID.clone();
-
         loop {
-            let result = connection
-                .xread_options::<_, _, redis::streams::StreamReadReply>(
-                    &["voice:events:user-lifecycle"],
-                    &[">"],
-                    &redis::streams::StreamReadOptions::default()
-                        .group("harmony-servers", &consumer_name)
-                        .block(5000)
-                        .count(10),
-                )
-                .await;
-
-            let reply = match result {
-                Ok(reply) => reply,
-                Err(e) => {
-                    tracing::error!("Failed to read from stream: {:?}", e);
-                    time::sleep(Duration::from_secs(1)).await;
-                    continue;
-                }
-            };
-
-            for stream_key in &reply.keys {
-                for stream_id in &stream_key.ids {
-                    let message_id = &stream_id.id;
-
-                    let event_data = match stream_id.map.get("data") {
-                        Some(redis::Value::BulkString(bytes)) => bytes,
-                        _ => {
-                            tracing::warn!("Invalid stream message format");
-                            continue;
-                        }
-                    };
-
-                    let payload: NodeEvent = match deserialize(event_data) {
-                        Ok(p) => p,
-                        Err(e) => {
-                            tracing::error!("Failed to deserialize event: {:?}", e);
-                            let _ = connection
-                                .xack::<_, _, _, ()>(
-                                    "voice:events:user-lifecycle",
-                                    "harmony-servers",
-                                    &[message_id],
-                                )
-                                .await;
-                            continue;
-                        }
-                    };
-
-                    let process_result = match payload.event {
-                        NodeEventKind::UserDisconnect {
-                            ref id,
-                            ref call_id,
-                        } => process_user_disconnect(id, call_id).await,
-                        NodeEventKind::UserConnect {
-                            ref id,
-                            ref call_id,
-                        } => process_user_connect(id, call_id).await,
-                        _ => Ok(()),
-                    };
-
-                    if let Err(e) = process_result {
-                        tracing::error!("Failed to process event: {:?}", e);
-                        // should be retried later
-                        continue;
-                    }
-
-                    let _ = connection
-                        .xack::<_, _, _, ()>(
-                            "voice:events:user-lifecycle",
-                            "harmony-servers",
-                            &[message_id],
-                        )
-                        .await;
-                }
+            if let Err(e) = run_lifecycle_worker().await {
+                tracing::error!("Lifecycle worker error: {:?}; recreating consumer in 1s", e);
+                time::sleep(Duration::from_secs(1)).await;
             }
         }
     });
@@ -244,6 +180,57 @@ pub fn spawn_voice_events() {
     });
 }
 
+async fn run_lifecycle_worker() -> std::result::Result<(), async_nats::Error> {
+    let js = nats::jetstream();
+    let stream = js.get_stream(STREAM_VOICE_LIFECYCLE).await?;
+    let consumer = stream
+        .create_consumer(pull::Config {
+            durable_name: Some("lifecycle-worker".to_string()),
+            name: Some("lifecycle-worker".to_string()),
+            ack_policy: AckPolicy::Explicit,
+            ack_wait: Duration::from_secs(30),
+            max_deliver: 5,
+            filter_subject: "voice.lifecycle.>".to_string(),
+            ..Default::default()
+        })
+        .await?;
+
+    let mut messages = consumer.messages().await?;
+    while let Some(message) = messages.next().await {
+        let message = message?;
+        let payload: NodeEvent = match serde_cbor_2::from_slice(&message.payload) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::error!("Failed to deserialize lifecycle event: {:?}", e);
+                message.ack().await.ok();
+                continue;
+            }
+        };
+
+        let process_result = match payload.event {
+            NodeEventKind::UserConnect {
+                ref id,
+                ref call_id,
+            } => process_user_connect(id, call_id).await,
+            NodeEventKind::UserDisconnect {
+                ref id,
+                ref call_id,
+            } => process_user_disconnect(id, call_id).await,
+            _ => Ok(()),
+        };
+
+        match process_result {
+            Ok(()) => {
+                let _ = message.ack().await;
+            }
+            Err(e) => {
+                tracing::error!("Failed to process lifecycle event: {:?}", e);
+            }
+        }
+    }
+    Ok(())
+}
+
 async fn process_user_disconnect(session_id: &str, call_id: &str) -> Result<()> {
     if let Ok(Some(mut call)) = ActiveCall::get(&call_id.to_string()).await {
         if let Err(e) = call.leave_user(&session_id.to_string()).await {
@@ -257,21 +244,20 @@ async fn process_user_disconnect(session_id: &str, call_id: &str) -> Result<()> 
         } else {
             info!("User {} disconnected from call {}", session_id, call_id);
 
-            let clients = RPC_CLIENTS.get().expect("RPC clients not initialized");
             let member_user_ids: Vec<String> = call
                 .members
                 .iter()
                 .map(|session| session.user_id.clone())
                 .collect();
 
-            emit_to_ids(
-                clients.clone(),
+            events::publish(
                 &member_user_ids,
                 Event::UserLeftCall(UserLeftCallEvent {
                     call_id: call_id.to_string(),
                     session_id: session_id.to_string(),
                 }),
-            );
+            )
+            .await;
         }
     }
     Ok(())
@@ -306,9 +292,7 @@ async fn process_user_connect(session_id: &str, call_id: &str) -> Result<()> {
                 .map(|session| session.user_id.clone())
                 .collect();
             // including the one who just joined
-            let clients = RPC_CLIENTS.get().expect("RPC clients not initialized");
-            emit_to_ids(
-                clients.clone(),
+            events::publish(
                 &member_ids,
                 Event::UserJoinedCall(UserJoinedCallEvent {
                     call_id: call_id.to_string(),
@@ -317,7 +301,8 @@ async fn process_user_connect(session_id: &str, call_id: &str) -> Result<()> {
                     muted: session.muted,
                     deafened: session.deafened,
                 }),
-            );
+            )
+            .await;
         } else {
             // TODO:!! this is most likely due to the call expiring while user is connecting
             // this should RESTORE the call into memory
@@ -379,8 +364,6 @@ pub async fn handle_node_down(node_id: String, region: Option<Region>) {
                     .map(|n| (n.id.clone(), n.server_address.clone()))
             });
 
-        let clients = RPC_CLIENTS.get();
-
         match target {
             Some((target_id, target_addr)) => {
                 if let Err(e) = call.migrate_to(&node_id, &target_id, &target_addr).await {
@@ -395,23 +378,21 @@ pub async fn handle_node_down(node_id: String, region: Option<Region>) {
                         let _: std::result::Result<(), _> =
                             redis.srem::<_, _, ()>(&index_key, &call_id).await;
                     }
-                    emit_call_ended(clients, &call_id, &affected_users, &member_sessions);
+                    emit_call_ended(&call_id, &affected_users, &member_sessions).await;
                     continue;
                 }
                 info!(
                     "Migrated call {} from node {} to node {}",
                     call_id, node_id, target_id
                 );
-                if let Some(clients) = clients {
-                    emit_to_ids(
-                        clients.clone(),
-                        &affected_users,
-                        Event::CallMigrated(CallMigratedEvent {
-                            call_id: call_id.clone(),
-                            server_address: target_addr.clone(),
-                        }),
-                    );
-                }
+                events::publish(
+                    &affected_users,
+                    Event::CallMigrated(CallMigratedEvent {
+                        call_id: call_id.clone(),
+                        server_address: target_addr.clone(),
+                    }),
+                )
+                .await;
             }
             None => {
                 info!("No alternative node for call {}; ending it", call_id);
@@ -420,7 +401,7 @@ pub async fn handle_node_down(node_id: String, region: Option<Region>) {
                     let _: std::result::Result<(), _> =
                         redis.srem::<_, _, ()>(&index_key, &call_id).await;
                 }
-                emit_call_ended(clients, &call_id, &affected_users, &member_sessions);
+                emit_call_ended(&call_id, &affected_users, &member_sessions).await;
             }
         }
     }
@@ -428,22 +409,20 @@ pub async fn handle_node_down(node_id: String, region: Option<Region>) {
     let _: std::result::Result<(), _> = redis.del::<_, ()>(&index_key).await;
 }
 
-fn emit_call_ended(
-    clients: Option<&RpcClients>,
+async fn emit_call_ended(
     call_id: &str,
     affected_users: &[String],
     member_sessions: &[(String, String)],
 ) {
-    let Some(clients) = clients else { return };
     for (_user_id, session_id) in member_sessions {
-        emit_to_ids(
-            clients.clone(),
+        events::publish(
             affected_users,
             Event::UserLeftCall(UserLeftCallEvent {
                 call_id: call_id.to_string(),
                 session_id: session_id.clone(),
             }),
-        );
+        )
+        .await;
     }
 }
 
@@ -472,7 +451,7 @@ impl FromRedisValue for ActiveCall {
     fn from_redis_value(v: redis::Value) -> std::result::Result<Self, redis::ParsingError> {
         match v {
             redis::Value::BulkString(ref bytes) => {
-                let data = deserialize(bytes);
+                let data = serde_cbor_2::from_slice(bytes);
                 match data {
                     Ok(data) => Ok(data),
                     Err(_) => Err(redis::ParsingError::from("Deserialization error")),
@@ -491,7 +470,7 @@ impl ToRedisArgs for ActiveCall {
     where
         W: ?Sized + redis::RedisWrite,
     {
-        let data = serialize(self).unwrap();
+        let data = serde_cbor_2::to_vec(self).unwrap();
         out.write_arg(data.as_slice());
     }
 }
@@ -700,17 +679,16 @@ impl ActiveCall {
             .collect();
         Call::update(&self.id, member_ids).await?;
 
-        redis
-            .publish::<&str, NodeEvent, ()>(
-                "nodes",
-                NodeEvent {
-                    id: INSTANCE_ID.clone(),
-                    event: NodeEventKind::CallEnded {
-                        call_id: self.id.clone(),
-                    },
+        nats::publish_node_event(
+            subject_node(&self.assigned_node),
+            &NodeEvent {
+                id: INSTANCE_ID.clone(),
+                event: NodeEventKind::CallEnded {
+                    call_id: self.id.clone(),
                 },
-            )
-            .await?;
+            },
+        )
+        .await;
 
         info!("Call {} ended", self.id);
 

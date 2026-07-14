@@ -11,7 +11,7 @@ futures = "0.3.28"
 async-tungstenite = { version = "0.34.1", features = ["tokio-runtime"] }
 
 serde = { workspace = true }
-ciborium = "0.2.2"
+serde_cbor_2 = "0.13.0"
 
 dashmap = "6.0.0"
 rand = "0.10.0"

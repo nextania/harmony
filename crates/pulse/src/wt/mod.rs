@@ -4,7 +4,7 @@ use common::{NodeEvent, NodeEventKind, SessionData};
 use dashmap::DashMap;
 use lazy_static::lazy_static;
 use moq_native::moq_net::{self, BroadcastProducer, Origin, OriginProducer, Track};
-use pulse_types::{ControlC2S, ControlS2C, MediaHint, decode_control, encode_control, track_names};
+use pulse_types::{ControlC2S, ControlS2C, MediaHint, track_names};
 use redis::AsyncCommands;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -191,7 +191,7 @@ fn spawn_s2c_writer(path: String, mut rx: mpsc::UnboundedReceiver<ControlS2C>) {
         // re-subscriber replay the whole control history; per-message groups let
         // the relay evict old ones.
         while let Some(message) = rx.recv().await {
-            match encode_control(&message) {
+            match serde_cbor_2::to_vec(&message) {
                 Ok(bytes) => {
                     if let Err(e) = track.write_frame(bytes) {
                         warn!("Failed to write s2c control frame: {:?}", e);
@@ -222,7 +222,7 @@ async fn run_control(
     let mut joined = false;
     while let Some(mut group) = ctl.next_group().await? {
         while let Some(frame) = group.read_frame().await? {
-            let message: ControlC2S = match decode_control(&frame) {
+            let message: ControlC2S = match serde_cbor_2::from_slice(&frame) {
                 Ok(m) => m,
                 Err(e) => {
                     warn!("Failed to decode control frame: {:?}", e);
@@ -348,7 +348,6 @@ async fn handle_join(
         );
     }
 
-    let mut redis_conn = crate::redis::get_connection().await;
     let event = NodeEvent {
         id: INSTANCE_ID.to_string(),
         event: NodeEventKind::UserConnect {
@@ -356,9 +355,9 @@ async fn handle_join(
             call_id: session_data.call_id.clone(),
         },
     };
-    let _: Result<(), redis::RedisError> = redis_conn
-        .xadd::<_, _, _, _, ()>("voice:events:user-lifecycle", "*", &[("data", event)])
-        .await;
+    publish_lifecycle(common::nats::SUBJECT_VOICE_CONNECT, &event).await;
+
+    let mut redis_conn = crate::redis::get_connection().await;
     redis_conn
         .expire::<_, ()>(&format!("session:{token}"), 60)
         .await?;
@@ -647,7 +646,6 @@ async fn cleanup_session(unique_id: &str) {
         broadcast_proposals(&call).await;
     }
 
-    let mut redis_conn = crate::redis::get_connection().await;
     let event = NodeEvent {
         id: INSTANCE_ID.to_string(),
         event: NodeEventKind::UserDisconnect {
@@ -655,7 +653,21 @@ async fn cleanup_session(unique_id: &str) {
             call_id: state.call_id.clone(),
         },
     };
-    let _: Result<(), redis::RedisError> = redis_conn
-        .xadd::<_, _, _, _, ()>("voice:events:user-lifecycle", "*", &[("data", event)])
-        .await;
+    publish_lifecycle(common::nats::SUBJECT_VOICE_DISCONNECT, &event).await;
+}
+
+async fn publish_lifecycle(subject: &'static str, event: &NodeEvent) {
+    let payload = match serde_cbor_2::to_vec(event) {
+        Ok(payload) => payload,
+        Err(e) => {
+            error!("Failed to serialize lifecycle event: {:?}", e);
+            return;
+        }
+    };
+    let id = Ulid::new().to_string();
+    if let Err(e) =
+        common::nats::publish_with_id(crate::nats::jetstream(), subject, &id, payload).await
+    {
+        error!("Failed to publish lifecycle event to NATS: {:?}", e);
+    }
 }

@@ -2,7 +2,6 @@ use std::str::FromStr;
 
 use serde::Deserialize;
 use serde::Serialize;
-use serde::de::DeserializeOwned;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
 pub enum Region {
@@ -140,20 +139,6 @@ pub enum ControlS2C {
         received: u32,
         jitter_ms: u32,
     },
-}
-
-pub fn encode_control<T: Serialize>(
-    message: &T,
-) -> Result<Vec<u8>, ciborium::ser::Error<std::io::Error>> {
-    let mut buf = Vec::new();
-    ciborium::into_writer(message, &mut buf)?;
-    Ok(buf)
-}
-
-pub fn decode_control<T: DeserializeOwned>(
-    bytes: &[u8],
-) -> Result<T, ciborium::de::Error<std::io::Error>> {
-    ciborium::from_reader(bytes)
 }
 
 // TODO: optimize

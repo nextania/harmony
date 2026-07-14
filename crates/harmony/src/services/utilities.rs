@@ -5,7 +5,6 @@ use rand::{RngExt, SeedableRng};
 
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
-use serde::{Deserialize, Serialize};
 
 use std::io::{Cursor, Read};
 
@@ -66,15 +65,4 @@ pub fn decompress(buffer: Vec<u8>) -> Vec<u8> {
     let mut buf = Vec::new();
     zlib.read_to_end(&mut buf).unwrap();
     buf
-}
-pub fn serialize<T: Serialize>(value: &T) -> Result<Vec<u8>, ciborium::ser::Error<std::io::Error>> {
-    let mut buf = Vec::new();
-    ciborium::into_writer(value, &mut buf)?;
-    Ok(buf)
-}
-
-pub fn deserialize<T: for<'a> Deserialize<'a>>(
-    buf: &[u8],
-) -> Result<T, ciborium::de::Error<std::io::Error>> {
-    ciborium::from_reader(buf)
 }

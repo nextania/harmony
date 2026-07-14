@@ -4,19 +4,20 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
 
-use ciborium::value::Value;
 use dashmap::DashMap;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
+use serde_cbor_2::Value;
 
 use async_tungstenite::{tokio::connect_async, tungstenite::protocol::Message};
+use serde_cbor_2::value::{from_value, to_value};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::time::timeout;
 use url::Url;
 use uuid::Uuid;
 
-use crate::error::{ApiError, HarmonyError, Result};
+use crate::error::{HarmonyError, Result};
 use crate::events::{ClientEvent, Event, LifecycleEvent, RpcMessageS2C};
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
@@ -170,7 +171,7 @@ impl HarmonyClient {
         let request_id = Uuid::new_v4().to_string();
 
         let params_value =
-            Value::serialized(&params).map_err(|e| HarmonyError::Serialization(Box::new(e)))?;
+            to_value(&params).map_err(|e| HarmonyError::Serialization(Box::new(e)))?;
 
         let request = RpcMessageC2S::Message {
             id: request_id.clone(),
@@ -178,9 +179,8 @@ impl HarmonyClient {
             data: params_value,
         };
 
-        let mut buf = Vec::new();
-        ciborium::into_writer(&request, &mut buf)
-            .map_err(|e| HarmonyError::Serialization(Box::new(e)))?;
+        let buf =
+            serde_cbor_2::to_vec(&request).map_err(|e| HarmonyError::Serialization(Box::new(e)))?;
 
         let (tx, rx) = oneshot::channel();
 
@@ -201,10 +201,8 @@ impl HarmonyClient {
             .map_err(|_| HarmonyError::ConnectionLost)?;
 
         match response {
-            Ok(value) => value
-                .deserialized::<R>()
-                .map_err(|e| HarmonyError::Serialization(Box::new(e))),
-            Err(error_value) => match error_value.deserialized::<ApiError>() {
+            Ok(value) => from_value(value).map_err(|e| HarmonyError::Serialization(Box::new(e))),
+            Err(error_value) => match from_value(error_value) {
                 Ok(api_error) => Err(HarmonyError::Api(api_error)),
                 Err(e) => Err(HarmonyError::Serialization(Box::new(e))),
             },
@@ -324,11 +322,7 @@ impl HarmonyClient {
                     let msg = RpcMessageC2S::Identify {
                         token: token.clone(),
                     };
-                    let mut buf = Vec::new();
-                    if ciborium::into_writer(&msg, &mut buf).is_err() {
-                        tracing::error!("failed to serialize identify");
-                    }
-                    buf
+                    serde_cbor_2::to_vec(&msg).unwrap()
                 };
                 if let Err(e) = ws_tx.send(Message::binary(identify)).await {
                     tracing::warn!("failed to send identify: {}", e);
@@ -360,14 +354,15 @@ impl HarmonyClient {
                         Some(message) = ws_rx.next() => {
                             match message {
                                 Ok(Message::Binary(data)) => {
-                                    let value: Value = match ciborium::from_reader(data.as_ref()) {
+                                    tracing::debug!("{:?}", data);
+                                    let value: Value = match serde_cbor_2::from_slice(data.as_ref()) {
                                         Ok(v) => v,
                                         Err(e) => {
                                             tracing::warn!("failed to deserialize frame: {}", e);
                                             break;
                                         }
                                     };
-                                    match value.deserialized::<RpcMessageS2C>() {
+                                    match from_value(value) {
                                         Ok(RpcMessageS2C::Identify {}) => {
                                             if !authed {
                                                 authed = true;
@@ -389,7 +384,7 @@ impl HarmonyClient {
                                             }
                                         }
                                         Ok(RpcMessageS2C::Event { event }) => {
-                                            match event.deserialized::<Event>() {
+                                            match from_value::<Event>(event) {
                                                 Ok(event) => emit(&evt_tx, event),
                                                 Err(e) => {
                                                     tracing::warn!("failed to parse event: {}", e);
@@ -421,12 +416,11 @@ impl HarmonyClient {
                             }
                         }
                         _ = tokio::time::sleep_until(next_heartbeat) => {
-                            let mut buf = Vec::new();
                             let heartbeat = RpcMessageC2S::Heartbeat {};
-                            if ciborium::into_writer(&heartbeat, &mut buf).is_err() {
+                            let Ok(buf) = serde_cbor_2::to_vec(&heartbeat) else {
                                 tracing::error!("failed to serialize heartbeat");
                                 break;
-                            }
+                            };
                             if let Err(e) = ws_tx.send(Message::binary(buf)).await {
                                 tracing::warn!("failed to send heartbeat: {}", e);
                                 break;

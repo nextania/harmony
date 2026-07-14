@@ -9,7 +9,8 @@ use rapid::socket::{RpcResponder, RpcState, RpcValue};
 use crate::{
     authentication::check_authenticated,
     errors::Error,
-    methods::{ChannelDeletedEvent, ChannelUpdatedEvent, Event, MemberLeftEvent, emit_to_ids},
+    methods::{ChannelDeletedEvent, ChannelUpdatedEvent, Event, MemberLeftEvent},
+    services::events,
     services::database::{
         channels::{Channel, ChannelMemberRole},
         messages::Message,
@@ -83,13 +84,13 @@ pub async fn edit_channel(state: RpcState, data: RpcValue<EditChannelMethod>) ->
     }
     let updated = channel.update_metadata(data.metadata).await?;
     let member_ids = updated.member_ids();
-    emit_to_ids(
-        state.clients(),
+    events::publish(
         &member_ids,
         Event::ChannelUpdated(ChannelUpdatedEvent {
             channel: updated.clone(),
         }),
-    );
+    )
+    .await;
     Ok(RpcValue(EditChannelResponse {
         channel: updated.into(),
     }))
@@ -109,13 +110,13 @@ pub async fn delete_channel(
     channel.delete().await?;
     // also delete all messages associated with the channel
     Message::delete_in(&data.channel_id).await?;
-    emit_to_ids(
-        state.clients(),
+    events::publish(
         &member_ids,
         Event::ChannelDeleted(ChannelDeletedEvent {
             channel_id: data.channel_id,
         }),
-    );
+    )
+    .await;
     Ok(RpcValue(DeleteChannelResponse {}))
 }
 
@@ -151,14 +152,14 @@ pub async fn leave_channel(
                     .filter(|m| m.id != user.id)
                     .map(|m| m.id.clone())
                     .collect();
-                emit_to_ids(
-                    state.clients(),
+                events::publish(
                     &remaining,
                     Event::MemberLeft(MemberLeftEvent {
                         channel_id: data.channel_id.clone(),
                         user_id: user.id.clone(),
                     }),
-                );
+                )
+                .await;
             }
         }
     }

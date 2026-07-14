@@ -7,7 +7,8 @@ use rapid::socket::{RpcResponder, RpcState, RpcValue};
 use crate::{
     authentication::check_authenticated,
     errors::Error,
-    methods::{Event, MessageDeletedEvent, MessageEditedEvent, NewMessageEvent, emit_to_ids},
+    methods::{Event, MessageDeletedEvent, MessageEditedEvent, NewMessageEvent},
+    services::events,
     services::database::{
         channels::{Channel, EncryptionHint},
         messages::Message,
@@ -85,14 +86,14 @@ pub async fn send_message(state: RpcState, data: RpcValue<SendMessageMethod>) ->
     };
 
     let member_ids = channel.member_ids();
-    emit_to_ids(
-        state.clients(),
+    events::publish(
         &member_ids,
         Event::NewMessage(NewMessageEvent {
             message: message.clone(),
             channel_id: data.channel_id,
         }),
-    );
+    )
+    .await;
 
     Ok(RpcValue(SendMessageResponse {
         message: message.into(),
@@ -115,14 +116,14 @@ pub async fn edit_message(state: RpcState, data: RpcValue<EditMessageMethod>) ->
     let updated = message.edit(data.content).await?;
     let channel = Channel::get(&updated.channel_id).await?;
     let member_ids = channel.member_ids();
-    emit_to_ids(
-        state.clients(),
+    events::publish(
         &member_ids,
         Event::MessageEdited(MessageEditedEvent {
             message: updated.clone(),
             channel_id: updated.channel_id.clone(),
         }),
-    );
+    )
+    .await;
     Ok(RpcValue(EditMessageResponse {
         message: updated.into(),
     }))
@@ -143,13 +144,13 @@ pub async fn delete_message(
     }
     let deleted = message.delete().await?;
     let member_ids = channel.member_ids();
-    emit_to_ids(
-        state.clients(),
+    events::publish(
         &member_ids,
         Event::MessageDeleted(MessageDeletedEvent {
             message_id: deleted.id.clone(),
             channel_id: deleted.channel_id.clone(),
         }),
-    );
+    )
+    .await;
     Ok(RpcValue(DeleteMessageResponse {}))
 }

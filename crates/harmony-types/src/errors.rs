@@ -111,6 +111,7 @@ impl From<redis::RedisError> for Error {
 #[cfg(feature = "server")]
 impl rapid::socket::RpcResponder for Error {
     fn into_response(self) -> rapid::socket::RpcResponse {
-        rapid::socket::RpcResponse::Error(ciborium::value::Value::serialized(&self).unwrap())
+        use serde_cbor_2::value::to_value;
+        rapid::socket::RpcResponse::Error(to_value(&self).unwrap())
     }
 }

@@ -29,9 +29,6 @@ pub enum MlsError {
     #[error("malformed CBOR credential binding")]
     MalformedBinding,
 
-    #[error("credential binding signature has wrong length")]
-    BindingSignatureLength,
-
     #[error("invalid credential binding")]
     InvalidBinding,
 
@@ -192,29 +189,14 @@ impl CredentialBinding {
     }
 
     fn encode(&self) -> Vec<u8> {
-        let mut out = Vec::from(*BINDING_HEADER);
-        ciborium::into_writer(&self, &mut out)
-            .expect("CBOR serialization into a Vec is infallible");
-        out
+        serde_cbor_2::to_vec(self).unwrap()
     }
 
     fn decode(bytes: &[u8]) -> Result<Option<Self>> {
-        let Some(payload) = bytes.strip_prefix(BINDING_HEADER.as_slice()) else {
-            return Ok(None);
+        if !bytes.strip_prefix(BINDING_HEADER.as_slice()).is_some() {
+            return Err(MlsError::MalformedBinding);
         };
-        let wire: Self = ciborium::from_reader(payload).map_err(|_| MlsError::MalformedBinding)?;
-        let signature: [u8; 64] = wire
-            .signature
-            .try_into()
-            .map_err(|_| MlsError::BindingSignatureLength)?;
-        Ok(Some(CredentialBinding {
-            user_id: wire.user_id,
-            session_id: wire.session_id,
-            call_id: wire.call_id,
-            identity_pk: wire.identity_pk,
-            leaf_signature_key: wire.leaf_signature_key,
-            signature,
-        }))
+        serde_cbor_2::from_slice(bytes).map_err(|_| MlsError::MalformedBinding)
     }
 }
 

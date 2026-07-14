@@ -5,6 +5,7 @@ pub mod environment;
 pub mod errors;
 pub mod metrics;
 pub mod mls;
+pub mod nats;
 pub mod redis;
 pub mod wt;
 
@@ -17,7 +18,10 @@ async fn main() -> anyhow::Result<()> {
     redis::get_connection().await;
     info!("Connected to Redis");
 
-    redis::listen();
+    nats::connect().await;
+    info!("Connected to NATS and created streams");
+
+    nats::listen();
 
     wt::listen().await
 }

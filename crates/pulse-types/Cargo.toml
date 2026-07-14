@@ -5,5 +5,5 @@ edition = "2024"
 
 [dependencies]
 serde = { workspace = true }
-ciborium = "0.2"
+serde_cbor_2 = "0.13.0"
 tls_codec = "0.4"

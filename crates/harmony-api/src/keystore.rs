@@ -214,7 +214,7 @@ impl Keystore {
                 "unsupported version {version}"
             ))));
         }
-        ciborium::from_reader(&bytes[6..]).map_err(|e| {
+        serde_cbor_2::from_slice(&bytes[6..]).map_err(|e| {
             HarmonyError::Crypto(CryptoError::InvalidKeystore(format!(
                 "failed to decode: {e}"
             )))
@@ -225,7 +225,7 @@ impl Keystore {
         let mut out = Vec::new();
         out.extend_from_slice(KEYSTORE_HEADER);
         out.extend_from_slice(&KEYSTORE_VERSION.to_le_bytes());
-        ciborium::into_writer(self, &mut out).expect("keystore serialization should not fail");
+        out.extend_from_slice(&serde_cbor_2::to_vec(self).unwrap());
         out
     }
 }

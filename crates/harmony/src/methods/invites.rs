@@ -8,7 +8,8 @@ use rapid::socket::{RpcResponder, RpcState, RpcValue};
 use crate::{
     authentication::check_authenticated,
     errors::Error,
-    methods::{Event, MemberJoinedEvent, emit_to_ids},
+    methods::{Event, MemberJoinedEvent},
+    services::events,
     services::database::{
         channels::{Channel, EncryptionHint},
         invites::Invite,
@@ -120,14 +121,14 @@ pub async fn accept_invite(
         };
         invite.increment_uses(&user.id).await?;
         // broadcast event
-        emit_to_ids(
-            state.clients(),
+        events::publish(
             &channel.member_ids(),
             Event::MemberJoined(MemberJoinedEvent {
                 channel_id: channel.id().to_string(),
                 user_id: user.id.clone(),
             }),
-        );
+        )
+        .await;
         Ok(RpcValue(AcceptInviteResponse {
             pending,
             channel_id: channel.id().to_string(),

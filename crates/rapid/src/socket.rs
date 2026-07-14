@@ -1,7 +1,6 @@
 use std::{future::Future, pin::Pin, sync::Arc};
 
 use async_tungstenite::{accept_async, tokio::TokioAdapter, tungstenite::Message};
-use ciborium::value::Value;
 use dashmap::DashMap;
 use futures::{
     SinkExt, StreamExt,
@@ -9,6 +8,10 @@ use futures::{
     future::BoxFuture,
 };
 use serde::{Deserialize, Serialize};
+use serde_cbor_2::{
+    Value,
+    value::{from_value, to_value},
+};
 use tokio::{
     net::{TcpListener, TcpStream},
     task,
@@ -114,7 +117,7 @@ impl RpcClient {
 
     pub fn emit<T: Serialize + Send + Clone + 'static>(&self, data: T) {
         let bytes = serialize(&RpcMessageS2C::Event {
-            event: Value::serialized(&data).expect("Failed to serialize"),
+            event: to_value(data).expect("Failed to serialize"),
         })
         .expect("Failed to serialize");
         self.emit_raw(bytes);
@@ -145,7 +148,7 @@ pub struct RpcValue<T>(pub T);
 
 impl<T: Serialize> RpcResponder for RpcValue<T> {
     fn into_response(self) -> RpcResponse {
-        RpcResponse::Success(Value::serialized(&self.0).unwrap())
+        RpcResponse::Success(to_value(&self.0).unwrap())
     }
 }
 impl<T: RpcResponder, U: RpcResponder> RpcResponder for Result<T, U> {
@@ -161,7 +164,7 @@ impl<T: RpcResponder, U: RpcResponder> RpcResponder for Result<T, U> {
 
 impl RpcResponder for Error {
     fn into_response(self) -> RpcResponse {
-        RpcResponse::Error(Value::serialized(&self).unwrap())
+        RpcResponse::Error(to_value(&self).unwrap())
     }
 }
 
@@ -185,7 +188,7 @@ impl<T> RpcValue<T> {
 
 impl<T: for<'a> Deserialize<'a>> RpcRequest for RpcValue<T> {
     fn from_value(value: Value) -> Result<Self, Error> {
-        let val = value.deserialized::<T>();
+        let val = from_value(value);
         match val {
             Ok(v) => Ok(RpcValue(v)),
             Err(e) => Err(e.into()),
@@ -264,7 +267,7 @@ pub struct RpcClients(Arc<DashMap<String, RpcClient>>);
 impl RpcClients {
     pub fn emit_all<T: Serialize + Send + Clone + 'static>(&self, data: T) {
         let bytes = serialize(&RpcMessageS2C::Event {
-            event: Value::serialized(&data).expect("Failed to serialize"),
+            event: to_value(&data).expect("Failed to serialize"),
         })
         .expect("Failed to serialize");
         for client in self.0.iter() {
@@ -278,7 +281,7 @@ impl RpcClients {
         filter: F,
     ) {
         let bytes = serialize(&RpcMessageS2C::Event {
-            event: Value::serialized(&data).expect("Failed to serialize"),
+            event: to_value(&data).expect("Failed to serialize"),
         })
         .expect("Failed to serialize");
         for client in self.0.iter().filter(|c| filter(c.value())) {
@@ -575,8 +578,7 @@ pub async fn handle_packet(
                             return RpcMessageS2C::Message {
                                 id,
                                 ok: false,
-                                data: Value::serialized(&Error::RateLimited)
-                                    .expect("Failed to serialize"),
+                                data: to_value(&Error::RateLimited).expect("Failed to serialize"),
                             };
                         }
                     }
@@ -623,14 +625,10 @@ pub async fn handle_packet(
     }
 }
 
-pub fn serialize<T: Serialize>(value: &T) -> Result<Vec<u8>, ciborium::ser::Error<std::io::Error>> {
-    let mut buf = Vec::new();
-    ciborium::into_writer(value, &mut buf)?;
-    Ok(buf)
+pub fn serialize<T: Serialize>(value: &T) -> Result<Vec<u8>, serde_cbor_2::Error> {
+    serde_cbor_2::to_vec(value)
 }
 
-pub fn deserialize<T: for<'a> Deserialize<'a>>(
-    buf: &[u8],
-) -> Result<T, ciborium::de::Error<std::io::Error>> {
-    ciborium::from_reader(buf)
+pub fn deserialize<T: for<'a> Deserialize<'a>>(buf: &[u8]) -> Result<T, serde_cbor_2::Error> {
+    serde_cbor_2::from_slice(buf)
 }

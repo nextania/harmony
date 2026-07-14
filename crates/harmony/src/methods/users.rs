@@ -7,7 +7,8 @@ use rapid::socket::{RpcResponder, RpcState, RpcValue};
 use crate::{
     authentication::check_authenticated,
     errors::Error,
-    methods::{Event, emit_to_id},
+    methods::Event,
+    services::events,
     services::database::users::{RelationshipState, User},
 };
 
@@ -15,14 +16,14 @@ pub async fn add_contact(state: RpcState, data: RpcValue<AddContactMethod>) -> i
     let user = check_authenticated(&state).await?;
     let data = data.into_inner();
     let result = user.add_contact(data.stage).await?;
-    emit_to_id(
-        state.clients(),
+    events::publish_one(
         &result.other_id,
         Event::ContactStateChanged {
             user_id: user.id.clone(),
             state: result.other_state,
         },
-    );
+    )
+    .await;
     Ok::<_, Error>(RpcValue(AddContactResponse {
         profile: result.profile,
         state: result.self_state,
@@ -37,14 +38,14 @@ pub async fn remove_contact(
     let data = data.into_inner();
     let friend = User::get(&data.id).await?;
     user.remove_contact(&friend.id).await?;
-    emit_to_id(
-        state.clients(),
+    events::publish_one(
         &friend.id,
         Event::ContactStateChanged {
             user_id: user.id.clone(),
             state: RelationshipState::None,
         },
-    );
+    )
+    .await;
     Ok::<_, Error>(RpcValue(RemoveContactResponse {}))
 }
 

@@ -9,7 +9,7 @@ moq-native = "0.18.0"
 moq-net = "0.1.16"
 url = "2.5"
 bytes = "1"
-ciborium = "0.2"
+serde_cbor_2 = "0.13.0"
 serde = { version = "1.0.228", features = ["derive"] }
 tokio = { version = "1.45.1", features = ["macros", "rt-multi-thread", "sync", "time"], default-features = false }
 openmls = "0.8.1"

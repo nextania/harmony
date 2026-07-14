@@ -31,10 +31,8 @@ async fn main() {
     redis::get_connection().await;
     info!("Connected to Redis");
 
-    redis::create_streams()
-        .await
-        .expect("Failed to initialize Redis streams");
-    info!("Initialized Redis streams");
+    services::nats::connect().await;
+    info!("Connected to NATS and created streams");
 
     let listen_address = LISTEN_ADDRESS.to_owned();
     info!("Starting server at {listen_address}");
@@ -76,6 +74,7 @@ async fn main() {
     RPC_CLIENTS
         .set(server.clients())
         .expect("Failed to set RPC clients");
+    services::events::spawn_event_subscriber(server.clients());
     voice::spawn_voice_events();
 
     server.start(listen_address).await;

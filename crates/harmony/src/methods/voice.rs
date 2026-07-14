@@ -7,12 +7,13 @@ use rapid::socket::{RpcResponder, RpcState, RpcValue};
 
 use crate::authentication::check_authenticated;
 use crate::errors::Error;
-use crate::methods::{Event, UserVoiceStateChangedEvent, emit_to_ids};
+use crate::methods::{Event, UserVoiceStateChangedEvent};
 use crate::services::database::channels::Channel;
-use crate::services::redis::{INSTANCE_ID, get_connection};
+use crate::services::redis::INSTANCE_ID;
 use crate::services::voice::ActiveCall;
+use crate::services::{events, nats};
+use common::nats::subject_node;
 use common::{NodeEvent, NodeEventKind};
-use redis::AsyncCommands;
 
 pub async fn create_call_token(
     state: RpcState,
@@ -117,7 +118,6 @@ pub async fn update_voice_state(
     call.members[member_index] = session.clone();
     call.update().await?;
 
-    let mut redis = get_connection().await;
     let event = NodeEvent {
         id: INSTANCE_ID.clone(),
         event: NodeEventKind::UserStateChange {
@@ -126,12 +126,11 @@ pub async fn update_voice_state(
             deafened: session.deafened,
         },
     };
-    redis.publish::<&str, NodeEvent, ()>("nodes", event).await?;
+    nats::publish_node_event(subject_node(&call.assigned_node), &event).await;
 
     let member_user_ids: Vec<String> = call.members.iter().map(|s| s.user_id.clone()).collect();
 
-    emit_to_ids(
-        state.clients(),
+    events::publish(
         &member_user_ids,
         Event::UserVoiceStateChanged(UserVoiceStateChangedEvent {
             call_id: call.id.clone(),
@@ -139,7 +138,8 @@ pub async fn update_voice_state(
             muted: session.muted,
             deafened: session.deafened,
         }),
-    );
+    )
+    .await;
 
     Ok(RpcValue(UpdateVoiceStateResponse {
         muted: session.muted,

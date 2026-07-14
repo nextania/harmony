@@ -26,7 +26,7 @@ pub enum Error {
     SerializeError(
         #[from]
         #[serde(skip)]
-        ciborium::value::Error,
+        serde_cbor_2::Error,
     ),
 
     // Rate limiting

@@ -1,3 +1,4 @@
+pub mod nats;
 pub mod telemetry;
 
 use pulse_types::Region;
@@ -59,34 +60,6 @@ pub enum NodeEventKind {
     }, // The main server notifies the node that a call has ended, disconnecting all users in that call
 }
 
-impl ToSingleRedisArg for NodeEvent {}
-
-impl ToRedisArgs for NodeEvent {
-    fn write_redis_args<W>(&self, out: &mut W)
-    where
-        W: ?Sized + redis::RedisWrite,
-    {
-        let data = serialize(self).unwrap();
-        out.write_arg(data.as_slice());
-    }
-}
-
-impl FromRedisValue for NodeEvent {
-    fn from_redis_value(v: redis::Value) -> Result<Self, redis::ParsingError> {
-        match v {
-            redis::Value::BulkString(ref bytes) => {
-                let data = deserialize(bytes);
-                match data {
-                    Ok(data) => Ok(data),
-                    Err(_) => Err(redis::ParsingError::from("Deserialization error")),
-                }
-            }
-
-            _ => Err(redis::ParsingError::from("Format error")),
-        }
-    }
-}
-
 impl ToSingleRedisArg for SessionData {}
 
 impl ToRedisArgs for SessionData {
@@ -94,7 +67,7 @@ impl ToRedisArgs for SessionData {
     where
         W: ?Sized + redis::RedisWrite,
     {
-        let data = serialize(self).unwrap();
+        let data = serde_cbor_2::to_vec(self).unwrap();
         out.write_arg(data.as_slice());
     }
 }
@@ -103,7 +76,7 @@ impl FromRedisValue for SessionData {
     fn from_redis_value(v: redis::Value) -> Result<Self, redis::ParsingError> {
         match v {
             redis::Value::BulkString(ref bytes) => {
-                let data = deserialize(bytes);
+                let data = serde_cbor_2::from_slice(bytes);
                 match data {
                     Ok(data) => Ok(data),
                     Err(_) => Err(redis::ParsingError::from("Deserialization error")),
@@ -113,16 +86,4 @@ impl FromRedisValue for SessionData {
             _ => Err(redis::ParsingError::from("Format error")),
         }
     }
-}
-
-pub fn serialize<T: Serialize>(value: &T) -> Result<Vec<u8>, ciborium::ser::Error<std::io::Error>> {
-    let mut buf = Vec::new();
-    ciborium::into_writer(value, &mut buf)?;
-    Ok(buf)
-}
-
-pub fn deserialize<T: for<'a> Deserialize<'a>>(
-    buf: &[u8],
-) -> Result<T, ciborium::de::Error<std::io::Error>> {
-    ciborium::from_reader(buf)
 }

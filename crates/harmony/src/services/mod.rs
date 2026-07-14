@@ -1,5 +1,7 @@
 pub mod database;
 pub mod environment;
+pub mod events;
+pub mod nats;
 pub mod permissions;
 pub mod rate_limiter;
 pub mod redis;

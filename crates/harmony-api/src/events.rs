@@ -1,5 +1,5 @@
-use ciborium::value::Value;
 use serde::{Deserialize, Serialize};
+use serde_cbor_2::Value;
 
 use crate::{Channel, Message, RelationshipState};
 

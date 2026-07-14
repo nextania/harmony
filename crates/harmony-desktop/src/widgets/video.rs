@@ -106,7 +106,7 @@ where
                     .borrow()
                     .cached
                     .as_ref()
-                    .map_or(true, |(p, _)| *p != ptr);
+                    .is_none_or(|(p, _)| *p != ptr);
 
                 if needs_update {
                     let handle = iced_image::Handle::from_rgba(

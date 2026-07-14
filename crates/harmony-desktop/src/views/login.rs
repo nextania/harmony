@@ -140,7 +140,7 @@ impl LoginView {
                 self.locale_dropdown_open = !self.locale_dropdown_open;
             }
             LoginMessage::SetLocale(locale) => {
-                rust_i18n::set_locale(&locale.code());
+                rust_i18n::set_locale(locale.code());
                 self.locale_dropdown_open = false;
             }
         }

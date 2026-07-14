@@ -9,11 +9,11 @@ use crate::{
     authentication::check_authenticated,
     errors::Error,
     methods::{Event, MemberJoinedEvent},
-    services::events,
     services::database::{
         channels::{Channel, EncryptionHint},
         invites::Invite,
     },
+    services::events,
 };
 
 pub async fn create_invite(
@@ -73,7 +73,7 @@ pub async fn get_invite(state: RpcState, data: RpcValue<GetInviteMethod>) -> imp
             inviter_id: invite.creator,
             authorized: invite
                 .authorized_users
-                .map_or(true, |users| users.contains(&user.id)),
+                .is_none_or(|users| users.contains(&user.id)),
             member_count: members.len() as i32,
         },
     }))
@@ -102,7 +102,7 @@ pub async fn accept_invite(
     if invite
         .authorized_users
         .as_ref()
-        .map_or(true, |users| users.contains(&user.id))
+        .is_none_or(|users| users.contains(&user.id))
     {
         let channel = Channel::get(&invite.channel_id).await?;
         let pending = if let Channel::GroupChannel {

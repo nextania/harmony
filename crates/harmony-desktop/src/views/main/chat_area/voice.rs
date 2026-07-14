@@ -128,9 +128,9 @@ fn voice_in_call<'a>(state: &'a MainView, call: &'a CallState) -> Element<'a, Ma
         .find(|p| p.user_id == *current_user_id)
         .map(|p| &p.tracks);
 
-    let mic_active = my_tracks.map_or(false, |t| t.audio);
-    let cam_active = my_tracks.map_or(false, |t| t.video);
-    let screen_active = my_tracks.map_or(false, |t| t.screen);
+    let mic_active = my_tracks.is_some_and(|t| t.audio);
+    let cam_active = my_tracks.is_some_and(|t| t.video);
+    let screen_active = my_tracks.is_some_and(|t| t.screen);
 
     let mut content = vec![];
     let screen_sharer = call
@@ -258,8 +258,7 @@ fn voice_in_call<'a>(state: &'a MainView, call: &'a CallState) -> Element<'a, Ma
         )
         .on_press(MainMessage::Call(CallMessage::ToggleScreenshareFullscreen))
         .padding(0)
-        .cursor_default()
-        .into();
+        .cursor_default();
 
         let panel_bottom: Element<MainMessage> = row![
             screen_label,
@@ -394,7 +393,6 @@ fn voice_in_call<'a>(state: &'a MainView, call: &'a CallState) -> Element<'a, Ma
         .padding(0)
         .style(styles::call_ctrl(bg))
         .cursor_default()
-        .into()
     };
 
     let mic_icon = if mic_active {

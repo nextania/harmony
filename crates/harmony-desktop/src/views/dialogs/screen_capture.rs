@@ -82,17 +82,17 @@ impl ScreenCaptureView {
                 self.quality = q;
             }
             ScreenCaptureMessage::Confirm => {
-                if let Some(idx) = self.selected {
-                    if let Some(info) = self.targets.get(idx) {
-                        let target = info.target.clone();
-                        let config = ScreenCaptureConfig {
-                            quality: self.quality,
-                            source_width: info.source_width,
-                            source_height: info.source_height,
-                            ..Default::default()
-                        };
-                        return Task::done(Message::ScreenCaptureSelected(target, config));
-                    }
+                if let Some(idx) = self.selected
+                    && let Some(info) = self.targets.get(idx)
+                {
+                    let target = info.target.clone();
+                    let config = ScreenCaptureConfig {
+                        quality: self.quality,
+                        source_width: info.source_width,
+                        source_height: info.source_height,
+                        ..Default::default()
+                    };
+                    return Task::done(Message::ScreenCaptureSelected(target, config));
                 }
             }
             ScreenCaptureMessage::Cancel => {
@@ -232,7 +232,6 @@ impl ScreenCaptureView {
                 }
             })
             .cursor_default()
-            .into()
         };
 
         let quality_row = row![

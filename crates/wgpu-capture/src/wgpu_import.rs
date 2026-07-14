@@ -40,7 +40,7 @@ impl WgpuImporter {
             if let Ok(imp) = windows::import_dx12::Dx12Importer::new(device) {
                 return Ok(ImportBackend::Dx12(imp));
             }
-            return Err(crate::Error::UnsupportedBackend);
+            Err(crate::Error::UnsupportedBackend)
         }
 
         #[cfg(target_os = "linux")]
@@ -49,7 +49,7 @@ impl WgpuImporter {
             if let Ok(imp) = linux::import_vk::VulkanLinuxImporter::new(device) {
                 return Ok(ImportBackend::VulkanLinux(imp));
             }
-            return Err(crate::Error::UnsupportedBackend);
+            Err(crate::Error::UnsupportedBackend)
         }
 
         #[cfg(not(any(windows, target_os = "linux")))]

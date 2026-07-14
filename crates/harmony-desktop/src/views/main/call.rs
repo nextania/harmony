@@ -344,12 +344,11 @@ impl CallSession {
                     had_track_flag = p.tracks.screen;
                     p.tracks.screen = false;
                 }
-                if was_sharing || had_track_flag {
-                    if let Some(pulse) = self.pulse_client.clone()
-                        && let Some(handle) = self.screen_track.take()
-                    {
-                        return stop_producing_task(pulse, handle, "Screen share cleanup error");
-                    }
+                if (was_sharing || had_track_flag)
+                    && let Some(pulse) = self.pulse_client.clone()
+                    && let Some(handle) = self.screen_track.take()
+                {
+                    return stop_producing_task(pulse, handle, "Screen share cleanup error");
                 }
             }
             CallMessage::ScreenCaptureError(m) => {
@@ -499,48 +498,46 @@ impl CallSession {
                 if self.screen_view_track_id.is_some() {
                     return Task::none();
                 }
-                if let Some(pulse) = self.pulse_client.clone() {
-                    if let Some(track) = self
+                if let Some(pulse) = self.pulse_client.clone()
+                    && let Some(track) = self
                         .available_screen_tracks
                         .iter()
                         .find(|t| t.id == track_id)
                         .cloned()
-                    {
-                        self.screen_view_track_id = Some(track.id.clone());
+                {
+                    self.screen_view_track_id = Some(track.id.clone());
 
-                        let drain_tid = track_id.clone();
-                        return Task::stream(stream! {
-                            let mut rx = match pulse.consume_track(&track).await {
-                                Ok(rx) => rx,
-                                Err(e) => {
-                                    yield err(RenderableError::UnknownError(format!(
-                                        "Failed to consume screen track: {e}"
-                                    )));
-                                    yield msg(CallMessage::StopViewingScreenTrack);
-                                    return;
-                                }
-                            };
-                            yield msg(CallMessage::VideoTrackSubscribed(drain_tid.clone()));
-
-                            while let Some(frame) = rx.recv().await {
-                                if let Some((_codec, data)) = codec::strip_codec_byte(&frame.data) {
-                                    yield msg(CallMessage::VideoPacket(
-                                        drain_tid.clone(),
-                                        data.to_vec(),
-                                    ));
-                                }
+                    let drain_tid = track_id.clone();
+                    return Task::stream(stream! {
+                        let mut rx = match pulse.consume_track(&track).await {
+                            Ok(rx) => rx,
+                            Err(e) => {
+                                yield err(RenderableError::UnknownError(format!(
+                                    "Failed to consume screen track: {e}"
+                                )));
+                                yield msg(CallMessage::StopViewingScreenTrack);
+                                return;
                             }
-                        });
-                    }
+                        };
+                        yield msg(CallMessage::VideoTrackSubscribed(drain_tid.clone()));
+
+                        while let Some(frame) = rx.recv().await {
+                            if let Some((_codec, data)) = codec::strip_codec_byte(&frame.data) {
+                                yield msg(CallMessage::VideoPacket(
+                                    drain_tid.clone(),
+                                    data.to_vec(),
+                                ));
+                            }
+                        }
+                    });
                 }
             }
             CallMessage::StopViewingScreenTrack => {
-                if let Some(track_id) = self.clear_screen_view_state() {
-                    if let Some(pulse) = self.pulse_client.clone() {
-                        if let Err(e) = pulse.stop_consuming(track_id) {
-                            tracing::warn!("stop_consuming screen track: {e:#}");
-                        }
-                    }
+                if let Some(track_id) = self.clear_screen_view_state()
+                    && let Some(pulse) = self.pulse_client.clone()
+                    && let Err(e) = pulse.stop_consuming(track_id)
+                {
+                    tracing::warn!("stop_consuming screen track: {e:#}");
                 }
             }
             CallMessage::ToggleScreenshareFullscreen => {
@@ -572,15 +569,15 @@ impl CallSession {
                     if is_audio {
                         return consume_track_task(pulse, track, true);
                     } else if matches!(track.media_hint, MediaHint::ScreenVideo) {
-                        if let Some(ref mut call) = self.state {
-                            if let Some(p) = call
+                        if let Some(ref mut call) = self.state
+                            && let Some(p) = call
                                 .participants
                                 .iter_mut()
                                 .find(|p| p.session_id == track.session_id)
-                            {
-                                p.tracks.screen = true;
-                            }
+                        {
+                            p.tracks.screen = true;
                         }
+
                         self.available_screen_tracks.push(track);
                     } else {
                         return consume_track_task(pulse, track, false);
@@ -590,14 +587,13 @@ impl CallSession {
             PulseEvent::TrackUnavailable(id) => {
                 if let Some(track) = self.available_screen_tracks.iter().find(|t| t.id == id) {
                     let session_id = track.session_id.clone();
-                    if let Some(ref mut call) = self.state {
-                        if let Some(p) = call
+                    if let Some(ref mut call) = self.state
+                        && let Some(p) = call
                             .participants
                             .iter_mut()
                             .find(|p| p.session_id == session_id)
-                        {
-                            p.tracks.screen = false;
-                        }
+                    {
+                        p.tracks.screen = false;
                     }
                 }
                 self.audio.remove_track(&id);
@@ -694,14 +690,13 @@ impl CallSession {
         if self.call_id.as_deref() != Some(call_id) {
             return;
         }
-        if let Some(ref mut call) = self.state {
-            if let Some(p) = call
+        if let Some(ref mut call) = self.state
+            && let Some(p) = call
                 .participants
                 .iter_mut()
                 .find(|p| p.session_id == session_id)
-            {
-                p.tracks.audio = !muted;
-            }
+        {
+            p.tracks.audio = !muted;
         }
     }
 
@@ -822,11 +817,9 @@ pub fn load_call_state_task(api: Arc<ApiClient>, conv_id: String) -> Task<Messag
 
 fn connect_call_task(client: Arc<ApiClient>, conv_id: String, start_first: bool) -> Task<Message> {
     Task::stream(stream! {
-        if start_first {
-            if let Err(e) = client.client().start_call(&conv_id, None).await {
-                yield err(e.into());
-                return;
-            }
+        if start_first && let Err(e) = client.client().start_call(&conv_id, None).await {
+            yield err(e.into());
+            return;
         }
         let token_info = match client.client().create_call_token(&conv_id, true, false).await {
             Ok(info) => info,

@@ -770,10 +770,10 @@ async fn write_media(
         }
     }
 
-    if let Some(group) = producer.group.as_mut() {
-        if let Err(e) = group.write_frame(payload) {
-            tracing::warn!("Failed to write media frame: {e:?}");
-        }
+    if let Some(group) = producer.group.as_mut()
+        && let Err(e) = group.write_frame(payload)
+    {
+        tracing::warn!("Failed to write media frame: {e:?}");
     }
 }
 
@@ -821,10 +821,10 @@ fn spawn_consumer(
         let mut last_error_emit: Option<Instant> = None;
         loop {
             // if we fall behind, discard and jump ahead
-            if let Some(latest) = tc.latest() {
-                if latest.saturating_sub(last_group_seq) > MAX_GROUP_BACKLOG {
-                    tc.start_at(latest);
-                }
+            if let Some(latest) = tc.latest()
+                && latest.saturating_sub(last_group_seq) > MAX_GROUP_BACKLOG
+            {
+                tc.start_at(latest);
             }
 
             let mut group = match tc.next_group().await {

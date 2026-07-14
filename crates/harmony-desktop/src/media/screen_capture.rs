@@ -135,13 +135,13 @@ fn probe_encoder_codec() -> (Codec, u8) {
 pub async fn list_targets_with_thumbnails() -> CaptureTargetList {
     #[cfg(target_os = "linux")]
     {
-        return CaptureTargetList::Portal(CaptureTargetInfo {
+        CaptureTargetList::Portal(CaptureTargetInfo {
             title: "Screen".to_string(),
             target: CaptureTarget::System,
             thumbnail: None,
             source_width: 0,
             source_height: 0,
-        });
+        })
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -253,7 +253,7 @@ pub fn start_screen_capture(
                 width: enc_w,
                 height: enc_h,
                 fps: config.fps.max(1),
-                bitrate_bps: config.bitrate_kbps.max(250) as u32 * 1000,
+                bitrate_bps: config.bitrate_kbps.max(250) * 1000,
                 codec: actual_codec,
                 output: EncodeOutput::new(move |encoded_data: Vec<u8>| {
                     let packet = codec::EncodedPacket {
@@ -282,10 +282,10 @@ pub fn start_screen_capture(
             };
 
             while !stop_thread.load(Ordering::Relaxed) {
-                if keyframe_requested.swap(false, Ordering::Relaxed) {
-                    if let Err(e) = encoder.request_keyframe() {
-                        tracing::warn!("screen encoder request_keyframe: {e}");
-                    }
+                if keyframe_requested.swap(false, Ordering::Relaxed)
+                    && let Err(e) = encoder.request_keyframe()
+                {
+                    tracing::warn!("screen encoder request_keyframe: {e}");
                 }
                 match capturer.next_frame() {
                     Some(frame) => {

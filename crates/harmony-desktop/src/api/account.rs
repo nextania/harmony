@@ -111,7 +111,7 @@ fn get_argon2_ksf() -> ArgonKsf {
         .build()
         .expect("The provided Argon2 parameters should be valid");
     let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
-    return ArgonKsf { argon };
+    ArgonKsf { argon }
 }
 
 pub async fn login(

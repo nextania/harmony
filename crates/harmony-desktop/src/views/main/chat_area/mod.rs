@@ -78,7 +78,6 @@ fn screenshare_banner(state: &MainView) -> Option<Element<MainMessage>> {
                 )))
                 .style(styles::accent_dim)
                 .cursor_default()
-                .into()
             })
         } else {
             Some(
@@ -93,8 +92,7 @@ fn screenshare_banner(state: &MainView) -> Option<Element<MainMessage>> {
                 )
                 .on_press(MainMessage::Call(CallMessage::StopViewingScreenTrack))
                 .style(styles::accent_dim)
-                .cursor_default()
-                .into(),
+                .cursor_default(),
             )
         };
 

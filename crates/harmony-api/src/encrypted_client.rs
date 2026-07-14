@@ -532,7 +532,7 @@ impl EncryptedClient {
                         .add_contact(ContactAction::Finalize {
                             user_id: user_id.clone(),
                             public_key: public_key.clone(),
-                            encapsulated: encapsulated.clone(),
+                            encapsulated: *encapsulated,
                         })
                         .await?;
                     Ok(Some(outcome))
@@ -546,7 +546,7 @@ impl EncryptedClient {
                         .add_contact(ContactAction::HandleEstablished {
                             user_id: user_id.clone(),
                             public_key: public_key.clone(),
-                            encapsulated: encapsulated.clone(),
+                            encapsulated: *encapsulated,
                             key_id: key_id.clone(),
                         })
                         .await?;

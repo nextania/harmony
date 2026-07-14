@@ -596,17 +596,17 @@ async fn handle_mls_commit(
     let call_id = state.call_id.clone();
     task::spawn(async move {
         time::sleep(Duration::from_secs(10)).await;
-        if let Some(call) = GLOBAL_CALLS.get(&call_id) {
-            if let Some(new_epoch) = call.increment_epoch().await {
-                for recipient in call.mls_state.lock().await.full_members.iter() {
-                    if let Some(session) = GLOBAL_SESSIONS.get(recipient) {
-                        let _ = session
-                            .message_tx
-                            .send(ControlS2C::EpochReady { epoch: new_epoch });
-                    }
+        if let Some(call) = GLOBAL_CALLS.get(&call_id)
+            && let Some(new_epoch) = call.increment_epoch().await
+        {
+            for recipient in call.mls_state.lock().await.full_members.iter() {
+                if let Some(session) = GLOBAL_SESSIONS.get(recipient) {
+                    let _ = session
+                        .message_tx
+                        .send(ControlS2C::EpochReady { epoch: new_epoch });
                 }
-                info!("Advanced to epoch {} for call {}", new_epoch, call_id);
             }
+            info!("Advanced to epoch {} for call {}", new_epoch, call_id);
         }
     });
 }
@@ -615,14 +615,14 @@ async fn handle_commit_ack(epoch: u64, state: &SessionState) {
     let Some(call) = GLOBAL_CALLS.get(&state.call_id) else {
         return;
     };
-    if call.record_commit_ack(&state.session_id, epoch).await {
-        if let Some(new_epoch) = call.increment_epoch().await {
-            for recipient in call.mls_state.lock().await.full_members.iter() {
-                if let Some(session) = GLOBAL_SESSIONS.get(recipient) {
-                    let _ = session
-                        .message_tx
-                        .send(ControlS2C::EpochReady { epoch: new_epoch });
-                }
+    if call.record_commit_ack(&state.session_id, epoch).await
+        && let Some(new_epoch) = call.increment_epoch().await
+    {
+        for recipient in call.mls_state.lock().await.full_members.iter() {
+            if let Some(session) = GLOBAL_SESSIONS.get(recipient) {
+                let _ = session
+                    .message_tx
+                    .send(ControlS2C::EpochReady { epoch: new_epoch });
             }
         }
     }

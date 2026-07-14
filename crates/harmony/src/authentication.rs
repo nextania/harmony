@@ -65,5 +65,5 @@ pub async fn validate_token(token: &str) -> rapid::errors::Result<AsUser> {
 pub async fn check_authenticated(state: &RpcState) -> Result<User> {
     let client = state.client();
     let id = client.user_id().ok_or(Error::NotAuthenticated)?;
-    User::get(&id).await
+    User::get(id).await
 }

@@ -102,10 +102,10 @@ impl EncodeSession for VaapiEncoder {
 
     fn request_keyframe(&mut self) -> Result<()> {
         let now = Instant::now();
-        if let Some(last) = self.last_keyframe_request {
-            if now.duration_since(last) < std::time::Duration::from_secs(1) {
-                return Ok(());
-            }
+        if let Some(last) = self.last_keyframe_request
+            && now.duration_since(last) < std::time::Duration::from_secs(1)
+        {
+            return Ok(());
         }
         self.last_keyframe_request = Some(now);
 
@@ -155,7 +155,7 @@ fn encoder_thread(
         width: aligned_width,
         height: aligned_height,
     };
-    let low_power = check_low_power(&*display, &codec);
+    let low_power = check_low_power(&display, &codec);
     let callback: Arc<dyn Fn(Vec<u8>) + Send + Sync> = output.0.clone();
 
     let gop_limit = (fps.max(1) * 2).clamp(1, u16::MAX as u32) as u16;
@@ -440,7 +440,7 @@ impl VaapiVpp {
             _ => u32::from_le_bytes(*b"BGRX"),
         };
 
-        let src_surface = if stride % SURFACE_PITCH_ALIGNMENT == 0 {
+        let src_surface = if stride.is_multiple_of(SURFACE_PITCH_ALIGNMENT) {
             debug!("VPP convert: zero-copy path (stride={stride}, {width}x{height})");
             let src_cros_fourcc = Fourcc::from(&va_src_fourcc.to_le_bytes());
             let src_layout = FrameLayout {

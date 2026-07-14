@@ -22,7 +22,7 @@ pub fn chat_list(state: &MainView) -> Element<MainMessage> {
         let is_selected = state
             .current_conversation
             .as_ref()
-            .map_or(false, |selected| selected == id);
+            .is_some_and(|selected| selected == id);
         let (channel_name, channel_icon) = match conv {
             harmony_api::Channel::PrivateChannel {
                 initiator_id,
@@ -66,17 +66,14 @@ pub fn chat_list(state: &MainView) -> Element<MainMessage> {
             None
         };
 
-        let name = text(channel_name)
-            .size(16)
-            .color(TEXT_PRIMARY)
-            .font(Font {
-                weight: if is_selected {
-                    iced::font::Weight::Bold
-                } else {
-                    iced::font::Weight::Medium
-                },
-                ..DM_SANS
-            });
+        let name = text(channel_name).size(16).color(TEXT_PRIMARY).font(Font {
+            weight: if is_selected {
+                iced::font::Weight::Bold
+            } else {
+                iced::font::Weight::Medium
+            },
+            ..DM_SANS
+        });
 
         let mut user_row_items = vec![channel_icon.into(), name.into()];
         if let Some(indicator) = screenshare_indicator {

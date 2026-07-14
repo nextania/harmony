@@ -106,11 +106,12 @@ impl App {
             loop {
                 match capturer.next_frame() {
                     Some(frame) => {
-                        if let Some(enc) = encoder.as_mut() {
-                            if let Err(e) = enc.submit_frame(&frame) {
-                                debug!("submit_frame: {e}");
-                            }
+                        if let Some(enc) = encoder.as_mut()
+                            && let Err(e) = enc.submit_frame(&frame)
+                        {
+                            debug!("submit_frame: {e}");
                         }
+
                         latest_for_thread.store(Arc::new(Some(frame)));
                         count_for_thread.fetch_add(1, Ordering::Relaxed);
                         tick_tx.send(()).ok();
@@ -128,11 +129,8 @@ impl App {
                 frame_count,
             },
             Task::stream(stream! {
-                loop {
-                    match tick_rx.recv().await {
-                        Some(()) => yield Message::Tick,
-                        None => break,
-                    }
+                while let Some(()) = tick_rx.recv().await {
+                    yield Message::Tick;
                 }
             }),
         )

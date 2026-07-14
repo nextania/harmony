@@ -168,10 +168,10 @@ impl MainView {
                     return Task::none();
                 }
                 self.chat_mode = mode;
-                if matches!(self.chat_mode, ChatMode::Voice) {
-                    if let Some(conv_id) = self.current_conversation.clone() {
-                        return call::load_call_state_task(self.api.clone(), conv_id);
-                    }
+                if matches!(self.chat_mode, ChatMode::Voice)
+                    && let Some(conv_id) = self.current_conversation.clone()
+                {
+                    return call::load_call_state_task(self.api.clone(), conv_id);
                 }
             }
             MainMessage::ChatSelected(i) => {
@@ -219,23 +219,23 @@ impl MainView {
             MainMessage::ChatInputChanged(s) => self.chat_input = s,
             MainMessage::SearchInputChanged(s) => self.search_input = s,
             MainMessage::SendMessage => {
-                if !self.chat_input.is_empty() {
-                    if let Some(conv_id) = &self.current_conversation {
-                        let client = self.api.clone();
-                        let channel_id = conv_id.clone();
-                        let content = self.chat_input.clone();
-                        self.chat_input.clear();
-                        return Task::perform(
-                            async move {
-                                let msg = client.send_message(&channel_id, &content).await?;
-                                Ok(ChatMessage::new(&msg, content))
-                            },
-                            move |result: crate::errors::RenderableResult<_>| match result {
-                                Ok(chat_msg) => Message::Main(MainMessage::MessageSent(chat_msg)),
-                                Err(e) => Message::Main(MainMessage::ApiError(e)),
-                            },
-                        );
-                    }
+                if !self.chat_input.is_empty()
+                    && let Some(conv_id) = &self.current_conversation
+                {
+                    let client = self.api.clone();
+                    let channel_id = conv_id.clone();
+                    let content = self.chat_input.clone();
+                    self.chat_input.clear();
+                    return Task::perform(
+                        async move {
+                            let msg = client.send_message(&channel_id, &content).await?;
+                            Ok(ChatMessage::new(&msg, content))
+                        },
+                        move |result: crate::errors::RenderableResult<_>| match result {
+                            Ok(chat_msg) => Message::Main(MainMessage::MessageSent(chat_msg)),
+                            Err(e) => Message::Main(MainMessage::ApiError(e)),
+                        },
+                    );
                 }
             }
             MainMessage::MessageSent(msg) => {
@@ -283,10 +283,10 @@ impl MainView {
             }
             MainMessage::MessageEdited(message_id, updated_msg) => {
                 if let Some(conv_id) = &self.current_conversation {
-                    if let Some(msgs) = self.conversation_messages.get_mut(conv_id) {
-                        if let Some(m) = msgs.iter_mut().find(|m| m.id == message_id) {
-                            *m = updated_msg.clone();
-                        }
+                    if let Some(msgs) = self.conversation_messages.get_mut(conv_id)
+                        && let Some(m) = msgs.iter_mut().find(|m| m.id == message_id)
+                    {
+                        *m = updated_msg.clone();
                     }
                     if let Some(m) = self
                         .current_conversation_messages
@@ -581,7 +581,7 @@ impl MainView {
     }
 
     pub fn view(&self) -> Element<MainMessage> {
-        let sidebar = sidebar(&self);
+        let sidebar = sidebar(self);
         let mut main_row = row![sidebar];
         let error_banner: Option<Element<MainMessage>> = self.error.as_ref().map(|e| {
             container(
@@ -655,7 +655,7 @@ impl MainView {
         }
 
         let content: Element<MainMessage> = if self.current_conversation.is_some() {
-            let chat_area = chat_area(&self);
+            let chat_area = chat_area(self);
             main_row
                 .push(chat_area)
                 .height(Length::Fill)

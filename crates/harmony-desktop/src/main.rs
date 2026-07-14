@@ -227,9 +227,9 @@ pub enum Message {
     HwndCaptured(window::Id, Option<isize>),
 }
 
-pub static DEFAULT_BASE_URL_AS: &'static str = "https://account.nextania.com";
-// pub static DEFAULT_BASE_URL_HARMONY: &'static str = "wss://chat.nextania.com";
-pub static DEFAULT_BASE_URL_HARMONY: &'static str = "ws://192.168.0.101:9005";
+pub static DEFAULT_BASE_URL_AS: &str = "https://account.nextania.com";
+// pub static DEFAULT_BASE_URL_HARMONY: &str = "wss://chat.nextania.com";
+pub static DEFAULT_BASE_URL_HARMONY: &str = "ws://192.168.0.101:9005";
 
 impl App {
     fn new() -> (Self, Task<Message>) {
@@ -731,10 +731,7 @@ impl App {
     }
 
     fn view(&self, id: window::Id) -> Element<Message> {
-        match match self.windows.get(&id) {
-            Some(w) => Some(&w.view),
-            None => None,
-        } {
+        match self.windows.get(&id).map(|w| &w.view) {
             Some(AppWindowView::ExternalLink(v)) => v.view().map(Message::ExternalLink),
             Some(AppWindowView::Splash(v)) => v.view().map(Message::Splash),
             Some(AppWindowView::Login(v)) => v.view().map(Message::Login),

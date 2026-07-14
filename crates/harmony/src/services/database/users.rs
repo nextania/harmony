@@ -257,7 +257,7 @@ impl User {
                     RelationshipState::PendingKeyExchange {
                         public_key: Some(pk),
                         encapsulated: Some(ct),
-                    } => (pk.clone(), ct.clone()),
+                    } => (pk.clone(), *ct),
                     _ => return Err(Error::InvalidStage),
                 };
                 let key_id = Ulid::new().to_string();
@@ -269,7 +269,7 @@ impl User {
                 };
                 let acceptor_state = RelationshipState::Established {
                     public_key,
-                    encapsulated: encapsulated.into(),
+                    encapsulated,
                     key_id: key_id.clone(),
                 };
 

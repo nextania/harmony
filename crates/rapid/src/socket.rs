@@ -571,16 +571,16 @@ pub async fn handle_packet(
 
                 if let Some(rl) = rate_limiter {
                     let client_user_id = clients.0.get(user_id).and_then(|c| c.user_id.clone());
-                    if let Some(uid) = client_user_id {
-                        if !rl.check_rate_limit(&uid, &method).await {
-                            #[cfg(feature = "otel")]
-                            rpc_rate_limited().add(1, &[KeyValue::new("method", method.clone())]);
-                            return RpcMessageS2C::Message {
-                                id,
-                                ok: false,
-                                data: to_value(&Error::RateLimited).expect("Failed to serialize"),
-                            };
-                        }
+                    if let Some(uid) = client_user_id
+                        && !rl.check_rate_limit(&uid, &method).await
+                    {
+                        #[cfg(feature = "otel")]
+                        rpc_rate_limited().add(1, &[KeyValue::new("method", method.clone())]);
+                        return RpcMessageS2C::Message {
+                            id,
+                            ok: false,
+                            data: to_value(&Error::RateLimited).expect("Failed to serialize"),
+                        };
                     }
                 }
 

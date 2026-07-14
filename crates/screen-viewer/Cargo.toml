@@ -7,7 +7,7 @@ edition = "2024"
 arc-swap = "1.9.1"
 async-stream = "0.3.6"
 
-iced = { git = "https://github.com/iced-rs/iced.git", rev = "cf09909", features = ["wgpu", "advanced", "tokio"] }
+iced = { git = "https://github.com/infiniwave/iced.git", rev = "29432bd", features = ["wgpu", "advanced", "tokio"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 tracing.workspace = true
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }

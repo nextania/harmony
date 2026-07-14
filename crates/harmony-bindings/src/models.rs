@@ -819,43 +819,26 @@ impl From<harmony_api::Event> for Event {
                 channel_id: e.channel_id,
                 user_id: e.user_id,
             },
-            harmony_api::Event::UserJoinedCall {
-                call_id,
-                user_id,
-                session_id,
-                muted,
-                deafened,
-            } => Event::UserJoinedCall {
-                call_id,
-                user_id,
-                session_id,
-                muted,
-                deafened,
+            harmony_api::Event::UserJoinedCall(e) => Event::UserJoinedCall {
+                call_id: e.call_id,
+                user_id: e.user_id,
+                session_id: e.session_id,
+                muted: e.muted,
+                deafened: e.deafened,
             },
-            harmony_api::Event::UserLeftCall {
-                call_id,
-                session_id,
-            } => Event::UserLeftCall {
-                call_id,
-                session_id,
+            harmony_api::Event::UserLeftCall(e) => Event::UserLeftCall {
+                call_id: e.call_id,
+                session_id: e.session_id,
             },
-            harmony_api::Event::UserVoiceStateChanged {
-                call_id,
-                session_id,
-                muted,
-                deafened,
-            } => Event::UserVoiceStateChanged {
-                call_id,
-                session_id,
-                muted,
-                deafened,
+            harmony_api::Event::UserVoiceStateChanged(e) => Event::UserVoiceStateChanged {
+                call_id: e.call_id,
+                session_id: e.session_id,
+                muted: e.muted,
+                deafened: e.deafened,
             },
-            harmony_api::Event::CallMigrated {
-                call_id,
-                server_address,
-            } => Event::CallMigrated {
-                call_id,
-                server_address,
+            harmony_api::Event::CallMigrated(e) => Event::CallMigrated {
+                call_id: e.call_id,
+                server_address: e.server_address,
             },
         }
     }

@@ -87,7 +87,7 @@ pub async fn edit_channel(state: RpcState, data: RpcValue<EditChannelMethod>) ->
     events::publish(
         &member_ids,
         Event::ChannelUpdated(ChannelUpdatedEvent {
-            channel: updated.clone(),
+            channel: updated.clone().into(),
         }),
     )
     .await;

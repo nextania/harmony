@@ -89,7 +89,7 @@ pub async fn send_message(state: RpcState, data: RpcValue<SendMessageMethod>) ->
     events::publish(
         &member_ids,
         Event::NewMessage(NewMessageEvent {
-            message: message.clone(),
+            message: message.clone().into(),
             channel_id: data.channel_id,
         }),
     )
@@ -119,7 +119,7 @@ pub async fn edit_message(state: RpcState, data: RpcValue<EditMessageMethod>) ->
     events::publish(
         &member_ids,
         Event::MessageEdited(MessageEditedEvent {
-            message: updated.clone(),
+            message: updated.clone().into(),
             channel_id: updated.channel_id.clone(),
         }),
     )

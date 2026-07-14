@@ -513,37 +513,20 @@ impl MainView {
             Event::MemberLeft(_e) => {
                 // TODO: update group channel membership
             }
-            Event::UserJoinedCall {
-                call_id,
-                user_id,
-                session_id,
-                muted,
-                deafened: _,
-            } => {
+            Event::UserJoinedCall(e) => {
                 return self
                     .call
-                    .on_user_joined(&call_id, user_id, session_id, muted, &self.api);
+                    .on_user_joined(&e.call_id, e.user_id, e.session_id, e.muted, &self.api);
             }
-            Event::UserLeftCall {
-                call_id,
-                session_id,
-            } => {
-                self.call.on_user_left(&call_id, &session_id);
+            Event::UserLeftCall(e) => {
+                self.call.on_user_left(&e.call_id, &e.session_id);
             }
-            Event::UserVoiceStateChanged {
-                call_id,
-                session_id,
-                muted,
-                deafened: _,
-            } => {
+            Event::UserVoiceStateChanged(e) => {
                 self.call
-                    .on_voice_state_changed(&call_id, &session_id, muted);
+                    .on_voice_state_changed(&e.call_id, &e.session_id, e.muted);
             }
-            Event::CallMigrated {
-                call_id,
-                server_address: _,
-            } => {
-                return self.call.on_call_migrated(&call_id, &self.api);
+            Event::CallMigrated(e) => {
+                return self.call.on_call_migrated(&e.call_id, &self.api);
             }
             Event::ContactStateChanged { user_id, state } => {
                 return self.contacts.on_state_changed(user_id, &state, &self.api);

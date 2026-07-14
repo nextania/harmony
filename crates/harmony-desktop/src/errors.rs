@@ -13,7 +13,7 @@ pub enum RenderableError {
 
 // TODO: localize error messages
 impl RenderableError {
-    pub fn to_string(&self) -> String {
+    pub fn friendly(&self) -> String {
         match self {
             RenderableError::IncorrectCredentials => "Invalid email or password".into(),
             RenderableError::NetworkError => "Network error, please try again".into(),

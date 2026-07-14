@@ -9,6 +9,7 @@ use chacha20poly1305::{
     Key, KeyInit, XChaCha20Poly1305, XNonce,
     aead::{Aead, Generate},
 };
+use harmony_types::users::Encapsulated;
 use tokio::sync::Mutex;
 use zeroize::Zeroizing;
 
@@ -67,12 +68,12 @@ pub enum ContactAction {
     Finalize {
         user_id: String,
         public_key: UnifiedPublicKey,
-        encapsulated: [u8; 1088],
+        encapsulated: Encapsulated,
     },
     HandleEstablished {
         user_id: String,
         public_key: UnifiedPublicKey,
-        encapsulated: [u8; 1088],
+        encapsulated: Encapsulated,
         key_id: String,
     },
 }
@@ -406,7 +407,7 @@ impl EncryptedClient {
                 let enc = ks
                     .get_encryption(&user_id)
                     .ok_or_else(|| missing_key("no negotiation key stored for contact"))?;
-                let ss1 = enc.decapsulate(&encapsulated)?;
+                let ss1 = enc.decapsulate(encapsulated.as_slice())?;
                 // encapsulate back to the acceptor to get the second shared secret
                 let (ct, ss2) = PersistentEncryption::encapsulate_to(&acceptor_pk.hybrid)?;
                 ks.store_outgoing_ss(&user_id, &ss2);
@@ -449,7 +450,7 @@ impl EncryptedClient {
                     let enc = ks
                         .get_encryption(&user_id)
                         .ok_or_else(|| missing_key("no negotiation key stored for contact"))?;
-                    let ss2 = enc.decapsulate(&encapsulated)?;
+                    let ss2 = enc.decapsulate(encapsulated.as_slice())?;
                     let ss1 = ks.get_outgoing_ss(&user_id).ok_or_else(|| {
                         missing_key("no outgoing shared secret stored for contact")
                     })?;
@@ -520,7 +521,7 @@ impl EncryptedClient {
         ks.get_group_key(channel_id).map(|k| k.to_vec())
     }
 
-    pub async fn handle_event(&self, event: &Event) -> Result<Option<AddContactOutcome>> {
+    pub async fn handle_event(&self, event: Event) -> Result<Option<AddContactOutcome>> {
         match event {
             Event::ContactStateChanged { user_id, state } => match state {
                 RelationshipState::PendingKeyExchange {
@@ -532,7 +533,7 @@ impl EncryptedClient {
                         .add_contact(ContactAction::Finalize {
                             user_id: user_id.clone(),
                             public_key: public_key.clone(),
-                            encapsulated: *encapsulated,
+                            encapsulated,
                         })
                         .await?;
                     Ok(Some(outcome))
@@ -546,7 +547,7 @@ impl EncryptedClient {
                         .add_contact(ContactAction::HandleEstablished {
                             user_id: user_id.clone(),
                             public_key: public_key.clone(),
-                            encapsulated: *encapsulated,
+                            encapsulated,
                             key_id: key_id.clone(),
                         })
                         .await?;

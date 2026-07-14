@@ -90,7 +90,7 @@ impl MfaView {
                 }
             }
             MfaMessage::Failed(e) => {
-                self.error = Some(e.to_string());
+                self.error = Some(e.friendly());
             }
         }
         Task::none()

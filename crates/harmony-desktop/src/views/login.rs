@@ -134,7 +134,7 @@ impl LoginView {
                 });
             }
             LoginMessage::Failed(e) => {
-                self.login_error = Some(e.to_string());
+                self.login_error = Some(e.friendly());
             }
             LoginMessage::ToggleLocaleDropdown => {
                 self.locale_dropdown_open = !self.locale_dropdown_open;

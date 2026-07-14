@@ -26,8 +26,8 @@ pub struct Presence {
 #[serde(rename_all = "camelCase")]
 pub struct HybridPublicKey {
     pub x25519: [u8; 32],
-    #[serde_as(as = "[_; 1184]")]
-    pub mlkem: [u8; 1184],
+    #[serde_as(as = "Box<[_; 1184]>")]
+    pub mlkem: Box<[u8; 1184]>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -38,7 +38,7 @@ pub struct UnifiedPublicKey {
 }
 
 /// Raw ML-KEM-768 ciphertext (1088 bytes) produced during encapsulation.
-pub type Encapsulated = [u8; 1088];
+pub type Encapsulated = Box<[u8; 1088]>;
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -50,12 +50,12 @@ pub enum RelationshipState {
     },
     PendingKeyExchange {
         public_key: Option<UnifiedPublicKey>,
-        #[serde_as(as = "Option<[_; 1088]>")]
+        #[serde_as(as = "Option<Box<[_; 1088]>>")]
         encapsulated: Option<Encapsulated>,
     },
     Established {
         public_key: UnifiedPublicKey,
-        #[serde_as(as = "[_; 1088]")]
+        #[serde_as(as = "Box<[_; 1088]>")]
         encapsulated: Encapsulated,
         key_id: String,
     },
@@ -135,15 +135,15 @@ pub enum AddContactStage {
     Accept {
         user_id: String,
         public_key: UnifiedPublicKey,
-        #[serde_as(as = "[_; 1088]")]
-        encapsulated: [u8; 1088],
+        #[serde_as(as = "Box<[_; 1088]>")]
+        encapsulated: Encapsulated,
     },
     // 3. finalize and send our ML-KEM encapsulation back to the acceptor
     Finalize {
         user_id: String,
         public_key: UnifiedPublicKey,
-        #[serde_as(as = "[_; 1088]")]
-        encapsulated: [u8; 1088],
+        #[serde_as(as = "Box<[_; 1088]>")]
+        encapsulated: Encapsulated,
     },
 }
 

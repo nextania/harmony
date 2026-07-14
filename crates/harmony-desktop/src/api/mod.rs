@@ -117,7 +117,7 @@ impl ApiClient {
         }
     }
 
-    pub async fn handle_event(&self, event: &Event) -> RenderableResult<Option<AddContactOutcome>> {
+    pub async fn handle_event(&self, event: Event) -> RenderableResult<Option<AddContactOutcome>> {
         Ok(self.crypto.handle_event(event).await?)
     }
 

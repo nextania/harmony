@@ -334,7 +334,7 @@ impl MainView {
                         let crypto_task = {
                             let api = self.api.clone();
                             let ev = e.clone();
-                            Task::perform(async move { api.handle_event(&ev).await }, |result| {
+                            Task::perform(async move { api.handle_event(ev).await }, |result| {
                                 match result {
                                     Ok(Some(outcome)) => Message::Main(MainMessage::Contacts(
                                         ContactsMessage::Accepted(contacts::Contact::from_outcome(
@@ -514,9 +514,13 @@ impl MainView {
                 // TODO: update group channel membership
             }
             Event::UserJoinedCall(e) => {
-                return self
-                    .call
-                    .on_user_joined(&e.call_id, e.user_id, e.session_id, e.muted, &self.api);
+                return self.call.on_user_joined(
+                    &e.call_id,
+                    e.user_id,
+                    e.session_id,
+                    e.muted,
+                    &self.api,
+                );
             }
             Event::UserLeftCall(e) => {
                 self.call.on_user_left(&e.call_id, &e.session_id);
@@ -569,7 +573,7 @@ impl MainView {
         let error_banner: Option<Element<MainMessage>> = self.error.as_ref().map(|e| {
             container(
                 row![
-                    text(e.to_string())
+                    text(e.friendly())
                         .size(14)
                         .font(DM_SANS)
                         .color(iced::Color::WHITE),

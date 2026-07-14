@@ -77,7 +77,10 @@ pub fn hybrid_pk_from_bytes(bytes: &[u8; HYBRID_PUBLIC_KEY_BYTES]) -> HybridPubl
     let mut x25519 = [0u8; 32];
     x25519.copy_from_slice(&bytes[..32]);
     let mlkem: [u8; 1184] = bytes[32..].try_into().unwrap();
-    HybridPublicKey { x25519, mlkem }
+    HybridPublicKey {
+        x25519,
+        mlkem: Box::new(mlkem),
+    }
 }
 
 pub fn hybrid_pk_to_bytes(
@@ -88,7 +91,7 @@ pub fn hybrid_pk_to_bytes(
     }
     let mut out = [0u8; HYBRID_PUBLIC_KEY_BYTES];
     out[..32].copy_from_slice(&pk.x25519);
-    out[32..].copy_from_slice(&pk.mlkem);
+    out[32..].copy_from_slice(pk.mlkem.as_slice());
     Ok(out)
 }
 
@@ -136,7 +139,10 @@ impl PersistentEncryption {
     pub fn public_key(&self) -> HybridPublicKey {
         let x25519 = *self.x25519_public.as_bytes();
         let mlkem = self.mlkem_ek.to_bytes().0;
-        HybridPublicKey { x25519, mlkem }
+        HybridPublicKey {
+            x25519,
+            mlkem: Box::new(mlkem),
+        }
     }
 
     pub fn secret_key_bytes(&self) -> [u8; HYBRID_SECRET_KEY_BYTES] {
@@ -151,12 +157,12 @@ impl PersistentEncryption {
     pub fn encapsulate_to(
         their_pk: &HybridPublicKey,
     ) -> Result<(Encapsulated, [u8; 32]), CryptoError> {
-        let their_mlkem_ek = EncapsulationKey768::new_from_slice(&their_pk.mlkem)
+        let their_mlkem_ek = EncapsulationKey768::new_from_slice(their_pk.mlkem.as_slice())
             .map_err(|_| CryptoError::InvalidPublicKey)?;
         let (ct, ss) = their_mlkem_ek.encapsulate();
         let mut ss_bytes = [0u8; 32];
         ss_bytes.copy_from_slice(ss.as_ref());
-        Ok((ct.0, ss_bytes))
+        Ok((Box::new(ct.0), ss_bytes))
     }
 
     /// Decapsulate a peer-supplied ciphertext.

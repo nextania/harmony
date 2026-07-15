@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
+use core_api::AvatarUrl;
 use iced::{
     Border, Color, Element, Length, Padding, Shadow, Vector, alignment, color,
-    widget::{Column, Space, button, column, container, row, shader, stack, text},
+    widget::{Column, Space, button, column, container, image, row, shader, stack, text},
 };
 
 use crate::{
@@ -70,7 +71,13 @@ pub fn voice_area(state: &MainView) -> Element<MainMessage> {
                 let names: Vec<String> = call
                     .participants
                     .iter()
-                    .map(|p| state.profile(&p.user_id).display_name)
+                    .map(|p| {
+                        state
+                            .api
+                            .users()
+                            .get(&p.user_id)
+                            .map_or("Unknown".to_string(), |x| x.display_name().to_string())
+                    })
                     .collect();
                 let in_call_label = text(format!(
                     "In call: {}",
@@ -133,11 +140,13 @@ fn voice_in_call<'a>(state: &'a MainView, call: &'a CallState) -> Element<'a, Ma
     let screen_active = my_tracks.is_some_and(|t| t.screen);
 
     let mut content = vec![];
-    let screen_sharer = call
-        .participants
-        .iter()
-        .find(|p| p.tracks.screen)
-        .map(|p| state.profile(&p.user_id).display_name);
+    let screen_sharer = call.participants.iter().find(|p| p.tracks.screen).map(|p| {
+        state
+            .api
+            .users()
+            .get(&p.user_id)
+            .map_or("Unknown".to_string(), |x| x.display_name().to_string())
+    });
 
     if let Some(sharer_name) = screen_sharer.clone() {
         let video_view: Element<MainMessage> = if screen_active {
@@ -297,78 +306,84 @@ fn voice_in_call<'a>(state: &'a MainView, call: &'a CallState) -> Element<'a, Ma
         content.push(Space::new().height(Length::Fill).into());
     };
 
-    let participant_card = |name: &str, avatar_color: Color, audio: bool| -> Element<MainMessage> {
-        let avatar = container(text("").size(1))
-            .width(64)
-            .height(64)
-            .style(move |_theme| container::Style {
-                background: Some(iced::Background::Color(avatar_color)),
-                border: Border::default().rounded(10),
+    let participant_card =
+        |name: &str, avatar: Option<AvatarUrl>, audio: bool| -> Element<MainMessage> {
+            let avatar = container(image(state.default_avatar.clone()))
+                .width(64)
+                .height(64)
+                .style(move |_theme| container::Style {
+                    border: Border::default().rounded(6),
+                    ..Default::default()
+                });
+
+            let mic_indicator = text(if audio {
+                Icon::MicFilled.unicode()
+            } else {
+                Icon::MicOffRegular.unicode()
+            })
+            .size(14)
+            .color(if audio { TEXT_PRIMARY } else { TEXT_MUTED })
+            .font(FLUENT_ICONS);
+
+            let name_label = container(
+                row![
+                    text(name.to_string())
+                        .size(16)
+                        .color(TEXT_PRIMARY)
+                        .font(DM_SANS)
+                        .align_x(alignment::Horizontal::Center),
+                    mic_indicator,
+                ]
+                .spacing(4)
+                .align_y(alignment::Vertical::Center),
+            )
+            .width(Length::Fill)
+            .align_x(alignment::Horizontal::Center)
+            .padding(Padding::from([5, 15]))
+            .style(|_theme| container::Style {
+                background: Some(iced::Background::Color(BG_PARTICIPANT_LABEL)),
+                border: Border::default().rounded(5),
                 ..Default::default()
             });
 
-        let mic_indicator = text(if audio {
-            Icon::MicFilled.unicode()
-        } else {
-            Icon::MicOffRegular.unicode()
-        })
-        .size(14)
-        .color(if audio { TEXT_PRIMARY } else { TEXT_MUTED })
-        .font(FLUENT_ICONS);
-
-        let name_label = container(
-            row![
-                text(name.to_string())
-                    .size(16)
-                    .color(TEXT_PRIMARY)
-                    .font(DM_SANS)
-                    .align_x(alignment::Horizontal::Center),
-                mic_indicator,
-            ]
-            .spacing(4)
-            .align_y(alignment::Vertical::Center),
-        )
-        .width(Length::Fill)
-        .align_x(alignment::Horizontal::Center)
-        .padding(Padding::from([5, 15]))
-        .style(|_theme| container::Style {
-            background: Some(iced::Background::Color(BG_PARTICIPANT_LABEL)),
-            border: Border::default().rounded(5),
-            ..Default::default()
-        });
-
-        container(
-            column![avatar, name_label]
-                .spacing(16)
-                .align_x(alignment::Horizontal::Center)
-                .width(Length::Fill),
-        )
-        .width(200)
-        .padding(Padding::from([10, 13]))
-        .style(|_theme| container::Style {
-            background: Some(iced::Background::Color(BG_PARTICIPANT_CARD)),
-            border: Border::default().rounded(5),
-            shadow: Shadow {
-                color: Color {
-                    r: 0.0,
-                    g: 0.0,
-                    b: 0.0,
-                    a: 0.25,
+            container(
+                column![avatar, name_label]
+                    .spacing(16)
+                    .align_x(alignment::Horizontal::Center)
+                    .width(Length::Fill),
+            )
+            .width(200)
+            .padding(Padding::from([10, 13]))
+            .style(|_theme| container::Style {
+                background: Some(iced::Background::Color(BG_PARTICIPANT_CARD)),
+                border: Border::default().rounded(5),
+                shadow: Shadow {
+                    color: Color {
+                        r: 0.0,
+                        g: 0.0,
+                        b: 0.0,
+                        a: 0.25,
+                    },
+                    offset: Vector::new(0.0, 4.0),
+                    blur_radius: 4.0,
                 },
-                offset: Vector::new(0.0, 4.0),
-                blur_radius: 4.0,
-            },
-            ..Default::default()
-        })
-        .into()
-    };
+                ..Default::default()
+            })
+            .into()
+        };
 
     let mut participants_row_content = row![].spacing(10);
     for participant in call.participants.iter() {
-        let profile = state.profile(&participant.user_id);
+        let (avatar_url, display_name) = state
+            .api
+            .users()
+            .get(&participant.user_id)
+            .map_or((None, "Unknown".to_string()), |x| {
+                (x.avatar().cloned(), x.display_name().to_string())
+            });
         participants_row_content = participants_row_content.push(participant_card(
-            &profile.display_name,
-            profile.avatar_color_start,
+            &display_name,
+            avatar_url,
             participant.tracks.audio,
         ));
     }

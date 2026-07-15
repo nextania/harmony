@@ -181,16 +181,17 @@ pub fn sidebar(state: &MainView) -> Element<MainMessage> {
         })
         .cursor_default();
 
-    let current_profile = state.profile(&state.current_user_id);
+    // TODO: add user() and make sure current user is ALWAYS loaded
+    let current_profile = state.api.users().get(&state.current_user_id).unwrap();
     let profile_info = column![
-        text(current_profile.display_name)
+        text(current_profile.display_name().to_string())
             .size(14)
             .color(TEXT_PRIMARY)
             .font(Font {
                 weight: iced::font::Weight::Bold,
                 ..DM_SANS
             }),
-        text(current_profile.username)
+        text(current_profile.username().to_string())
             .size(12)
             .color(TEXT_MUTED)
             .font(DM_SANS),

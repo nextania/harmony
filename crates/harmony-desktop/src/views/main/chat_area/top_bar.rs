@@ -1,6 +1,6 @@
 use iced::{
-    Border, Color, Element, Font, Length, Padding, alignment, color,
-    widget::{button, container, row, text, text_input},
+    Border, Color, Element, Font, Length, Padding, alignment,
+    widget::{button, container, image, row, text, text_input},
 };
 
 use crate::{
@@ -32,19 +32,21 @@ pub fn top_bar(state: &MainView) -> Element<MainMessage> {
             } else {
                 initiator_id
             };
-            let other = state.profile(other_id);
-            (other.avatar_color_start, other.display_name)
+            state
+                .api
+                .users()
+                .get(other_id)
+                .map_or((None, "Unknown".to_string()), |x| {
+                    (x.avatar().cloned(), x.display_name().to_string())
+                })
         }
-        harmony_api::ChannelData::GroupChannel { .. } => {
-            (color!(0x555555), "Unnamed Group".to_string())
-        }
+        harmony_api::ChannelData::GroupChannel { .. } => (None, "Unnamed Group".to_string()),
     };
 
-    let avatar = container(text("").size(1))
+    let avatar = container(image(state.default_avatar.clone()))
         .width(24)
         .height(24)
         .style(move |_theme| container::Style {
-            background: Some(iced::Background::Color(avatar_color)),
             border: Border::default().rounded(6),
             ..Default::default()
         });

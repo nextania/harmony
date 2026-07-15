@@ -60,7 +60,11 @@ fn screenshare_banner(state: &MainView) -> Option<Element<MainMessage>> {
         )
     } else if let Some(participant) = state.remote_screenshare_available() {
         let is_consuming = state.is_consuming_remote_screenshare();
-        let name = state.profile(&participant.user_id).display_name;
+        let name = state
+            .api
+            .users()
+            .get(&participant.user_id)
+            .map_or("Unknown".to_string(), |x| x.display_name().to_string());
         let label = if is_consuming {
             format!("Viewing {name}'s screen")
         } else {

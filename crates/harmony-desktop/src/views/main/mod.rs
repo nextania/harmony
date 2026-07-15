@@ -1,17 +1,18 @@
 use std::{collections::HashMap, sync::Arc};
 
-use harmony_api::{AddContactOutcome, Channel, EncryptedClient, EncryptedEvent, LifecycleEvent};
+use harmony_api::{
+    AddContactOutcome, Channel, EncryptedClient, EncryptedEvent, LifecycleEvent, User,
+};
 use iced::{
     Element, Length, Task,
-    widget::{Space, button, column, container, row, text},
+    widget::{Space, button, column, container, image::Handle, row, text},
 };
 
 use crate::{
     ChatMessage, Message,
-    api::{UserProfile, placeholder_profile},
     errors::RenderableError,
     icons::{FLUENT_ICONS, Icon},
-    theme::{BG_APP, DM_SANS, TEXT_MUTED},
+    theme::{BG_APP, DEFAULT_AVATAR, DM_SANS, TEXT_MUTED},
     views::main::{
         call::{CallContext, CallMessage, CallParticipant, CallSession},
         chat_area::chat_area,
@@ -107,6 +108,8 @@ pub struct MainView {
     pub emoji_picker_category: emojis::Group,
     pub emoji_search: String,
 
+    pub default_avatar: Handle,
+
     // TODO:
     pub call: CallSession,
     pub contacts: ContactsState,
@@ -135,6 +138,7 @@ impl MainView {
             call: CallSession::new(),
             contacts: ContactsState::default(),
             error: None,
+            default_avatar: Handle::from_bytes(DEFAULT_AVATAR),
         }
     }
 
@@ -515,12 +519,8 @@ impl MainView {
             .remote_screenshare_available(&self.current_user_id)
     }
 
-    pub fn profile(&self, user_id: &str) -> UserProfile {
-        self.api
-            .users()
-            .get(user_id)
-            .map(|u| UserProfile::from(&u))
-            .unwrap_or_else(|| placeholder_profile(user_id))
+    pub fn profile(&self, user_id: &str) -> Option<User> {
+        self.api.users().get(user_id)
     }
 
     pub fn pending_screen_track_id(&self) -> Option<&str> {

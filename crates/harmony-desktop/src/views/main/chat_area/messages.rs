@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use iced::{
     Border, Color, Element, Font, Length, Padding, Shadow, Vector, alignment,
-    widget::{Column, Space, button, column, container, row, scrollable, text},
+    widget::{Column, Space, button, column, container, image, row, scrollable, text},
 };
 
 use crate::{
@@ -159,24 +159,26 @@ pub fn main_chat(state: &MainView) -> Element<MainMessage> {
                 .align_y(alignment::Vertical::Top)
                 .into()
         } else {
-            let profile = state.profile(&msg.author_id);
-            let avatar_color = profile.avatar_color_start;
-            let avatar = container(text("").size(1))
-                .width(40)
-                .height(40)
+            // TODO: avatar url
+            let (avatar_url, display_name) = state
+                .api
+                .users()
+                .get(&msg.author_id)
+                .map_or((None, "Unknown".to_string()), |x| {
+                    (x.avatar().cloned(), x.display_name().to_string())
+                });
+            let avatar = container(image(state.default_avatar.clone()))
+                .width(24)
+                .height(24)
                 .style(move |_theme| container::Style {
-                    background: Some(iced::Background::Color(avatar_color)),
-                    border: Border::default().rounded(10),
+                    border: Border::default().rounded(6),
                     ..Default::default()
                 });
 
-            let username = text(profile.display_name)
-                .size(16)
-                .color(TEXT_PRIMARY)
-                .font(Font {
-                    weight: iced::font::Weight::Bold,
-                    ..DM_SANS
-                });
+            let username = text(display_name).size(16).color(TEXT_PRIMARY).font(Font {
+                weight: iced::font::Weight::Bold,
+                ..DM_SANS
+            });
             // HH:MM format for message timestamps
             // if timestamp was before today, show the date as well
             let time_label = text(&msg.formatted_time)

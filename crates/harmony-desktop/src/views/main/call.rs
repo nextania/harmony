@@ -833,7 +833,7 @@ fn connect_call_task(
             session_id: token_info.id,
             session_token: token_info.token,
             call_id: token_info.call_id.clone(),
-            identity: crate::api::call_identity(&client).await,
+            identity: call_identity(&client).await,
         })
         .await
         {
@@ -911,4 +911,14 @@ fn stop_producing_task(
             ))),
         },
     )
+}
+
+async fn call_identity(client: &EncryptedClient) -> pulse_api::MlsIdentity {
+    let seed = client.identity_seed().await;
+    let trusted = client.identity_key_snapshot().await;
+    pulse_api::MlsIdentity {
+        user_id: client.user_id().to_string(),
+        signing_seed: *seed,
+        trusted_keys: Arc::new(move |user_id: &str| trusted.get(user_id).copied()),
+    }
 }

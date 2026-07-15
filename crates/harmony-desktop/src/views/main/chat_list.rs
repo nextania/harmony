@@ -1,6 +1,6 @@
 use iced::{
     Border, Element, Font, Length, Padding, alignment,
-    widget::{Column, Row, Space, button, column, container, text},
+    widget::{Column, Row, Space, button, column, container, image, text},
 };
 
 use crate::{
@@ -34,18 +34,21 @@ pub fn chat_list(state: &MainView) -> Element<MainMessage> {
                 } else {
                     initiator_id
                 };
-                let other = state.profile(other_id);
-                let avatar_color = other.avatar_color_start;
-                let avatar_placeholder =
-                    container(text("").size(1))
-                        .width(30)
-                        .height(30)
-                        .style(move |_theme| container::Style {
-                            background: Some(iced::Background::Color(avatar_color)),
-                            border: Border::default().rounded(8),
-                            ..Default::default()
-                        });
-                (other.display_name, avatar_placeholder)
+                let (avatar_url, display_name) = state
+                    .api
+                    .users()
+                    .get(other_id)
+                    .map_or((None, "Unknown".to_string()), |x| {
+                        (x.avatar().cloned(), x.display_name().to_string())
+                    });
+                let avatar = container(image(state.default_avatar.clone()))
+                    .width(30)
+                    .height(30)
+                    .style(move |_theme| container::Style {
+                        border: Border::default().rounded(8),
+                        ..Default::default()
+                    });
+                (display_name, avatar)
             }
             harmony_api::ChannelData::GroupChannel { .. } => {
                 todo!("Group chat icons not implemented yet");

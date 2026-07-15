@@ -81,3 +81,4 @@ pub const DM_SANS: Font = Font {
 
 pub const LOGO_SVG: &[u8] = include_bytes!("../assets/logo.svg");
 pub const LOGIN_BG: &[u8] = include_bytes!("../assets/login-bg.png");
+pub const DEFAULT_AVATAR: &[u8] = include_bytes!("../assets/default.png");

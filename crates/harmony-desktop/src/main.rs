@@ -1,7 +1,6 @@
 #![allow(mismatched_lifetime_syntaxes)]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-pub mod api;
 pub mod errors;
 pub mod icons;
 pub mod media;

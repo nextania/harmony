@@ -1,10 +1,9 @@
 use iced::{
     Border, Color, Element, Font, Length, Padding, alignment,
-    widget::{Column, button, column, container, row, text, text_input},
+    widget::{Column, button, column, container, image, row, text, text_input},
 };
 
 use crate::{
-    api::UserProfile,
     icons::{FLUENT_ICONS, Icon},
     theme::{
         ACCENT_PURPLE, BG_HOVER, BG_PANEL, BG_SELECTED, BG_SUNKEN, BORDER, DANGER_RED, DM_SANS,
@@ -77,8 +76,7 @@ pub fn people_list(state: &MainView) -> Element<MainMessage> {
     } else {
         for contact in &state.contacts.list {
             if contact.status != ContactStatus::None {
-                contact_items =
-                    contact_items.push(contact_row(contact, state.profile(&contact.user_id)));
+                contact_items = contact_items.push(contact_row(state, contact, &contact.user_id));
             }
         }
     }
@@ -103,25 +101,30 @@ pub fn people_list(state: &MainView) -> Element<MainMessage> {
         .into()
 }
 
-fn contact_row(contact: &Contact, profile: UserProfile) -> Element<'static, MainMessage> {
-    let color_start = profile.avatar_color_start;
-
-    let avatar = container(text("").size(1))
+fn contact_row(
+    state: &MainView,
+    contact: &Contact,
+    user_id: &str,
+) -> Element<'static, MainMessage> {
+    let (avatar_url, display_name) = state
+        .api
+        .users()
+        .get(&contact.user_id)
+        .map_or((None, "Unknown".to_string()), |x| {
+            (x.avatar().cloned(), x.display_name().to_string())
+        });
+    let avatar = container(image(state.default_avatar.clone()))
         .width(30)
         .height(30)
         .style(move |_theme| container::Style {
-            background: Some(iced::Background::Color(color_start)),
             border: Border::default().rounded(8),
             ..Default::default()
         });
 
-    let name = text(profile.display_name.clone())
-        .size(14)
-        .color(TEXT_PRIMARY)
-        .font(Font {
-            weight: iced::font::Weight::Medium,
-            ..DM_SANS
-        });
+    let name = text(display_name).size(14).color(TEXT_PRIMARY).font(Font {
+        weight: iced::font::Weight::Medium,
+        ..DM_SANS
+    });
 
     let status_label = contact_status_badge(contact.status);
 
@@ -132,12 +135,12 @@ fn contact_row(contact: &Contact, profile: UserProfile) -> Element<'static, Main
             icon_action_btn(
                 Icon::ChatRegular,
                 TEXT_PRIMARY,
-                MainMessage::OpenPrivateChannel(profile.id.clone()),
+                MainMessage::OpenPrivateChannel(user_id.to_string()),
             ),
             icon_action_btn(
                 Icon::DeleteRegular,
                 DANGER_RED,
-                MainMessage::Contacts(ContactsMessage::Remove(profile.id.clone())),
+                MainMessage::Contacts(ContactsMessage::Remove(user_id.to_string())),
             ),
         ]
         .spacing(2)
@@ -145,23 +148,23 @@ fn contact_row(contact: &Contact, profile: UserProfile) -> Element<'static, Main
         ContactStatus::PendingRemote => icon_action_btn(
             Icon::DismissRegular,
             TEXT_MUTED,
-            MainMessage::Contacts(ContactsMessage::Remove(profile.id.clone())),
+            MainMessage::Contacts(ContactsMessage::Remove(user_id.to_string())),
         ),
         ContactStatus::None => icon_action_btn(
             Icon::DismissRegular,
             TEXT_MUTED,
-            MainMessage::Contacts(ContactsMessage::Remove(profile.id.clone())),
+            MainMessage::Contacts(ContactsMessage::Remove(user_id.to_string())),
         ),
         ContactStatus::PendingLocal => row![
             icon_action_btn(
                 Icon::CheckmarkRegular,
                 ACCENT_PURPLE,
-                MainMessage::Contacts(ContactsMessage::Accept(profile.id.clone())),
+                MainMessage::Contacts(ContactsMessage::Accept(user_id.to_string())),
             ),
             icon_action_btn(
                 Icon::DismissRegular,
                 DANGER_RED,
-                MainMessage::Contacts(ContactsMessage::Remove(profile.id.clone())),
+                MainMessage::Contacts(ContactsMessage::Remove(user_id.to_string())),
             ),
         ]
         .spacing(2)
@@ -169,7 +172,7 @@ fn contact_row(contact: &Contact, profile: UserProfile) -> Element<'static, Main
         ContactStatus::Blocked => icon_action_btn(
             Icon::PersonProhibitedRegular,
             TEXT_MUTED,
-            MainMessage::Contacts(ContactsMessage::Unblock(profile.id.clone())),
+            MainMessage::Contacts(ContactsMessage::Unblock(user_id.to_string())),
         ),
     };
 

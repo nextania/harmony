@@ -39,9 +39,11 @@ fn missing_key(msg: impl Into<String>) -> HarmonyError {
 
 const MAX_KEYSTORE_SYNC_RETRIES: u32 = 5;
 
-const CONTACT_EVENT_CHANNEL_CAPACITY: usize = 64;
-
 const EVENT_CHANNEL_CAPACITY: usize = 256;
+
+fn single(event: EncryptedEvent) -> Vec<EncryptedEvent> {
+    vec![event]
+}
 
 fn encrypt_keystore(cipher: &XChaCha20Poly1305, ks: &Keystore) -> Vec<u8> {
     let nonce = XNonce::generate();
@@ -128,20 +130,7 @@ pub enum EncryptedEvent {
         user_id: String,
         state: RelationshipState,
     },
-}
-
-struct Processed {
-    emit: Option<EncryptedEvent>,
-    outcome: Option<AddContactOutcome>,
-}
-
-impl Processed {
-    fn event(emit: EncryptedEvent) -> Self {
-        Self {
-            emit: Some(emit),
-            outcome: None,
-        }
-    }
+    ContactAdded(AddContactOutcome),
 }
 
 pub(crate) struct Core {
@@ -283,7 +272,6 @@ pub struct EncryptedClient {
     core: Arc<Core>,
     channels: Arc<ChannelManager>,
     users: Arc<UserManager>,
-    contacts_tx: broadcast::Sender<AddContactOutcome>,
     events_tx: broadcast::Sender<EncryptedEvent>,
 }
 
@@ -322,13 +310,11 @@ impl EncryptedClient {
         });
         let users = Arc::new(UserManager::new(core.clone(), session.clone()));
         let channels = Arc::new(ChannelManager::new(core.clone(), users.clone()));
-        let (contacts_tx, _) = broadcast::channel(CONTACT_EVENT_CHANNEL_CAPACITY);
         let (events_tx, events_rx) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
         let this = Arc::new(Self {
             core,
             channels,
             users,
-            contacts_tx,
             events_tx,
         });
         this.spawn_event_pump(consumer_rx);
@@ -344,23 +330,20 @@ impl EncryptedClient {
                         let Some(this) = weak.upgrade() else {
                             break;
                         };
-                        let processed = match client_event {
+                        let events = match client_event {
                             ClientEvent::Lifecycle(lifecycle) => {
-                                Processed::event(EncryptedEvent::Lifecycle(lifecycle))
+                                vec![EncryptedEvent::Lifecycle(lifecycle)]
                             }
                             ClientEvent::Event(event) => match this.handle_event(event).await {
-                                Ok(processed) => processed,
+                                Ok(events) => events,
                                 Err(e) => {
                                     tracing::warn!("failed to process event: {e}");
                                     continue;
                                 }
                             },
                         };
-                        if let Some(outcome) = processed.outcome {
-                            let _ = this.contacts_tx.send(outcome);
-                        }
-                        if let Some(emit) = processed.emit {
-                            let _ = this.events_tx.send(emit);
+                        for event in events {
+                            let _ = this.events_tx.send(event);
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(n)) => {
@@ -386,10 +369,6 @@ impl EncryptedClient {
 
     pub fn user_id(&self) -> &str {
         &self.core.user_id
-    }
-
-    pub fn subscribe_contacts(&self) -> broadcast::Receiver<AddContactOutcome> {
-        self.contacts_tx.subscribe()
     }
 
     pub async fn sync_keystore(&self) -> Result<()> {
@@ -580,19 +559,18 @@ impl EncryptedClient {
         Ok(AddContactOutcome::Response(response))
     }
 
-    async fn handle_event(&self, event: Event) -> Result<Processed> {
+    async fn handle_event(&self, event: Event) -> Result<Vec<EncryptedEvent>> {
         Ok(match event {
             Event::ContactStateChanged { user_id, state } => {
                 let outcome = self.advance_contact_handshake(&user_id, &state).await?;
-                Processed {
-                    emit: Some(EncryptedEvent::ContactStateChanged { user_id, state }),
-                    outcome,
-                }
+                let mut events = vec![EncryptedEvent::ContactStateChanged { user_id, state }];
+                events.extend(outcome.map(EncryptedEvent::ContactAdded));
+                events
             }
             Event::NewMessage(e) => {
                 let channel = self.channels.fetch(&e.channel_id).await?;
                 let content = channel.receive_message(&e.message).await?;
-                Processed::event(EncryptedEvent::NewMessage {
+                single(EncryptedEvent::NewMessage {
                     channel_id: e.channel_id,
                     message: DecryptedMessage {
                         message: e.message,
@@ -603,7 +581,7 @@ impl EncryptedClient {
             Event::MessageEdited(e) => {
                 let channel = self.channels.fetch(&e.channel_id).await?;
                 let content = channel.receive_message(&e.message).await?;
-                Processed::event(EncryptedEvent::MessageEdited {
+                single(EncryptedEvent::MessageEdited {
                     channel_id: e.channel_id,
                     message: DecryptedMessage {
                         message: e.message,
@@ -615,41 +593,41 @@ impl EncryptedClient {
                 if let Some(channel) = self.channels.get(&e.channel_id) {
                     channel.remove_cached(&e.message_id);
                 }
-                Processed::event(EncryptedEvent::MessageDeleted {
+                single(EncryptedEvent::MessageDeleted {
                     channel_id: e.channel_id,
                     message_id: e.message_id,
                 })
             }
             Event::ChannelUpdated(e) => {
                 let channel = self.channels.update(e.channel);
-                Processed::event(EncryptedEvent::ChannelUpdated { channel })
+                single(EncryptedEvent::ChannelUpdated { channel })
             }
             Event::ChannelDeleted(e) => {
                 self.channels.invalidate(&e.channel_id);
-                Processed::event(EncryptedEvent::ChannelDeleted {
+                single(EncryptedEvent::ChannelDeleted {
                     channel_id: e.channel_id,
                 })
             }
             Event::MemberJoined(e) => {
                 self.channels.invalidate(&e.channel_id);
-                Processed::event(EncryptedEvent::MemberJoined {
+                single(EncryptedEvent::MemberJoined {
                     channel_id: e.channel_id,
                     user_id: e.user_id,
                 })
             }
             Event::MemberLeft(e) => {
                 self.channels.invalidate(&e.channel_id);
-                Processed::event(EncryptedEvent::MemberLeft {
+                single(EncryptedEvent::MemberLeft {
                     channel_id: e.channel_id,
                     user_id: e.user_id,
                 })
             }
-            Event::UserJoinedCall(e) => Processed::event(EncryptedEvent::UserJoinedCall(e)),
-            Event::UserLeftCall(e) => Processed::event(EncryptedEvent::UserLeftCall(e)),
+            Event::UserJoinedCall(e) => single(EncryptedEvent::UserJoinedCall(e)),
+            Event::UserLeftCall(e) => single(EncryptedEvent::UserLeftCall(e)),
             Event::UserVoiceStateChanged(e) => {
-                Processed::event(EncryptedEvent::UserVoiceStateChanged(e))
+                single(EncryptedEvent::UserVoiceStateChanged(e))
             }
-            Event::CallMigrated(e) => Processed::event(EncryptedEvent::CallMigrated(e)),
+            Event::CallMigrated(e) => single(EncryptedEvent::CallMigrated(e)),
         })
     }
 

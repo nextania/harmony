@@ -116,24 +116,14 @@ impl LoginView {
                     }.await;
                     match result {
                         Ok(LoginFlow::Done(client, channels, mut stream)) => {
-                            let mut contacts = client.subscribe_contacts();
                             yield Message::LoginFinished((client, channels));
                             loop {
-                                tokio::select! {
-                                    event = stream.recv() => match event {
-                                        Ok(event) => yield Message::Main(MainMessage::ServerEvent(event)),
-                                        Err(RecvError::Lagged(missed)) => {
-                                            tracing::warn!("event stream lagged; {missed} events dropped");
-                                        }
-                                        Err(RecvError::Closed) => break,
-                                    },
-                                    outcome = contacts.recv() => match outcome {
-                                        Ok(outcome) => yield Message::Main(MainMessage::ContactOutcome(outcome)),
-                                        Err(RecvError::Lagged(missed)) => {
-                                            tracing::warn!("contact stream lagged; {missed} events dropped");
-                                        }
-                                        Err(RecvError::Closed) => break,
-                                    },
+                                match stream.recv().await {
+                                    Ok(event) => yield Message::Main(MainMessage::ServerEvent(event)),
+                                    Err(RecvError::Lagged(missed)) => {
+                                        tracing::warn!("event stream lagged; {missed} events dropped");
+                                    }
+                                    Err(RecvError::Closed) => break,
                                 }
                             }
                         }

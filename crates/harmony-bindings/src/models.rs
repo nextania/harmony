@@ -759,6 +759,9 @@ pub enum Event {
         call_id: String,
         server_address: String,
     },
+    ContactAdded {
+        outcome: AddContactOutcome,
+    },
 }
 
 impl From<harmony_api::ClientEvent> for Event {
@@ -918,6 +921,9 @@ impl From<harmony_api::EncryptedEvent> for Event {
             E::ContactStateChanged { user_id, state } => Event::ContactStateChanged {
                 user_id,
                 state: state.into(),
+            },
+            E::ContactAdded(outcome) => Event::ContactAdded {
+                outcome: outcome.into(),
             },
         }
     }

@@ -65,24 +65,14 @@ impl MfaView {
                         }.await;
                         match result {
                             Ok((client, channels, mut stream)) => {
-                                let mut contacts = client.subscribe_contacts();
                                 yield Message::LoginFinished((client, channels));
                                 loop {
-                                    tokio::select! {
-                                        event = stream.recv() => match event {
-                                            Ok(event) => yield Message::Main(MainMessage::ServerEvent(event)),
-                                            Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
-                                                tracing::warn!("event stream lagged; {missed} events dropped");
-                                            }
-                                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                                        },
-                                        outcome = contacts.recv() => match outcome {
-                                            Ok(outcome) => yield Message::Main(MainMessage::ContactOutcome(outcome)),
-                                            Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
-                                                tracing::warn!("contact stream lagged; {missed} events dropped");
-                                            }
-                                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                                        },
+                                    match stream.recv().await {
+                                        Ok(event) => yield Message::Main(MainMessage::ServerEvent(event)),
+                                        Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
+                                            tracing::warn!("event stream lagged; {missed} events dropped");
+                                        }
+                                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                                     }
                                 }
                             }

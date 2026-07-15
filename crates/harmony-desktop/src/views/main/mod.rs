@@ -1,8 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use harmony_api::{
-    AddContactOutcome, Channel, EncryptedClient, EncryptedEvent, LifecycleEvent, User,
-};
+use harmony_api::{Channel, EncryptedClient, EncryptedEvent, LifecycleEvent, User};
 use iced::{
     Element, Length, Task,
     widget::{Space, button, column, container, image::Handle, row, text},
@@ -83,7 +81,6 @@ pub enum MainMessage {
     OpenPrivateChannel(String),
     PrivateChannelOpened(crate::errors::RenderableResult<Channel>),
     UsersFetched,
-    ContactOutcome(AddContactOutcome),
 }
 
 fn decode_content(bytes: Vec<u8>) -> String {
@@ -297,12 +294,6 @@ impl MainView {
                 tracing::info!("Received client event: {:?}", event);
                 return self.handle_client_event(event);
             }
-            MainMessage::ContactOutcome(outcome) => {
-                return self.contacts.update(
-                    ContactsMessage::Accepted(contacts::Contact::from_outcome(outcome)),
-                    &self.api,
-                );
-            }
             MainMessage::Ignore => {}
             MainMessage::ToggleEmojiPicker => self.emoji_picker_open = !self.emoji_picker_open,
             MainMessage::EmojiPickerDismiss => self.emoji_picker_open = false,
@@ -501,6 +492,12 @@ impl MainView {
             }
             EncryptedEvent::ContactStateChanged { user_id, state } => {
                 return self.contacts.on_state_changed(user_id, &state, &self.api);
+            }
+            EncryptedEvent::ContactAdded(outcome) => {
+                return self.contacts.update(
+                    ContactsMessage::Accepted(contacts::Contact::from_outcome(outcome)),
+                    &self.api,
+                );
             }
         }
         Task::none()

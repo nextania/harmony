@@ -1,3 +1,4 @@
+use core_api::errors::Error as CoreError;
 use harmony_api::HarmonyError;
 
 /// A `Result` type with localizable error messages.
@@ -32,6 +33,18 @@ impl From<HarmonyError> for RenderableError {
             | HarmonyError::Timeout
             | HarmonyError::Reconnecting
             | HarmonyError::ReconnectionFailed { .. } => RenderableError::NetworkError,
+            _ => RenderableError::UnknownError(error.to_string()),
+        }
+    }
+}
+
+impl From<CoreError> for RenderableError {
+    fn from(error: CoreError) -> Self {
+        match error {
+            CoreError::IncorrectCredentials => RenderableError::IncorrectCredentials,
+            CoreError::Crypto(msg) => RenderableError::CryptoError(msg.to_string()),
+            CoreError::Request => RenderableError::NetworkError,
+            CoreError::RequestDetailed(_) => RenderableError::NetworkError,
             _ => RenderableError::UnknownError(error.to_string()),
         }
     }

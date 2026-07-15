@@ -292,6 +292,12 @@ impl From<harmony_api::PublicUser> for PublicUser {
     }
 }
 
+impl From<harmony_api::User> for PublicUser {
+    fn from(user: harmony_api::User) -> Self {
+        user.base().clone().into()
+    }
+}
+
 #[derive(Clone, Debug, uniffi::Enum)]
 pub enum AddContactStage {
     Request {
@@ -378,10 +384,10 @@ pub enum Channel {
     },
 }
 
-impl From<harmony_api::Channel> for Channel {
-    fn from(channel: harmony_api::Channel) -> Self {
+impl From<harmony_api::ChannelData> for Channel {
+    fn from(channel: harmony_api::ChannelData) -> Self {
         match channel {
-            harmony_api::Channel::PrivateChannel {
+            harmony_api::ChannelData::PrivateChannel {
                 id,
                 initiator_id,
                 target_id,
@@ -392,7 +398,7 @@ impl From<harmony_api::Channel> for Channel {
                 target_id,
                 last_key_id,
             },
-            harmony_api::Channel::GroupChannel {
+            harmony_api::ChannelData::GroupChannel {
                 id,
                 metadata,
                 members,
@@ -844,10 +850,82 @@ impl From<harmony_api::Event> for Event {
     }
 }
 
+impl From<harmony_api::EncryptedEvent> for Event {
+    fn from(event: harmony_api::EncryptedEvent) -> Self {
+        use harmony_api::EncryptedEvent as E;
+        match event {
+            E::Lifecycle(lifecycle) => lifecycle.into(),
+            E::NewMessage {
+                channel_id,
+                message,
+            } => Event::NewMessage {
+                message: message.message.into(),
+                channel_id,
+            },
+            E::MessageEdited {
+                channel_id,
+                message,
+            } => Event::MessageEdited {
+                message: message.message.into(),
+                channel_id,
+            },
+            E::MessageDeleted {
+                channel_id,
+                message_id,
+            } => Event::MessageDeleted {
+                message_id,
+                channel_id,
+            },
+            E::ChannelUpdated { channel } => Event::ChannelUpdated {
+                channel: channel.data().clone().into(),
+            },
+            E::ChannelDeleted { channel_id } => Event::ChannelDeleted { channel_id },
+            E::MemberJoined {
+                channel_id,
+                user_id,
+            } => Event::MemberJoined {
+                channel_id,
+                user_id,
+            },
+            E::MemberLeft {
+                channel_id,
+                user_id,
+            } => Event::MemberLeft {
+                channel_id,
+                user_id,
+            },
+            E::UserJoinedCall(e) => Event::UserJoinedCall {
+                call_id: e.call_id,
+                user_id: e.user_id,
+                session_id: e.session_id,
+                muted: e.muted,
+                deafened: e.deafened,
+            },
+            E::UserLeftCall(e) => Event::UserLeftCall {
+                call_id: e.call_id,
+                session_id: e.session_id,
+            },
+            E::UserVoiceStateChanged(e) => Event::UserVoiceStateChanged {
+                call_id: e.call_id,
+                session_id: e.session_id,
+                muted: e.muted,
+                deafened: e.deafened,
+            },
+            E::CallMigrated(e) => Event::CallMigrated {
+                call_id: e.call_id,
+                server_address: e.server_address,
+            },
+            E::ContactStateChanged { user_id, state } => Event::ContactStateChanged {
+                user_id,
+                state: state.into(),
+            },
+        }
+    }
+}
+
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct ClientOptions {
     pub server_url: String,
-    pub token: String,
     pub timeout_seconds: u64,
     pub auto_reconnect: bool,
     pub max_reconnect_attempts: u32,
@@ -855,10 +933,9 @@ pub struct ClientOptions {
 
 impl ClientOptions {
     #[uniffi::constructor]
-    pub fn new(server_url: String, token: String) -> Self {
+    pub fn new(server_url: String) -> Self {
         Self {
             server_url,
-            token,
             timeout_seconds: 30,
             auto_reconnect: true,
             max_reconnect_attempts: 5,
@@ -889,7 +966,7 @@ impl ClientOptions {
 
 impl From<ClientOptions> for harmony_api::ClientOptions {
     fn from(options: ClientOptions) -> Self {
-        harmony_api::ClientOptions::new(options.server_url, options.token)
+        harmony_api::ClientOptions::new(options.server_url)
             .with_timeout(std::time::Duration::from_secs(options.timeout_seconds))
             .with_auto_reconnect(options.auto_reconnect)
             .with_max_reconnect_attempts(options.max_reconnect_attempts)

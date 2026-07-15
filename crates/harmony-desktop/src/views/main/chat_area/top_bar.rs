@@ -12,7 +12,7 @@ use crate::{
 
 pub fn top_bar(state: &MainView) -> Element<MainMessage> {
     let (avatar_color, name) = match state
-        .conversations
+        .current_channels
         .get(
             state
                 .current_conversation
@@ -20,8 +20,9 @@ pub fn top_bar(state: &MainView) -> Element<MainMessage> {
                 .expect("This should be defined"),
         )
         .expect("This should be defined")
+        .data()
     {
-        harmony_api::Channel::PrivateChannel {
+        harmony_api::ChannelData::PrivateChannel {
             initiator_id,
             target_id,
             ..
@@ -34,7 +35,7 @@ pub fn top_bar(state: &MainView) -> Element<MainMessage> {
             let other = state.profile(other_id);
             (other.avatar_color_start, other.display_name)
         }
-        harmony_api::Channel::GroupChannel { .. } => {
+        harmony_api::ChannelData::GroupChannel { .. } => {
             (color!(0x555555), "Unnamed Group".to_string())
         }
     };

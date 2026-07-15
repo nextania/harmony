@@ -68,13 +68,16 @@ impl Call {
             let Some(session) = GLOBAL_SESSIONS.get(member.key()) else {
                 continue;
             };
-            let _ = session.message_tx.send(ControlS2C::TrackAvailable {
-                track: AvailableTrack {
-                    id: track_id.clone(),
-                    media_hint: media_hint.clone(),
-                    session_id: info_session_id.clone(),
-                },
-            });
+            session
+                .message_tx
+                .send(ControlS2C::TrackAvailable {
+                    track: AvailableTrack {
+                        id: track_id.clone(),
+                        media_hint: media_hint.clone(),
+                        session_id: info_session_id.clone(),
+                    },
+                })
+                .ok();
         }
     }
 
@@ -88,9 +91,12 @@ impl Call {
             let Some(session) = GLOBAL_SESSIONS.get(member.key()) else {
                 continue;
             };
-            let _ = session.message_tx.send(ControlS2C::TrackUnavailable {
-                id: track_id.to_string(),
-            });
+            session
+                .message_tx
+                .send(ControlS2C::TrackUnavailable {
+                    id: track_id.to_string(),
+                })
+                .ok();
         }
     }
 

@@ -87,7 +87,7 @@ impl ScreenCaptureSession {
     pub fn stop(mut self) {
         self.stop.store(true, Ordering::Relaxed);
         if let Some(handle) = self.handle.take() {
-            let _ = handle.join();
+            handle.join().ok();
         }
     }
 }
@@ -290,7 +290,7 @@ pub fn start_screen_capture(
                 match capturer.next_frame() {
                     Some(frame) => {
                         latest_frame.store(Arc::new(Some(frame.clone())));
-                        let _ = tick_tx.send(());
+                        tick_tx.send(()).ok();
                         if let Err(e) = encoder.submit_frame(&frame) {
                             tracing::warn!("screen encoder submit failed: {e}");
                             break;

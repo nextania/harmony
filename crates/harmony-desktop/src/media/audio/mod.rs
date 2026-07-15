@@ -86,11 +86,12 @@ impl AudioPipeline {
         }
         let (track, consumer) = TrackPlayback::new()?;
         if let Some(tx) = &self.track_cmd_tx {
-            let _ = tx.send(TrackCommand::Add {
+            tx.send(TrackCommand::Add {
                 id: track_id.clone(),
                 consumer,
                 volume: Arc::clone(&track.volume),
-            });
+            })
+            .ok();
         } else {
             self.pending_consumers.insert(track_id.clone(), consumer);
         }
@@ -102,9 +103,10 @@ impl AudioPipeline {
         self.tracks.remove(track_id);
         self.pending_consumers.remove(track_id);
         if let Some(tx) = &self.track_cmd_tx {
-            let _ = tx.send(TrackCommand::Remove {
+            tx.send(TrackCommand::Remove {
                 id: track_id.to_owned(),
-            });
+            })
+            .ok();
         }
     }
 
@@ -267,7 +269,7 @@ impl AudioPipeline {
                             Ok(len) => {
                                 out.truncate(len);
                                 let packet = codec::prepend_codec_byte(codec::AUDIO_OPUS, &out);
-                                let _ = tx.send(packet);
+                                tx.send(packet).ok();
                             }
                             Err(e) => {
                                 tracing::warn!("opus encode error: {e}");

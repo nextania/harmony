@@ -111,6 +111,18 @@ pub struct GetUserResponse {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GetUsersMethod {
+    pub user_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetUsersResponse {
+    pub users: Vec<UserProfile>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SetKeyPackageMethod {
     pub encrypted_keys: Vec<u8>,
     pub expected_generation: u64,

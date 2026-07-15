@@ -1,6 +1,6 @@
 use harmony_types::users::{
-    GetUserMethod, GetUserResponse, RelationshipState, SetKeyPackageMethod, SetKeyPackageResponse,
-    UserProfile,
+    GetUserMethod, GetUserResponse, GetUsersMethod, GetUsersResponse, RelationshipState,
+    SetKeyPackageMethod, SetKeyPackageResponse, UserProfile,
 };
 use rapid::socket::{RpcResponder, RpcState, RpcValue};
 
@@ -39,4 +39,33 @@ pub async fn get_user(state: RpcState, data: RpcValue<GetUserMethod>) -> impl Rp
             presence: show_presence,
         },
     }))
+}
+
+const GET_USERS_MAX_BATCH: usize = 50;
+
+pub async fn get_users(state: RpcState, data: RpcValue<GetUsersMethod>) -> impl RpcResponder {
+    let user = check_authenticated(&state).await?;
+    let data = data.into_inner();
+    if data.user_ids.len() > GET_USERS_MAX_BATCH {
+        return Err(Error::InvalidMethod);
+    }
+    let mut users = Vec::with_capacity(data.user_ids.len());
+    for user_id in &data.user_ids {
+        let target = match User::get(user_id).await {
+            Ok(target) => target,
+            Err(Error::NotFound) => continue,
+            Err(e) => return Err(e),
+        };
+        let show_presence = match user.relationship_with(&target.id).await? {
+            Some(RelationshipState::Established { .. }) => {
+                Some(get_presentable_presence(&target).await?)
+            }
+            _ => None,
+        };
+        users.push(UserProfile {
+            id: target.id,
+            presence: show_presence,
+        });
+    }
+    Ok::<_, Error>(RpcValue(GetUsersResponse { users }))
 }

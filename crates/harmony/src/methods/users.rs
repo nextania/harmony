@@ -8,8 +8,8 @@ use crate::{
     authentication::check_authenticated,
     errors::Error,
     methods::Event,
-    services::events,
     services::database::users::{RelationshipState, User},
+    services::events,
 };
 
 pub async fn add_contact(state: RpcState, data: RpcValue<AddContactMethod>) -> impl RpcResponder {

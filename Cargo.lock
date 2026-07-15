@@ -1494,6 +1494,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9885fa71e26b8ab7855e2ec7cae6e9b380edff76cd052e07c683a0319d51b3a2"
 
 [[package]]
+name = "core-api"
+version = "0.1.0"
+dependencies = [
+ "argon2",
+ "base64",
+ "chacha20poly1305 0.11.0",
+ "opaque-ke",
+ "reqwest",
+ "serde",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+ "tokio",
+ "zeroize",
+]
+
+[[package]]
 name = "core-foundation"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3133,6 +3149,7 @@ dependencies = [
  "async-tungstenite",
  "base64",
  "chacha20poly1305 0.11.0",
+ "core-api",
  "dashmap",
  "ed25519-dalek 3.0.0",
  "futures-util",
@@ -3160,6 +3177,7 @@ dependencies = [
 name = "harmony-bindings"
 version = "0.1.0"
 dependencies = [
+ "core-api",
  "harmony-api",
  "reqwest",
  "serde",
@@ -3181,6 +3199,7 @@ dependencies = [
  "base64",
  "bytes",
  "chrono",
+ "core-api",
  "cpal",
  "emojis",
  "futures",
@@ -3201,6 +3220,7 @@ dependencies = [
  "rkyv",
  "rust-i18n",
  "serde",
+ "serde_cbor_2",
  "serde_json",
  "sha2 0.10.9",
  "sqlx",

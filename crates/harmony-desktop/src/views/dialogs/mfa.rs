@@ -1,4 +1,8 @@
+use std::sync::Arc;
+
 use async_stream::stream;
+use core_api::LoginMfa;
+use harmony_api::{ClientOptions, EncryptedClient};
 use iced::{
     Border, Element, Font, Length, Padding, Task, Theme, alignment,
     widget::{Space, button, column, container, text, text_input},
@@ -6,7 +10,6 @@ use iced::{
 
 use crate::{
     Message,
-    api::{ApiClient, account},
     errors::RenderableError,
     theme::{ACCENT_PURPLE, BG_APP, BG_LOGIN_INPUT, DM_SANS, SUBTLE_GREY, TEXT_WHITE},
     views::main::MainMessage,
@@ -21,28 +24,19 @@ pub enum MfaMessage {
 }
 
 pub struct MfaView {
-    mfa: Option<account::LoginMfa>,
+    mfa: Option<LoginMfa>,
     code: String,
     error: Option<String>,
-    backend_account: String,
     backend_harmony: String,
-    password: String,
 }
 
 impl MfaView {
-    pub fn new(
-        mfa: account::LoginMfa,
-        backend_account: String,
-        backend_harmony: String,
-        password: String,
-    ) -> Self {
+    pub fn new(mfa: LoginMfa, backend_harmony: String) -> Self {
         Self {
             mfa: Some(mfa),
             code: String::new(),
             error: None,
-            backend_account,
             backend_harmony,
-            password,
         }
     }
 
@@ -61,26 +55,34 @@ impl MfaView {
                 if let Some(mfa) = self.mfa.as_ref() {
                     let mfa = mfa.clone();
                     let code = self.code.clone();
-                    let backend_account = self.backend_account.clone();
                     let backend_harmony = self.backend_harmony.clone();
-                    let password = self.password.clone();
                     return Task::stream(stream! {
                         let result = async {
-                            let (token, encrypted_key) = mfa.code(&code).await?;
-                            let (client, stream) = ApiClient::connect(&backend_account, &backend_harmony, &token, &encrypted_key, &password).await?;
-                            let (conversations, profiles) = crate::api::load_session(&client).await?;
-                            Ok::<_, RenderableError>((client, conversations, profiles, stream))
+                            let session = Arc::new(mfa.code(&code).await?);
+                            let (client, stream) = EncryptedClient::connect(session.clone(), ClientOptions::new(backend_harmony)).await?;
+                            let channels = client.channels().fetch_personal().await?;
+                            Ok::<_, RenderableError>((client, channels, stream))
                         }.await;
                         match result {
-                            Ok((client, convs, profiles, mut stream)) => {
-                                yield Message::LoginFinished((client, convs, profiles));
+                            Ok((client, channels, mut stream)) => {
+                                let mut contacts = client.subscribe_contacts();
+                                yield Message::LoginFinished((client, channels));
                                 loop {
-                                    match stream.recv().await {
-                                        Ok(event) => yield Message::Main(MainMessage::ServerEvent(event)),
-                                        Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
-                                            tracing::warn!("event stream lagged; {missed} events dropped");
-                                        }
-                                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                                    tokio::select! {
+                                        event = stream.recv() => match event {
+                                            Ok(event) => yield Message::Main(MainMessage::ServerEvent(event)),
+                                            Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
+                                                tracing::warn!("event stream lagged; {missed} events dropped");
+                                            }
+                                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                                        },
+                                        outcome = contacts.recv() => match outcome {
+                                            Ok(outcome) => yield Message::Main(MainMessage::ContactOutcome(outcome)),
+                                            Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
+                                                tracing::warn!("contact stream lagged; {missed} events dropped");
+                                            }
+                                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                                        },
                                     }
                                 }
                             }

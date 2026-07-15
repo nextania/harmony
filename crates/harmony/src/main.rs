@@ -64,6 +64,7 @@ async fn main() {
         // Keys
         .register("SET_KEY_PACKAGE", methods::keys::set_key_package)
         .register("GET_USER", methods::keys::get_user)
+        .register("GET_USERS", methods::keys::get_users)
         // Voice
         .register("CREATE_CALL_TOKEN", methods::voice::create_call_token)
         .register("START_CALL", methods::voice::start_call)

@@ -43,6 +43,8 @@ futures = "0.3"
 notify-rust = "4.12.0"
 argon2 = "0.5.3"
 ringbuf = "0.5.0"
+serde_cbor_2 = "0.13.0"
+core-api = { path = "../core-api" }
 
 [build-dependencies]
 winres = "0.1.12"

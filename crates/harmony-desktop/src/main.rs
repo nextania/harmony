@@ -16,6 +16,8 @@ use std::{
     time::Duration,
 };
 
+use core_api::LoginMfa;
+use harmony_api::{Channel, EncryptedClient};
 use iced::{
     Color, Element, Length, Task, Theme,
     widget::{container, mouse_area, stack, text},
@@ -71,13 +73,10 @@ use iced::window;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use crate::{
-    api::{ApiClient, UserProfile, account},
-    views::{
-        login::{LoginMessage, LoginView},
-        main::MainView,
-        splash::{SplashMessage, SplashView},
-    },
+use crate::views::{
+    login::{LoginMessage, LoginView},
+    main::MainView,
+    splash::{SplashMessage, SplashView},
 };
 use crate::{
     media::screen_capture::ScreenCaptureConfig,
@@ -185,18 +184,14 @@ impl AppWindow {
 
 struct App {
     windows: BTreeMap<window::Id, AppWindow>,
-    api: Option<Arc<ApiClient>>,
+    api: Option<Arc<EncryptedClient>>,
     backend_account: String,
     backend_harmony: String,
 }
 
 pub type EventReceiver = UnboundedReceiver<harmony_api::Event>;
 
-pub type LoginResult = (
-    Arc<ApiClient>,
-    HashMap<String, harmony_api::Channel>,
-    HashMap<String, UserProfile>,
-);
+pub type LoginResult = (Arc<EncryptedClient>, HashMap<String, Channel>);
 
 #[derive(Clone)]
 pub enum Message {
@@ -204,7 +199,7 @@ pub enum Message {
     SplashFinished(Option<LoginResult>),
     Login(LoginMessage),
     LoginFinished(LoginResult),
-    OpenMfa(account::LoginMfa, String),
+    OpenMfa(LoginMfa),
     Mfa(MfaMessage),
     Main(MainMessage),
     ExternalLink(ExternalLinkMessage),
@@ -364,7 +359,7 @@ impl App {
                 tasks.push(close_splash);
                 return Task::batch(tasks);
             }
-            Message::LoginFinished((api, conversations, profiles)) => {
+            Message::LoginFinished((api, channels)) => {
                 let (main_id, open_task) = window::open(window::Settings {
                     size: iced::Size::new(1100.0, 700.0),
                     position: window::Position::Centered,
@@ -392,11 +387,7 @@ impl App {
                 self.api = Some(api.clone());
                 self.windows.insert(
                     main_id,
-                    AppWindow::new(AppWindowView::Main(MainView::new(
-                        api,
-                        conversations,
-                        profiles,
-                    ))),
+                    AppWindow::new(AppWindowView::Main(MainView::new(api, channels))),
                 );
 
                 #[cfg(target_os = "windows")]
@@ -408,18 +399,13 @@ impl App {
 
                 return Task::batch([open_done, close_login, close_mfa, close_backend]);
             }
-            Message::OpenMfa(mfa, password) => {
+            Message::OpenMfa(mfa) => {
                 let parent = self
                     .find_window_id(|v| matches!(v, AppWindowView::Login(_)))
                     .expect("Login window should exist when opening MFA");
                 return self.open_dialog(
                     parent,
-                    AppWindowView::Mfa(MfaView::new(
-                        mfa,
-                        self.backend_account.clone(),
-                        self.backend_harmony.clone(),
-                        password,
-                    )),
+                    AppWindowView::Mfa(MfaView::new(mfa, self.backend_harmony.clone())),
                     iced::Size::new(400.0, 200.0),
                 );
             }

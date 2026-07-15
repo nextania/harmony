@@ -18,6 +18,7 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 async-tungstenite = { version = "0.34.1", features = ["tokio-runtime"] }
 harmony-types = { path = "../harmony-types" }
 pulse-types = { path = "../pulse-types" }
+core-api = { path = "../core-api" }
 dashmap = "6.1.0"
 reqwest = { version = "0.13.2", features = ["json"] }
 quick_cache = "0.7.0"

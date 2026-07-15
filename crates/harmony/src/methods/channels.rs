@@ -10,11 +10,11 @@ use crate::{
     authentication::check_authenticated,
     errors::Error,
     methods::{ChannelDeletedEvent, ChannelUpdatedEvent, Event, MemberLeftEvent},
-    services::events,
     services::database::{
         channels::{Channel, ChannelMemberRole},
         messages::Message,
     },
+    services::events,
 };
 
 pub async fn get_channel(state: RpcState, data: RpcValue<GetChannelMethod>) -> impl RpcResponder {

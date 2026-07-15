@@ -11,16 +11,15 @@ use pulse_api::{
 };
 use wgpu_capture::CaptureTarget;
 
-use harmony_api::CallMember;
+use harmony_api::{CallMember, EncryptedClient};
 
 use crate::{
     Message,
-    api::ApiClient,
     errors::{RenderableError, RenderableResult},
     media::screen_capture::{ScreenCaptureConfig, ScreenCaptureSession},
     media::video::{self, Frame as VideoFrame},
     media::{audio::AudioPipeline, codec},
-    views::main::{MainMessage, fetch_profiles_task},
+    views::main::{MainMessage, fetch_users_task},
     widgets::remote_screen::RemoteScreenFrame,
 };
 
@@ -96,7 +95,7 @@ fn err(e: RenderableError) -> Message {
 }
 
 pub struct CallContext<'a> {
-    pub api: &'a Arc<ApiClient>,
+    pub api: &'a Arc<EncryptedClient>,
     pub current_conversation: Option<&'a str>,
     pub self_user_id: &'a str,
 }
@@ -200,7 +199,7 @@ impl CallSession {
                                             })?;
                                         return Ok(Some(handle));
                                     } else if let Some(handle) = mic_track {
-                                        let _ = pulse.stop_producing(handle).await;
+                                        pulse.stop_producing(handle).await.ok();
                                     }
                                 }
                                 Ok::<Option<TrackHandle>, RenderableError>(None)
@@ -410,8 +409,9 @@ impl CallSession {
                             match decoder.decode(&data) {
                                 Ok(frames) => {
                                     if let Some(f) = frames.into_iter().last() {
-                                        let _ =
-                                            frame_tx.send(Ok((f.width, f.height, f.rgba.to_vec())));
+                                        frame_tx
+                                            .send(Ok((f.width, f.height, f.rgba.to_vec())))
+                                            .ok();
                                     }
                                 }
                                 Err(e) => {
@@ -435,7 +435,7 @@ impl CallSession {
             }
             CallMessage::VideoPacket(track_id, data) => {
                 if let Some(tx) = self.video_decode_tx.get(&track_id) {
-                    let _ = tx.send(data);
+                    tx.send(data).ok();
                 }
             }
             CallMessage::VideoFrameDecoded(track_id, result) => match result {
@@ -631,7 +631,7 @@ impl CallSession {
         user_id: String,
         session_id: String,
         muted: bool,
-        api: &Arc<ApiClient>,
+        api: &Arc<EncryptedClient>,
     ) -> Task<Message> {
         if self.call_id.as_deref() != Some(call_id) {
             return Task::none();
@@ -662,7 +662,7 @@ impl CallSession {
                 participants: vec![participant],
             });
         }
-        fetch_profiles_task(api.clone(), vec![user_id])
+        fetch_users_task(api.clone(), vec![user_id])
     }
 
     pub fn on_user_left(&mut self, call_id: &str, session_id: &str) {
@@ -700,7 +700,7 @@ impl CallSession {
         }
     }
 
-    pub fn on_call_migrated(&mut self, call_id: &str, api: &Arc<ApiClient>) -> Task<Message> {
+    pub fn on_call_migrated(&mut self, call_id: &str, api: &Arc<EncryptedClient>) -> Task<Message> {
         // reconnect to new server
         if self.call_id.as_deref() != Some(call_id) {
             return Task::none();
@@ -790,24 +790,20 @@ impl CallSession {
     }
 }
 
-async fn fetch_call_state(
-    api: &ApiClient,
-    conv_id: &str,
-) -> RenderableResult<(CallState, Vec<crate::api::UserProfile>)> {
+async fn fetch_call_state(api: &EncryptedClient, conv_id: &str) -> RenderableResult<CallState> {
     let members = api.client().get_call_members(conv_id).await?;
     let ids: Vec<String> = members.iter().map(|m| m.user_id.clone()).collect();
-    let profiles = api.get_profiles(ids).await.unwrap_or_default();
-    let state = CallState {
+    let _ = api.users().fetch_bulk(ids).await;
+    Ok(CallState {
         participants: members.into_iter().map(CallParticipant::from).collect(),
-    };
-    Ok((state, profiles))
+    })
 }
 
-pub fn load_call_state_task(api: Arc<ApiClient>, conv_id: String) -> Task<Message> {
+pub fn load_call_state_task(api: Arc<EncryptedClient>, conv_id: String) -> Task<Message> {
     Task::stream(stream! {
         match fetch_call_state(&api, &conv_id).await {
-            Ok((state, profiles)) => {
-                yield Message::Main(MainMessage::ProfilesLoaded(profiles));
+            Ok(state) => {
+                yield Message::Main(MainMessage::UsersFetched);
                 yield msg(CallMessage::StateLoaded(conv_id, Some(state)));
             }
             Err(e) => yield err(e),
@@ -815,7 +811,11 @@ pub fn load_call_state_task(api: Arc<ApiClient>, conv_id: String) -> Task<Messag
     })
 }
 
-fn connect_call_task(client: Arc<ApiClient>, conv_id: String, start_first: bool) -> Task<Message> {
+fn connect_call_task(
+    client: Arc<EncryptedClient>,
+    conv_id: String,
+    start_first: bool,
+) -> Task<Message> {
     Task::stream(stream! {
         if start_first && let Err(e) = client.client().start_call(&conv_id, None).await {
             yield err(e.into());
@@ -833,7 +833,7 @@ fn connect_call_task(client: Arc<ApiClient>, conv_id: String, start_first: bool)
             session_id: token_info.id,
             session_token: token_info.token,
             call_id: token_info.call_id.clone(),
-            identity: client.call_identity().await,
+            identity: crate::api::call_identity(&client).await,
         })
         .await
         {
@@ -850,8 +850,8 @@ fn connect_call_task(client: Arc<ApiClient>, conv_id: String, start_first: bool)
             token_info.call_id,
         ));
         match fetch_call_state(&client, &conv_id).await {
-            Ok((state, profiles)) => {
-                yield Message::Main(MainMessage::ProfilesLoaded(profiles));
+            Ok(state) => {
+                yield Message::Main(MainMessage::UsersFetched);
                 yield msg(CallMessage::StateLoaded(conv_id, Some(state)));
             }
             Err(_) => yield msg(CallMessage::StateLoaded(conv_id, None)),

@@ -221,7 +221,7 @@ async fn run_lifecycle_worker() -> std::result::Result<(), async_nats::Error> {
 
         match process_result {
             Ok(()) => {
-                let _ = message.ack().await;
+                message.ack().await.ok();
             }
             Err(e) => {
                 tracing::error!("Failed to process lifecycle event: {:?}", e);

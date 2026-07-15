@@ -36,6 +36,17 @@ pub enum HarmonyBindingError {
 
     #[error("Crypto error: {reason}")]
     Crypto { reason: String },
+
+    #[error("Account server error: {reason}")]
+    Core { reason: String },
+}
+
+impl From<core_api::errors::Error> for HarmonyBindingError {
+    fn from(error: core_api::errors::Error) -> Self {
+        HarmonyBindingError::Core {
+            reason: error.to_string(),
+        }
+    }
 }
 
 impl From<harmony_api::HarmonyError> for HarmonyBindingError {
@@ -50,9 +61,11 @@ impl From<harmony_api::HarmonyError> for HarmonyBindingError {
             harmony_api::HarmonyError::Http(e) => HarmonyBindingError::Internal {
                 reason: e.to_string(),
             },
-            harmony_api::HarmonyError::AuthenticationClosed => HarmonyBindingError::Authentication {
-                reason: "connection closed before authentication".to_string(),
-            },
+            harmony_api::HarmonyError::AuthenticationClosed => {
+                HarmonyBindingError::Authentication {
+                    reason: "connection closed before authentication".to_string(),
+                }
+            }
             harmony_api::HarmonyError::Api(api_error) => HarmonyBindingError::Api {
                 reason: format!("{:?}", api_error),
             },
@@ -86,6 +99,7 @@ impl From<harmony_api::HarmonyError> for HarmonyBindingError {
             harmony_api::HarmonyError::Crypto(e) => HarmonyBindingError::Crypto {
                 reason: e.to_string(),
             },
+            harmony_api::HarmonyError::Core(e) => e.into(),
         }
     }
 }

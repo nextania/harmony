@@ -170,7 +170,7 @@ impl PulseClient {
             .map_err(|_| PulseError::Disconnected)?;
 
         if matches!(track.media_hint, MediaHint::Video | MediaHint::ScreenVideo) {
-            let _ = self.request_keyframe(&track.id);
+            self.request_keyframe(&track.id).ok();
         }
         Ok(rx)
     }
@@ -229,7 +229,7 @@ impl PulseClient {
 
     /// Gracefully disconnect (closes the MoQ session, no reconnect).
     pub fn disconnect(&self) {
-        let _ = self.command_tx.send(ClientCommand::Shutdown);
+        self.command_tx.send(ClientCommand::Shutdown).ok();
     }
 
     pub fn call_id(&self) -> &str {
@@ -315,12 +315,12 @@ async fn supervisor(
 
     let mut ctx = match establish(&shared.options, &shared.mls).await {
         Ok((ctx, id, tracks)) => {
-            let _ = ready_tx.send(Ok(()));
+            ready_tx.send(Ok(())).ok();
             announce_connected(&shared.event_tx, id, tracks);
             ctx
         }
         Err(e) => {
-            let _ = ready_tx.send(Err(e));
+            ready_tx.send(Err(e)).ok();
             return;
         }
     };
@@ -332,9 +332,12 @@ async fn supervisor(
         match end {
             SessionEnd::Shutdown => return,
             SessionEnd::Kicked => {
-                let _ = shared.event_tx.send(PulseEvent::Disconnected {
-                    reason: "disconnected by server".to_string(),
-                });
+                shared
+                    .event_tx
+                    .send(PulseEvent::Disconnected {
+                        reason: "disconnected by server".to_string(),
+                    })
+                    .ok();
                 return;
             }
             SessionEnd::Lost { redirect } => {
@@ -343,15 +346,18 @@ async fn supervisor(
                     shared.options.session_token = token;
                 }
                 let Some(new_ctx) = reconnect(&shared).await else {
-                    let _ = shared.event_tx.send(PulseEvent::Disconnected {
-                        reason: "reconnect attempts exhausted".to_string(),
-                    });
+                    shared
+                        .event_tx
+                        .send(PulseEvent::Disconnected {
+                            reason: "reconnect attempts exhausted".to_string(),
+                        })
+                        .ok();
                     return;
                 };
                 ctx = new_ctx;
                 for hint in shared.active_hints.clone() {
                     if let Err(e) = start_producer(&mut ctx, &mut shared, hint, None) {
-                        let _ = shared.event_tx.send(PulseEvent::Error(e));
+                        shared.event_tx.send(PulseEvent::Error(e)).ok();
                     }
                 }
             }
@@ -361,7 +367,10 @@ async fn supervisor(
 
 async fn reconnect(shared: &Shared) -> Option<SessionCtx> {
     for attempt in 1..=MAX_RECONNECT_ATTEMPTS {
-        let _ = shared.event_tx.send(PulseEvent::Reconnecting { attempt });
+        shared
+            .event_tx
+            .send(PulseEvent::Reconnecting { attempt })
+            .ok();
         match establish(&shared.options, &shared.mls).await {
             Ok((ctx, id, tracks)) => {
                 announce_connected(&shared.event_tx, id, tracks);
@@ -369,7 +378,7 @@ async fn reconnect(shared: &Shared) -> Option<SessionCtx> {
             }
             Err(e) => {
                 tracing::warn!("Pulse reconnect attempt {attempt} failed: {e}");
-                let _ = shared.event_tx.send(PulseEvent::Error(e));
+                shared.event_tx.send(PulseEvent::Error(e)).ok();
                 let backoff = Duration::from_millis(500)
                     .saturating_mul(1 << attempt.min(5))
                     .min(Duration::from_secs(10));
@@ -385,12 +394,14 @@ fn announce_connected(
     id: String,
     available_tracks: Vec<AvailableTrack>,
 ) {
-    let _ = event_tx.send(PulseEvent::Connected {
-        id,
-        available_tracks: available_tracks.clone(),
-    });
+    event_tx
+        .send(PulseEvent::Connected {
+            id,
+            available_tracks: available_tracks.clone(),
+        })
+        .ok();
     for track in available_tracks {
-        let _ = event_tx.send(PulseEvent::TrackAvailable(track));
+        event_tx.send(PulseEvent::TrackAvailable(track)).ok();
     }
 }
 
@@ -402,11 +413,11 @@ fn teardown(ctx: &mut SessionCtx) {
         match pending.kind {
             PendingKind::StartProduce { reply, .. } => {
                 if let Some(reply) = reply {
-                    let _ = reply.send(Err(PulseError::Disconnected));
+                    reply.send(Err(PulseError::Disconnected)).ok();
                 }
             }
             PendingKind::StopProduce { reply } => {
-                let _ = reply.send(Err(PulseError::Disconnected));
+                reply.send(Err(PulseError::Disconnected)).ok();
             }
         }
     }
@@ -549,7 +560,7 @@ async fn run_session(
                     }
                     ClientCommand::StartProduce { media_hint, reply } => {
                         if let Err(e) = start_producer(ctx, shared, media_hint, Some(reply)) {
-                            let _ = shared.event_tx.send(PulseEvent::Error(e));
+                            shared.event_tx.send(PulseEvent::Error(e)).ok();
                         }
                     }
                     ClientCommand::StopProduce { media_hint, reply } => {
@@ -649,7 +660,7 @@ fn start_producer(
         }
         Err(e) => {
             if let Some(reply) = reply {
-                let _ = reply.send(Err(e));
+                reply.send(Err(e)).ok();
                 Ok(())
             } else {
                 Err(e)
@@ -666,7 +677,7 @@ fn stop_producer(
 ) {
     let track_name = track_name_for_hint(&media_hint);
     if ctx.producers.remove(track_name).is_none() {
-        let _ = reply.send(Err(PulseError::NotProducing(media_hint)));
+        reply.send(Err(PulseError::NotProducing(media_hint))).ok();
         return;
     }
     shared.active_hints.retain(|h| h != &media_hint);
@@ -680,7 +691,7 @@ fn stop_producer(
             media_hint,
         },
     ) {
-        let _ = reply.send(Err(e));
+        reply.send(Err(e)).ok();
         return;
     }
     ctx.pending.insert(
@@ -709,11 +720,15 @@ fn sweep_expired_requests(ctx: &mut SessionCtx, shared: &mut Shared) {
                 ctx.producers.remove(track_name_for_hint(&media_hint));
                 shared.active_hints.retain(|h| h != &media_hint);
                 if let Some(reply) = reply {
-                    let _ = reply.send(Err(PulseError::Timeout(REQUEST_TIMEOUT, "ProduceStarted")));
+                    reply
+                        .send(Err(PulseError::Timeout(REQUEST_TIMEOUT, "ProduceStarted")))
+                        .ok();
                 }
             }
             PendingKind::StopProduce { reply } => {
-                let _ = reply.send(Err(PulseError::Timeout(REQUEST_TIMEOUT, "ProduceStopped")));
+                reply
+                    .send(Err(PulseError::Timeout(REQUEST_TIMEOUT, "ProduceStopped")))
+                    .ok();
             }
         }
     }
@@ -757,7 +772,7 @@ async fn write_media(
     // new group for each keyframe
     if keyframe || producer.group.is_none() {
         if let Some(mut old) = producer.group.take() {
-            let _ = old.finish();
+            old.finish().ok();
         }
         let seq = producer.next_group_seq;
         producer.next_group_seq += 1;
@@ -785,7 +800,7 @@ fn emit_crypto_error(ctx: &mut SessionCtx, shared: &Shared, error: PulseError) {
         .is_none_or(|last| now.duration_since(last) >= ERROR_EVENT_INTERVAL)
     {
         ctx.last_crypto_error = Some(now);
-        let _ = shared.event_tx.send(PulseEvent::Error(error));
+        shared.event_tx.send(PulseEvent::Error(error)).ok();
     }
 }
 
@@ -866,7 +881,7 @@ fn spawn_consumer(
                                     now.duration_since(last) >= ERROR_EVENT_INTERVAL
                                 }) {
                                     last_error_emit = Some(now);
-                                    let _ = event_tx.send(PulseEvent::Error(PulseError::Crypto(e)));
+                                    event_tx.send(PulseEvent::Error(PulseError::Crypto(e))).ok();
                                 }
                             }
                         }
@@ -899,7 +914,7 @@ async fn handle_server_message(
                     producer.server_track_id = Some(track_id);
                 }
                 if let Some(reply) = reply {
-                    let _ = reply.send(Ok(TrackHandle { media_hint }));
+                    reply.send(Ok(TrackHandle { media_hint })).ok();
                 }
             }
             _ => tracing::warn!("ProduceStarted for unknown request {request_id}"),
@@ -907,7 +922,7 @@ async fn handle_server_message(
         ControlS2C::ProduceStopped { request_id } => {
             match ctx.pending.remove(&request_id).map(|r| r.kind) {
                 Some(PendingKind::StopProduce { reply }) => {
-                    let _ = reply.send(Ok(()));
+                    reply.send(Ok(())).ok();
                 }
                 _ => tracing::warn!("ProduceStopped for unknown request {request_id}"),
             }
@@ -919,30 +934,31 @@ async fn handle_server_message(
                     shared.active_hints.retain(|h| h != &media_hint);
                     match reply {
                         Some(reply) => {
-                            let _ = reply.send(Err(PulseError::Rejected(reason)));
+                            reply.send(Err(PulseError::Rejected(reason))).ok();
                         }
                         None => {
-                            let _ = shared
+                            shared
                                 .event_tx
-                                .send(PulseEvent::Error(PulseError::Rejected(reason)));
+                                .send(PulseEvent::Error(PulseError::Rejected(reason)))
+                                .ok();
                         }
                     }
                 }
                 Some(PendingKind::StopProduce { reply }) => {
-                    let _ = reply.send(Err(PulseError::Rejected(reason)));
+                    reply.send(Err(PulseError::Rejected(reason))).ok();
                 }
                 None => tracing::warn!("ProduceFailed for unknown request {request_id}: {reason}"),
             }
         }
 
         ControlS2C::TrackAvailable { track } => {
-            let _ = shared.event_tx.send(PulseEvent::TrackAvailable(track));
+            shared.event_tx.send(PulseEvent::TrackAvailable(track)).ok();
         }
         ControlS2C::TrackUnavailable { id } => {
             if let Some(handle) = ctx.consumers.remove(&id) {
                 handle.abort();
             }
-            let _ = shared.event_tx.send(PulseEvent::TrackUnavailable(id));
+            shared.event_tx.send(PulseEvent::TrackUnavailable(id)).ok();
         }
         ControlS2C::Connected {
             id,
@@ -968,9 +984,10 @@ async fn handle_server_message(
                 Ok(()) => {
                     let (epoch, members) = (mls.current_epoch(), mls.roster());
                     drop(mls);
-                    let _ = shared
+                    shared
                         .event_tx
-                        .send(PulseEvent::MembershipChanged { epoch, members });
+                        .send(PulseEvent::MembershipChanged { epoch, members })
+                        .ok();
                 }
                 Err(e) => {
                     drop(mls);
@@ -1020,10 +1037,13 @@ async fn handle_server_message(
             };
             match result {
                 Ok(()) => {
-                    let _ = shared.event_tx.send(PulseEvent::MembershipChanged {
-                        epoch: cur_epoch,
-                        members: roster.unwrap_or_default(),
-                    });
+                    shared
+                        .event_tx
+                        .send(PulseEvent::MembershipChanged {
+                            epoch: cur_epoch,
+                            members: roster.unwrap_or_default(),
+                        })
+                        .ok();
                     if let Err(e) = write_ctl_frame(
                         &mut ctx.ctl_track,
                         &ControlC2S::CommitAck { epoch: cur_epoch },
@@ -1039,7 +1059,7 @@ async fn handle_server_message(
                 let mut mls = shared.mls.lock().await;
                 mls.on_epoch_ready(epoch);
             }
-            let _ = shared.event_tx.send(PulseEvent::EpochReady(epoch));
+            shared.event_tx.send(PulseEvent::EpochReady(epoch)).ok();
         }
         ControlS2C::KeyFrameRequested { track_id } => {
             let hint = ctx
@@ -1049,7 +1069,10 @@ async fn handle_server_message(
                 .map(|p| p.media_hint.clone());
             match hint {
                 Some(hint) => {
-                    let _ = shared.event_tx.send(PulseEvent::KeyFrameRequested(hint));
+                    shared
+                        .event_tx
+                        .send(PulseEvent::KeyFrameRequested(hint))
+                        .ok();
                 }
                 None => tracing::warn!("KeyFrameRequested for unknown track {track_id}"),
             }
@@ -1067,12 +1090,15 @@ async fn handle_server_message(
                 .map(|p| p.media_hint.clone());
             match hint {
                 Some(media_hint) => {
-                    let _ = shared.event_tx.send(PulseEvent::ReceiverReport {
-                        media_hint,
-                        lost,
-                        received,
-                        jitter_ms,
-                    });
+                    shared
+                        .event_tx
+                        .send(PulseEvent::ReceiverReport {
+                            media_hint,
+                            lost,
+                            received,
+                            jitter_ms,
+                        })
+                        .ok();
                 }
                 None => tracing::debug!(track_id, "ReceiverReport for unknown track"),
             }
@@ -1087,7 +1113,7 @@ fn emit_mls_error(shared: &Shared, message: MlsError) {
 
 fn emit_error(shared: &Shared, error: PulseError) {
     tracing::error!("{error}");
-    let _ = shared.event_tx.send(PulseEvent::Error(error));
+    shared.event_tx.send(PulseEvent::Error(error)).ok();
 }
 
 async fn read_s2c(

@@ -1,5 +1,6 @@
 use async_stream::stream;
-use harmony_api::ClientEvent;
+use core_api::LoginMfa;
+use harmony_api::{Channel, ClientOptions, EncryptedClient, EncryptedEvent};
 use iced::{
     Border, Color, Element, Font, Length, Padding, Shadow, Task, Theme, Vector, alignment, color,
     widget::{
@@ -13,7 +14,6 @@ use tokio::sync::broadcast::{Receiver, error::RecvError};
 
 use crate::{
     Message,
-    api::{ApiClient, account},
     errors::RenderableError,
     icons::{FLUENT_ICONS, Icon},
     preferences::Locale,
@@ -25,17 +25,15 @@ use crate::{
     widgets::{button::ButtonExt, styles},
 };
 
-use crate::api::UserProfile;
 use std::{collections::HashMap, sync::Arc};
 
 enum LoginFlow {
     Done(
-        Arc<ApiClient>,
-        HashMap<String, harmony_api::Channel>,
-        HashMap<String, UserProfile>,
-        Receiver<ClientEvent>,
+        Arc<EncryptedClient>,
+        HashMap<String, Channel>,
+        Receiver<EncryptedEvent>,
     ),
-    NeedsMfa(account::LoginMfa),
+    NeedsMfa(LoginMfa),
 }
 
 #[derive(Clone)]
@@ -104,31 +102,42 @@ impl LoginView {
                 let backend_harmony = self.backend_harmony.clone();
                 return Task::stream(stream! {
                     let result = async {
-                        match account::login(&backend_account, &email, &password).await? {
-                            account::LoginResult::Success((token, encrypted_key)) => {
-                                let (client, stream) = ApiClient::connect(&backend_account, &backend_harmony, &token, &encrypted_key, &password).await?;
-                                let (conversations, profiles) = crate::api::load_session(&client).await?;
-                                Ok::<_, RenderableError>(LoginFlow::Done(client, conversations, profiles, stream))
+                        match core_api::login(&backend_account, &email, &password).await? {
+                            core_api::LoginResult::Success(session) => {
+                                let session = Arc::new(session);
+                                let (client, stream) = EncryptedClient::connect(session.clone(), ClientOptions::new(&backend_harmony)).await?;
+                                let channels = client.channels().fetch_personal().await?;
+                                Ok::<_, RenderableError>(LoginFlow::Done(client, channels, stream))
                             }
-                            account::LoginResult::RequiresContinuation(mfa) => {
+                            core_api::LoginResult::RequiresContinuation(mfa) => {
                                 Ok::<_, RenderableError>(LoginFlow::NeedsMfa(mfa))
                             }
                         }
                     }.await;
                     match result {
-                        Ok(LoginFlow::Done(client, convs, profiles, mut stream)) => {
-                            yield Message::LoginFinished((client, convs, profiles));
+                        Ok(LoginFlow::Done(client, channels, mut stream)) => {
+                            let mut contacts = client.subscribe_contacts();
+                            yield Message::LoginFinished((client, channels));
                             loop {
-                                match stream.recv().await {
-                                    Ok(event) => yield Message::Main(MainMessage::ServerEvent(event)),
-                                    Err(RecvError::Lagged(missed)) => {
-                                        tracing::warn!("event stream lagged; {missed} events dropped");
-                                    }
-                                    Err(RecvError::Closed) => break,
+                                tokio::select! {
+                                    event = stream.recv() => match event {
+                                        Ok(event) => yield Message::Main(MainMessage::ServerEvent(event)),
+                                        Err(RecvError::Lagged(missed)) => {
+                                            tracing::warn!("event stream lagged; {missed} events dropped");
+                                        }
+                                        Err(RecvError::Closed) => break,
+                                    },
+                                    outcome = contacts.recv() => match outcome {
+                                        Ok(outcome) => yield Message::Main(MainMessage::ContactOutcome(outcome)),
+                                        Err(RecvError::Lagged(missed)) => {
+                                            tracing::warn!("contact stream lagged; {missed} events dropped");
+                                        }
+                                        Err(RecvError::Closed) => break,
+                                    },
                                 }
                             }
                         }
-                        Ok(LoginFlow::NeedsMfa(mfa)) => yield Message::OpenMfa(mfa, password),
+                        Ok(LoginFlow::NeedsMfa(mfa)) => yield Message::OpenMfa(mfa),
                         Err(e) => yield Message::Login(LoginMessage::Failed(e)),
                     }
                 });

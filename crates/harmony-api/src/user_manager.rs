@@ -1,134 +1,94 @@
+use std::{collections::HashMap, sync::Arc};
+
+use core_api::Session;
 use quick_cache::sync::Cache;
-use reqwest::Client;
-use serde::{Deserialize, Serialize};
 
-use crate::{Result, error::HarmonyError};
+use crate::{Result, encrypted_client::Core, user::User};
 
-// TODO: separate this into account
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PublicUser {
-    pub id: String,
-    pub username: String,
-    pub display_name: String,
-    pub description: String,
-    pub avatar: Option<AvatarUrl>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AvatarUrl {
-    pub id: String,
-    pub signature: String,
-    pub timestamp: u64,
-}
+pub use core_api::{AvatarUrl, PublicUser};
 
 const CACHE_CAPACITY: usize = 512;
+const FETCH_CHUNK_SIZE: usize = 50;
 
 pub struct UserManager {
-    cache: Cache<String, PublicUser>,
-    http: Client,
-    base_url: String,
-    token: String,
+    cache: Cache<String, User>,
+    session: Arc<Session>,
+    core: Arc<Core>,
 }
 
 impl UserManager {
-    pub fn new(http: Client, base_url: impl Into<String>, token: impl Into<String>) -> Self {
+    pub(crate) fn new(core: Arc<Core>, session: Arc<Session>) -> Self {
         Self {
             cache: Cache::new(CACHE_CAPACITY),
-            http,
-            base_url: base_url.into(),
-            token: token.into(),
+            session,
+            core,
         }
     }
 
-    pub async fn get_user(&self, user_id: &str) -> Result<PublicUser> {
-        if let Some(profile) = self.cache.get(user_id) {
-            return Ok(profile.clone());
+    /// Gets a user if cached.
+    pub fn get(&self, id: &str) -> Option<User> {
+        self.cache.get(id)
+    }
+
+    async fn fetch_merged(&self, base: PublicUser) -> Result<User> {
+        let profile = self.core.client.get_user(&base.id).await?;
+        let user = User::new(base, profile);
+        self.cache.insert(user.id().to_string(), user.clone());
+        Ok(user)
+    }
+
+    pub async fn fetch(&self, user_id: &str) -> Result<User> {
+        if let Some(user) = self.cache.get(user_id) {
+            return Ok(user);
         }
-
-        let resp = self
-            .http
-            .get(format!("{}/api/user/{}", self.base_url, user_id))
-            .header("Authorization", self.token.clone())
-            .send()
-            .await
-            .map_err(|_| HarmonyError::NotConnected)?;
-
-        let public_user: PublicUser = resp
-            .json()
-            .await
-            .map_err(|e| HarmonyError::Http(Box::new(e)))?;
-
-        self.cache
-            .insert(public_user.id.clone(), public_user.clone());
-
-        Ok(public_user)
-    }
-    pub async fn get_user_by_username(&self, username: &str) -> Result<PublicUser> {
-        let resp = self
-            .http
-            .get(format!("{}/api/user/username/{}", self.base_url, username))
-            .header("Authorization", self.token.clone())
-            .send()
-            .await
-            .map_err(|_| HarmonyError::NotConnected)?;
-
-        let public_user: PublicUser = resp
-            .json()
-            .await
-            .map_err(|e| HarmonyError::Http(Box::new(e)))?;
-
-        self.cache
-            .insert(public_user.id.clone(), public_user.clone());
-
-        Ok(public_user)
+        let base = self.session.get_user(user_id).await?;
+        self.fetch_merged(base).await
     }
 
-    pub async fn get_users(&self, user_ids: Vec<String>) -> Result<Vec<PublicUser>> {
-        let mut fetched: Vec<(String, PublicUser)> = Vec::new();
+    pub async fn fetch_by_username(&self, username: &str) -> Result<User> {
+        let base = self.session.get_user_by_username(username).await?;
+        if let Some(user) = self.cache.get(&base.id) {
+            return Ok(user);
+        }
+        self.fetch_merged(base).await
+    }
+
+    pub async fn fetch_bulk(&self, user_ids: Vec<String>) -> Result<Vec<User>> {
+        let mut users: HashMap<String, User> = HashMap::new();
         let mut missing: Vec<String> = Vec::new();
 
         for id in &user_ids {
-            if let Some(profile) = self.cache.get(id) {
-                fetched.push((id.clone(), profile.clone()));
+            if let Some(user) = self.cache.get(id) {
+                users.insert(id.clone(), user);
             } else {
                 missing.push(id.clone());
             }
         }
 
-        for chunk in missing.chunks(50) {
-            let resp = self
-                .http
-                .post(format!("{}/api/user/batch", self.base_url))
-                .header("Authorization", self.token.clone())
-                .json(chunk)
-                .send()
-                .await
-                .map_err(|_| HarmonyError::NotConnected)?;
+        for chunk in missing.chunks(FETCH_CHUNK_SIZE) {
+            let mut profiles: HashMap<String, _> = self
+                .core
+                .client
+                .get_users(chunk)
+                .await?
+                .into_iter()
+                .map(|p| (p.id.clone(), p))
+                .collect();
 
-            let users: Vec<PublicUser> = resp
-                .json()
-                .await
-                .map_err(|e| HarmonyError::Http(Box::new(e)))?;
-
-            for user in users {
-                self.cache.insert(user.id.clone(), user.clone());
-                fetched.push((user.id.clone(), user));
+            // users unknown to either server are skipped
+            for base in self.session.get_users(chunk).await? {
+                let Some(profile) = profiles.remove(&base.id) else {
+                    continue;
+                };
+                let user = User::new(base, profile);
+                self.cache.insert(user.id().to_string(), user.clone());
+                users.insert(user.id().to_string(), user);
             }
         }
 
-        let ordered = user_ids
+        Ok(user_ids
             .iter()
-            .filter_map(|id| {
-                fetched
-                    .iter()
-                    .find(|(k, _)| k == id)
-                    .map(|(_, v)| v.clone())
-            })
-            .collect();
-
-        Ok(ordered)
+            .filter_map(|id| users.get(id).cloned())
+            .collect())
     }
 }

@@ -106,4 +106,3 @@ pub struct CallMigratedEvent {
     pub call_id: String,
     pub server_address: String,
 }
-

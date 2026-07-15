@@ -4,6 +4,7 @@ use tokio::sync::broadcast::{self, error::RecvError};
 
 use crate::error::HarmonyResult;
 use crate::models::*;
+use crate::session::Session;
 
 #[derive(uniffi::Object)]
 pub struct HarmonyClient {
@@ -14,8 +15,9 @@ pub struct HarmonyClient {
 #[uniffi::export]
 impl HarmonyClient {
     #[uniffi::constructor]
-    pub async fn new(config: ClientOptions) -> HarmonyResult<Arc<Self>> {
-        let (inner, receiver) = harmony_api::HarmonyClient::new(config.into()).await?;
+    pub async fn new(session: Arc<Session>, config: ClientOptions) -> HarmonyResult<Arc<Self>> {
+        let (inner, receiver) =
+            harmony_api::HarmonyClient::new(session.inner.clone(), config.into()).await?;
 
         Ok(Arc::new(Self {
             inner: Arc::new(inner),
@@ -298,11 +300,5 @@ impl HarmonyClient {
 
     pub async fn unblock_contact(&self, user_id: String) -> HarmonyResult<ContactExtended> {
         Ok(self.inner.unblock_contact(&user_id).await?.into())
-    }
-}
-
-impl HarmonyClient {
-    pub(crate) fn inner(&self) -> Arc<harmony_api::HarmonyClient> {
-        self.inner.clone()
     }
 }

@@ -150,11 +150,12 @@ async fn handle_node_event(payload: NodeEvent) {
                                 if let Some(member_session) =
                                     crate::wt::GLOBAL_SESSIONS.get(member_key)
                                 {
-                                    let _ = member_session.message_tx.send(
-                                        ControlS2C::TrackUnavailable {
+                                    member_session
+                                        .message_tx
+                                        .send(ControlS2C::TrackUnavailable {
                                             id: track.id.clone(),
-                                        },
-                                    );
+                                        })
+                                        .ok();
                                 }
                             }
                         }
@@ -168,9 +169,10 @@ async fn handle_node_event(payload: NodeEvent) {
             ..
         } => {
             if let Some(session) = crate::wt::GLOBAL_SESSIONS.get(&id) {
-                let _ = session
+                session
                     .message_tx
-                    .send(ControlS2C::Disconnected { reconnect: None });
+                    .send(ControlS2C::Disconnected { reconnect: None })
+                    .ok();
 
                 session.close("User disconnected by server");
             }
@@ -186,9 +188,12 @@ async fn handle_node_event(payload: NodeEvent) {
             ..
         } => {
             if let Some(session) = crate::wt::GLOBAL_SESSIONS.get(&id) {
-                let _ = session.message_tx.send(ControlS2C::Disconnected {
-                    reconnect: Some((target_server, target_token)),
-                });
+                session
+                    .message_tx
+                    .send(ControlS2C::Disconnected {
+                        reconnect: Some((target_server, target_token)),
+                    })
+                    .ok();
 
                 session.close("User moved to another server");
             }
@@ -202,9 +207,10 @@ async fn handle_node_event(payload: NodeEvent) {
                 for member_id in call.members.iter() {
                     let member_key: &String = member_id.key();
                     if let Some(session) = crate::wt::GLOBAL_SESSIONS.get(member_key) {
-                        let _ = session
+                        session
                             .message_tx
-                            .send(ControlS2C::Disconnected { reconnect: None });
+                            .send(ControlS2C::Disconnected { reconnect: None })
+                            .ok();
 
                         session.close("Call ended");
                     }

@@ -16,9 +16,9 @@ use harmony_types::messages::{
 use harmony_types::users::{
     AddContactMethod, AddContactResponse, AddContactStage, BlockContactMethod,
     BlockContactResponse, ContactExtended, CurrentUserResponse, GetContactsMethod,
-    GetContactsResponse, GetCurrentUserMethod, GetUserMethod, GetUserResponse, RemoveContactMethod,
-    RemoveContactResponse, SetKeyPackageMethod, SetKeyPackageResponse, UnblockContactMethod,
-    UnblockContactResponse,
+    GetContactsResponse, GetCurrentUserMethod, GetUserMethod, GetUserResponse, GetUsersMethod,
+    GetUsersResponse, RemoveContactMethod, RemoveContactResponse, SetKeyPackageMethod,
+    SetKeyPackageResponse, UnblockContactMethod, UnblockContactResponse,
 };
 use harmony_types::voice::{
     CreateCallTokenMethod, CreateCallTokenResponse, EndCallMethod, EndCallResponse,
@@ -28,11 +28,11 @@ use harmony_types::voice::{
 use pulse_types::Region;
 
 use crate::error::Result;
-use crate::{Channel, EncryptionHint, HarmonyClient, Message};
+use crate::{ChannelData, EncryptionHint, HarmonyClient, Message};
 
 impl HarmonyClient {
     /// Get a specific channel by ID
-    pub async fn get_channel(&self, channel_id: &str) -> Result<Channel> {
+    pub async fn get_channel(&self, channel_id: &str) -> Result<ChannelData> {
         let response: GetChannelResponse = self
             .send_request(
                 "GET_CHANNEL",
@@ -46,7 +46,7 @@ impl HarmonyClient {
     }
 
     /// Get all channels the user has access to
-    pub async fn get_channels(&self) -> Result<Vec<Channel>> {
+    pub async fn get_channels(&self) -> Result<Vec<ChannelData>> {
         let response: GetChannelsResponse = self
             .send_request("GET_CHANNELS", GetChannelsMethod {})
             .await?;
@@ -242,7 +242,7 @@ impl HarmonyClient {
     }
 
     /// Create a new private channel with another user
-    pub async fn create_private_channel(&self, target_id: &str) -> Result<Channel> {
+    pub async fn create_private_channel(&self, target_id: &str) -> Result<ChannelData> {
         let response: CreateChannelResponse = self
             .send_request(
                 "CREATE_CHANNEL",
@@ -262,7 +262,7 @@ impl HarmonyClient {
         &self,
         metadata: Vec<u8>,
         encryption_hint: EncryptionHint,
-    ) -> Result<Channel> {
+    ) -> Result<ChannelData> {
         let response: CreateChannelResponse = self
             .send_request(
                 "CREATE_CHANNEL",
@@ -279,7 +279,7 @@ impl HarmonyClient {
     }
 
     /// Edit group channel metadata (manager only)
-    pub async fn edit_channel(&self, channel_id: &str, metadata: Vec<u8>) -> Result<Channel> {
+    pub async fn edit_channel(&self, channel_id: &str, metadata: Vec<u8>) -> Result<ChannelData> {
         let response: EditChannelResponse = self
             .send_request(
                 "EDIT_CHANNEL",
@@ -395,6 +395,20 @@ impl HarmonyClient {
             .await?;
 
         Ok(response.user)
+    }
+
+    /// Get multiple users' public profiles in one request.
+    pub async fn get_users(&self, user_ids: &[String]) -> Result<Vec<crate::UserProfile>> {
+        let response: GetUsersResponse = self
+            .send_request(
+                "GET_USERS",
+                GetUsersMethod {
+                    user_ids: user_ids.to_vec(),
+                },
+            )
+            .await?;
+
+        Ok(response.users)
     }
 
     /// Get the current authenticated user's data and keys

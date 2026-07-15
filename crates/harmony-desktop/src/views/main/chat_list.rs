@@ -18,13 +18,13 @@ pub fn chat_list(state: &MainView) -> Element<MainMessage> {
 
     let mut chat_items = Column::new().width(Length::Fill);
 
-    for (id, conv) in state.conversations.iter() {
+    for (id, conv) in state.current_channels.iter() {
         let is_selected = state
             .current_conversation
             .as_ref()
             .is_some_and(|selected| selected == id);
-        let (channel_name, channel_icon) = match conv {
-            harmony_api::Channel::PrivateChannel {
+        let (channel_name, channel_icon) = match conv.data() {
+            harmony_api::ChannelData::PrivateChannel {
                 initiator_id,
                 target_id,
                 ..
@@ -47,7 +47,7 @@ pub fn chat_list(state: &MainView) -> Element<MainMessage> {
                         });
                 (other.display_name, avatar_placeholder)
             }
-            harmony_api::Channel::GroupChannel { .. } => {
+            harmony_api::ChannelData::GroupChannel { .. } => {
                 todo!("Group chat icons not implemented yet");
             }
         };

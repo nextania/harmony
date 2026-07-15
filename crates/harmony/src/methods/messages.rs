@@ -8,12 +8,12 @@ use crate::{
     authentication::check_authenticated,
     errors::Error,
     methods::{Event, MessageDeletedEvent, MessageEditedEvent, NewMessageEvent},
-    services::events,
     services::database::{
         channels::{Channel, EncryptionHint},
         messages::Message,
         users::User,
     },
+    services::events,
 };
 
 pub async fn get_messages(state: RpcState, data: RpcValue<GetMessagesMethod>) -> impl RpcResponder {

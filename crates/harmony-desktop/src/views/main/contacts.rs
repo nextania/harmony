@@ -1,13 +1,12 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
-use harmony_api::{AddContactOutcome, ContactAction, RelationshipState};
+use harmony_api::{AddContactOutcome, ContactAction, EncryptedClient, RelationshipState};
 use iced::Task;
 
 use crate::{
     Message,
-    api::{ApiClient, UserProfile},
     errors::RenderableError,
-    views::main::{MainMessage, fetch_profiles_task},
+    views::main::{MainMessage, fetch_users_task},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,10 +54,10 @@ impl Contact {
 
 #[derive(Clone)]
 pub enum ContactsMessage {
-    Loaded(Vec<Contact>, Vec<UserProfile>),
+    Loaded(Vec<Contact>),
     AddInputChanged(String),
     AddSubmit,
-    Added(Contact, Option<UserProfile>),
+    Added(Contact),
     Remove(String),
     Removed(String),
     Accept(String),
@@ -88,12 +87,10 @@ impl ContactsState {
     pub fn update(
         &mut self,
         message: ContactsMessage,
-        api: &Arc<ApiClient>,
-        profiles: &mut HashMap<String, UserProfile>,
+        api: &Arc<EncryptedClient>,
     ) -> Task<Message> {
         match message {
-            ContactsMessage::Loaded(contacts, loaded_profiles) => {
-                profiles.extend(loaded_profiles.into_iter().map(|p| (p.id.clone(), p)));
+            ContactsMessage::Loaded(contacts) => {
                 self.list = contacts;
                 self.loaded = true;
             }
@@ -105,27 +102,22 @@ impl ContactsState {
                     let client = api.clone();
                     return Task::perform(
                         async move {
-                            let profile = client.get_profile_by_username(&username).await?;
+                            let user = client.users().fetch_by_username(&username).await?;
                             let outcome = client
                                 .add_contact(ContactAction::Request {
-                                    user_id: profile.id.clone(),
+                                    user_id: user.id().to_string(),
                                 })
                                 .await?;
-                            Ok((Contact::from_outcome(outcome), profile))
+                            Ok(Contact::from_outcome(outcome))
                         },
                         |result: crate::errors::RenderableResult<_>| match result {
-                            Ok((contact, profile)) => {
-                                msg(ContactsMessage::Added(contact, Some(profile)))
-                            }
+                            Ok(contact) => msg(ContactsMessage::Added(contact)),
                             Err(e) => err(e),
                         },
                     );
                 }
             }
-            ContactsMessage::Added(contact, profile) => {
-                if let Some(profile) = profile {
-                    profiles.insert(profile.id.clone(), profile);
-                }
+            ContactsMessage::Added(contact) => {
                 if !self.list.iter().any(|c| c.user_id == contact.user_id) {
                     self.list.push(contact);
                 }
@@ -150,7 +142,13 @@ impl ContactsState {
             ContactsMessage::Accept(user_id) => {
                 let client = api.clone();
                 return Task::perform(
-                    async move { client.add_contact(ContactAction::Accept { user_id }).await },
+                    async move {
+                        Ok::<_, RenderableError>(
+                            client
+                                .add_contact(ContactAction::Accept { user_id })
+                                .await?,
+                        )
+                    },
                     |result| match result {
                         Ok(outcome) => {
                             msg(ContactsMessage::Accepted(Contact::from_outcome(outcome)))
@@ -209,13 +207,13 @@ impl ContactsState {
         Task::none()
     }
 
-    pub fn load_task(api: &Arc<ApiClient>) -> Task<Message> {
+    pub fn load_task(api: &Arc<EncryptedClient>) -> Task<Message> {
         let client = api.clone();
         Task::perform(
             async move {
                 let contacts = client.client().get_contacts().await?;
                 let ids: Vec<String> = contacts.iter().map(|c| c.id.clone()).collect();
-                let profiles = client.get_profiles(ids).await.unwrap_or_default();
+                let _ = client.users().fetch_bulk(ids).await;
                 let contacts = contacts
                     .into_iter()
                     .map(|c| Contact {
@@ -223,10 +221,10 @@ impl ContactsState {
                         status: ContactStatus::from(&c.state),
                     })
                     .collect();
-                Ok::<_, RenderableError>((contacts, profiles))
+                Ok::<_, RenderableError>(contacts)
             },
             |result| match result {
-                Ok((contacts, profiles)) => msg(ContactsMessage::Loaded(contacts, profiles)),
+                Ok(contacts) => msg(ContactsMessage::Loaded(contacts)),
                 Err(e) => err(e),
             },
         )
@@ -236,7 +234,7 @@ impl ContactsState {
         &mut self,
         user_id: String,
         state: &RelationshipState,
-        api: &Arc<ApiClient>,
+        api: &Arc<EncryptedClient>,
     ) -> Task<Message> {
         if matches!(state, RelationshipState::None) {
             self.list.retain(|c| c.user_id != user_id);
@@ -252,7 +250,7 @@ impl ContactsState {
                     user_id: user_id.clone(),
                     status: new_status,
                 });
-                return fetch_profiles_task(api.clone(), vec![user_id]);
+                return fetch_users_task(api.clone(), vec![user_id]);
             }
         }
         Task::none()

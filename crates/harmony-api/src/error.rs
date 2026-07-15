@@ -2,6 +2,7 @@ pub use harmony_types::errors::Error as ApiError;
 use thiserror::Error;
 
 pub use crate::crypto::CryptoError;
+pub use core_api::errors::Error as CoreError;
 
 /// A type-erased error originating from a third-party crate.
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -62,4 +63,7 @@ pub enum HarmonyError {
 
     #[error("Crypto error: {0}")]
     Crypto(#[from] CryptoError),
+
+    #[error("Core error: {0}")]
+    Core(#[from] CoreError),
 }

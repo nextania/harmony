@@ -1,15 +1,14 @@
-use std::{collections::HashMap, num::NonZero, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
-use harmony_api::{ClientEvent, Event, LifecycleEvent};
+use harmony_api::{AddContactOutcome, Channel, EncryptedClient, EncryptedEvent, LifecycleEvent};
 use iced::{
     Element, Length, Task,
     widget::{Space, button, column, container, row, text},
 };
-use lru::LruCache;
 
 use crate::{
     ChatMessage, Message,
-    api::{ApiClient, UserProfile, placeholder_profile},
+    api::{UserProfile, placeholder_profile},
     errors::RenderableError,
     icons::{FLUENT_ICONS, Icon},
     theme::{BG_APP, DM_SANS, TEXT_MUTED},
@@ -63,7 +62,7 @@ pub enum MainMessage {
     MessageEdited(String, ChatMessage),
     DeleteMessage(String),
     MessageDeleted(String, String),
-    ServerEvent(harmony_api::ClientEvent),
+    ServerEvent(harmony_api::EncryptedEvent),
     Ignore,
     Call(CallMessage),
     Contacts(ContactsMessage),
@@ -73,7 +72,6 @@ pub enum MainMessage {
     AvatarMenuAction(AvatarAction),
     OpenSettings,
     MessagesLoaded(String, Vec<ChatMessage>),
-    NewMessageDecrypted(String, ChatMessage),
     ApiError(RenderableError),
     DismissError,
     ToggleEmojiPicker,
@@ -82,21 +80,24 @@ pub enum MainMessage {
     EmojiCategorySelected(emojis::Group),
     EmojiSearchChanged(String),
     OpenPrivateChannel(String),
-    PrivateChannelOpened(crate::errors::RenderableResult<(harmony_api::Channel, Vec<UserProfile>)>),
-    ProfilesLoaded(Vec<UserProfile>),
+    PrivateChannelOpened(crate::errors::RenderableResult<Channel>),
+    UsersFetched,
+    ContactOutcome(AddContactOutcome),
+}
+
+fn decode_content(bytes: Vec<u8>) -> String {
+    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 pub struct MainView {
     active_tab: SidebarTab,
     chat_mode: ChatMode,
-    api: Arc<ApiClient>,
+    api: Arc<EncryptedClient>,
     pub chat_input: String,
     pub search_input: String,
-    pub conversations: HashMap<String, harmony_api::Channel>,
+    pub current_channels: HashMap<String, Channel>,
     pub current_conversation: Option<String>,
-    pub conversation_messages: LruCache<String, Vec<ChatMessage>>,
     pub current_user_id: String,
-    pub profiles: HashMap<String, UserProfile>,
     pub chat_list_visible: bool,
     pub avatar_menu_open: bool,
 
@@ -106,6 +107,7 @@ pub struct MainView {
     pub emoji_picker_category: emojis::Group,
     pub emoji_search: String,
 
+    // TODO:
     pub call: CallSession,
     pub contacts: ContactsState,
 
@@ -113,11 +115,7 @@ pub struct MainView {
 }
 
 impl MainView {
-    pub fn new(
-        api: Arc<ApiClient>,
-        conversations: HashMap<String, harmony_api::Channel>,
-        profiles: HashMap<String, UserProfile>,
-    ) -> Self {
+    pub fn new(api: Arc<EncryptedClient>, channels: HashMap<String, Channel>) -> Self {
         let current_user_id = api.user_id().to_string();
         Self {
             active_tab: SidebarTab::Messages,
@@ -125,11 +123,9 @@ impl MainView {
             api,
             chat_input: String::new(),
             search_input: String::new(),
-            conversations,
+            current_channels: channels,
             current_conversation: None,
-            conversation_messages: LruCache::new(NonZero::new(100).unwrap()),
             current_user_id,
-            profiles,
             chat_list_visible: true,
             avatar_menu_open: false,
             current_conversation_messages: Vec::new(),
@@ -155,7 +151,7 @@ impl MainView {
                 );
             }
             MainMessage::Contacts(m) => {
-                return self.contacts.update(m, &self.api, &mut self.profiles);
+                return self.contacts.update(m, &self.api);
             }
             MainMessage::TabSelected(tab) => {
                 self.active_tab = tab;
@@ -186,34 +182,25 @@ impl MainView {
 
                 let call_task = call::load_call_state_task(self.api.clone(), i.clone());
 
-                // return a task to load messages for this conversation if not already cached
-                let msg_task = if !self.conversation_messages.contains(&i) {
-                    let client = self.api.clone();
-                    Task::perform(
-                        async move {
-                            let raw = client.get_messages(&i).await?;
-                            let messages = raw
-                                .into_iter()
-                                .map(|(m, text)| ChatMessage::new(&m, text))
-                                .collect();
-                            Ok((i, messages))
-                        },
-                        |result| match result {
-                            Ok((conv_id, messages)) => {
-                                Message::Main(MainMessage::MessagesLoaded(conv_id, messages))
-                            }
-                            Err(e) => Message::Main(MainMessage::ApiError(e)),
-                        },
-                    )
-                } else {
-                    Task::done(Message::Main(MainMessage::MessagesLoaded(
-                        i.clone(),
-                        self.conversation_messages
-                            .get(&i)
-                            .cloned()
-                            .unwrap_or_default(),
-                    )))
-                };
+                let client = self.api.clone();
+                let msg_task = Task::perform(
+                    async move {
+                        let channel = client.channels().fetch(&i).await?;
+                        let messages = channel
+                            .messages()
+                            .await?
+                            .into_iter()
+                            .map(|m| ChatMessage::new(&m.message, decode_content(m.content)))
+                            .collect();
+                        Ok((i, messages))
+                    },
+                    |result| match result {
+                        Ok((conv_id, messages)) => {
+                            Message::Main(MainMessage::MessagesLoaded(conv_id, messages))
+                        }
+                        Err(e) => Message::Main(MainMessage::ApiError(e)),
+                    },
+                );
                 return Task::batch([msg_task, call_task]);
             }
             MainMessage::ChatInputChanged(s) => self.chat_input = s,
@@ -228,7 +215,8 @@ impl MainView {
                     self.chat_input.clear();
                     return Task::perform(
                         async move {
-                            let msg = client.send_message(&channel_id, &content).await?;
+                            let channel = client.channels().fetch(&channel_id).await?;
+                            let msg = channel.send_message(content.as_bytes()).await?;
                             Ok(ChatMessage::new(&msg, content))
                         },
                         move |result: crate::errors::RenderableResult<_>| match result {
@@ -239,26 +227,8 @@ impl MainView {
                 }
             }
             MainMessage::MessageSent(msg) => {
-                if let Some(conv_id) = &self.current_conversation {
-                    if let Some(msgs) = self.conversation_messages.get_mut(conv_id) {
-                        msgs.push(msg.clone());
-                    } else {
-                        self.conversation_messages
-                            .put(conv_id.clone(), vec![msg.clone()]);
-                    }
+                if self.current_conversation.is_some() {
                     self.current_conversation_messages.push(msg);
-                }
-            }
-            MainMessage::NewMessageDecrypted(channel_id, chat_msg) => {
-                let author_id = chat_msg.author_id.clone();
-                if let Some(msgs) = self.conversation_messages.get_mut(&channel_id) {
-                    msgs.push(chat_msg.clone());
-                }
-                if self.current_conversation.as_ref() == Some(&channel_id) {
-                    self.current_conversation_messages.push(chat_msg);
-                }
-                if !self.profiles.contains_key(&author_id) {
-                    return fetch_profiles_task(self.api.clone(), vec![author_id]);
                 }
             }
             MainMessage::EditMessage(message_id, new_content) => {
@@ -268,7 +238,8 @@ impl MainView {
                     let mid = message_id.clone();
                     return Task::perform(
                         async move {
-                            let msg = client.edit_message(&mid, &channel_id, &new_content).await?;
+                            let channel = client.channels().fetch(&channel_id).await?;
+                            let msg = channel.edit_message(&mid, new_content.as_bytes()).await?;
                             Ok(ChatMessage::new(&msg, new_content))
                         },
                         move |result: crate::errors::RenderableResult<_>| match result {
@@ -282,19 +253,12 @@ impl MainView {
                 }
             }
             MainMessage::MessageEdited(message_id, updated_msg) => {
-                if let Some(conv_id) = &self.current_conversation {
-                    if let Some(msgs) = self.conversation_messages.get_mut(conv_id)
-                        && let Some(m) = msgs.iter_mut().find(|m| m.id == message_id)
-                    {
-                        *m = updated_msg.clone();
-                    }
-                    if let Some(m) = self
-                        .current_conversation_messages
-                        .iter_mut()
-                        .find(|m| m.id == message_id)
-                    {
-                        *m = updated_msg;
-                    }
+                if let Some(m) = self
+                    .current_conversation_messages
+                    .iter_mut()
+                    .find(|m| m.id == message_id)
+                {
+                    *m = updated_msg;
                 }
             }
             MainMessage::DeleteMessage(message_id) => {
@@ -302,9 +266,11 @@ impl MainView {
                     let client = self.api.clone();
                     let mid = message_id.clone();
                     let cid = conv_id.clone();
+                    let channel_id = cid.clone();
                     return Task::perform(
                         async move {
-                            client.client().delete_message(&mid).await?;
+                            let channel = client.channels().fetch(&channel_id).await?;
+                            channel.delete_message(&mid).await?;
                             Ok::<(), RenderableError>(())
                         },
                         move |result| match result {
@@ -318,9 +284,6 @@ impl MainView {
                 }
             }
             MainMessage::MessageDeleted(message_id, channel_id) => {
-                if let Some(msgs) = self.conversation_messages.get_mut(&channel_id) {
-                    msgs.retain(|m| m.id != message_id);
-                }
                 if self.current_conversation.as_ref() == Some(&channel_id) {
                     self.current_conversation_messages
                         .retain(|m| m.id != message_id);
@@ -328,28 +291,13 @@ impl MainView {
             }
             MainMessage::ServerEvent(event) => {
                 tracing::info!("Received client event: {:?}", event);
-                match event {
-                    ClientEvent::Lifecycle(l) => return self.handle_lifecycle_event(l),
-                    ClientEvent::Event(e) => {
-                        let crypto_task = {
-                            let api = self.api.clone();
-                            let ev = e.clone();
-                            Task::perform(async move { api.handle_event(ev).await }, |result| {
-                                match result {
-                                    Ok(Some(outcome)) => Message::Main(MainMessage::Contacts(
-                                        ContactsMessage::Accepted(contacts::Contact::from_outcome(
-                                            outcome,
-                                        )),
-                                    )),
-                                    Ok(None) => Message::Main(MainMessage::Ignore),
-                                    Err(err) => Message::Main(MainMessage::ApiError(err)),
-                                }
-                            })
-                        };
-                        let ui_task = self.handle_server_event(e);
-                        return Task::batch([crypto_task, ui_task]);
-                    }
-                }
+                return self.handle_client_event(event);
+            }
+            MainMessage::ContactOutcome(outcome) => {
+                return self.contacts.update(
+                    ContactsMessage::Accepted(contacts::Contact::from_outcome(outcome)),
+                    &self.api,
+                );
             }
             MainMessage::Ignore => {}
             MainMessage::ToggleEmojiPicker => self.emoji_picker_open = !self.emoji_picker_open,
@@ -378,20 +326,16 @@ impl MainView {
                 let mut missing: Vec<String> = messages
                     .iter()
                     .map(|m| m.author_id.clone())
-                    .filter(|a| !self.profiles.contains_key(a))
+                    .filter(|a| self.api.users().get(a).is_none())
                     .collect();
                 missing.sort();
                 missing.dedup();
-                self.conversation_messages.put(id.clone(), messages.clone());
                 if self.current_conversation.as_ref() == Some(&id) {
                     self.current_conversation_messages = messages;
                 }
-                return fetch_profiles_task(self.api.clone(), missing);
+                return fetch_users_task(self.api.clone(), missing);
             }
-            MainMessage::ProfilesLoaded(profiles) => {
-                self.profiles
-                    .extend(profiles.into_iter().map(|p| (p.id.clone(), p)));
-            }
+            MainMessage::UsersFetched => {}
             MainMessage::ApiError(e) => {
                 self.error = Some(e);
             }
@@ -399,14 +343,19 @@ impl MainView {
                 self.error = None;
             }
             MainMessage::OpenPrivateChannel(user_id) => {
-                let existing_id = self.conversations.iter().find_map(|(id, ch)| match ch {
-                    harmony_api::Channel::PrivateChannel {
-                        initiator_id,
-                        target_id,
-                        ..
-                    } if *initiator_id == user_id || *target_id == user_id => Some(id.clone()),
-                    _ => None,
-                });
+                let existing_id =
+                    self.current_channels
+                        .iter()
+                        .find_map(|(id, ch)| match ch.data() {
+                            harmony_api::ChannelData::PrivateChannel {
+                                initiator_id,
+                                target_id,
+                                ..
+                            } if *initiator_id == user_id || *target_id == user_id => {
+                                Some(id.clone())
+                            }
+                            _ => None,
+                        });
                 if let Some(id) = existing_id {
                     self.active_tab = SidebarTab::Messages;
                     return Task::done(Message::Main(MainMessage::ChatSelected(id)));
@@ -414,21 +363,19 @@ impl MainView {
                     let client = self.api.clone();
                     return Task::perform(
                         async move {
-                            let channel = client.client().create_private_channel(&user_id).await?;
-                            let profiles =
-                                client.get_profiles(vec![user_id]).await.unwrap_or_default();
-                            Ok((channel, profiles))
+                            let channel =
+                                client.channels().create_private_channel(&user_id).await?;
+                            let _ = client.users().fetch_bulk(vec![user_id]).await;
+                            Ok(channel)
                         },
                         |result| Message::Main(MainMessage::PrivateChannelOpened(result)),
                     );
                 }
             }
             MainMessage::PrivateChannelOpened(result) => match result {
-                Ok((channel, profiles)) => {
-                    self.profiles
-                        .extend(profiles.into_iter().map(|p| (p.id.clone(), p)));
+                Ok(channel) => {
                     let id = channel.id().to_string();
-                    self.conversations.insert(id.clone(), channel);
+                    self.current_channels.insert(id.clone(), channel);
                     self.active_tab = SidebarTab::Messages;
                     return Task::done(Message::Main(MainMessage::ChatSelected(id)));
                 }
@@ -456,64 +403,80 @@ impl MainView {
         Task::none()
     }
 
-    fn handle_server_event(&mut self, event: Event) -> Task<Message> {
+    fn handle_client_event(&mut self, event: EncryptedEvent) -> Task<Message> {
         match event {
-            Event::NewMessage(e) => {
-                let channel_id = e.channel_id.clone();
-                let msg = e.message;
-                let api = self.api.clone();
-                return Task::perform(
-                    async move {
-                        let text = api.decrypt_message(&msg).await?;
-                        Ok((channel_id, ChatMessage::new(&msg, text)))
-                    },
-                    |result: crate::errors::RenderableResult<_>| match result {
-                        Ok((channel_id, chat_msg)) => {
-                            Message::Main(MainMessage::NewMessageDecrypted(channel_id, chat_msg))
-                        }
-                        Err(e) => Message::Main(MainMessage::ApiError(e)),
-                    },
-                );
+            EncryptedEvent::Lifecycle(l) => return self.handle_lifecycle_event(l),
+            EncryptedEvent::NewMessage {
+                channel_id,
+                message,
+            } => {
+                let chat_msg = ChatMessage::new(&message.message, decode_content(message.content));
+                let author_id = chat_msg.author_id.clone();
+                if self.current_conversation.as_ref() == Some(&channel_id) {
+                    self.current_conversation_messages.push(chat_msg);
+                }
+                if self.api.users().get(&author_id).is_none() {
+                    return fetch_users_task(self.api.clone(), vec![author_id]);
+                }
             }
-            Event::MessageEdited(_e) => {
-                // TODO:
+            EncryptedEvent::MessageEdited {
+                channel_id,
+                message,
+            } => {
+                if self.current_conversation.as_ref() == Some(&channel_id) {
+                    let chat_msg =
+                        ChatMessage::new(&message.message, decode_content(message.content));
+                    if let Some(m) = self
+                        .current_conversation_messages
+                        .iter_mut()
+                        .find(|m| m.id == chat_msg.id)
+                    {
+                        *m = chat_msg;
+                    }
+                }
             }
-            Event::MessageDeleted(_e) => {
-                // TODO:
+            EncryptedEvent::MessageDeleted {
+                channel_id,
+                message_id,
+            } => {
+                if self.current_conversation.as_ref() == Some(&channel_id) {
+                    self.current_conversation_messages
+                        .retain(|m| m.id != message_id);
+                }
             }
-            Event::ChannelUpdated(e) => {
-                let ch = e.channel;
-                let member_ids: Vec<String> = match &ch {
-                    harmony_api::Channel::PrivateChannel {
+            EncryptedEvent::ChannelUpdated { channel } => {
+                let member_ids: Vec<String> = match channel.data() {
+                    harmony_api::ChannelData::PrivateChannel {
                         initiator_id,
                         target_id,
                         ..
                     } => vec![initiator_id.clone(), target_id.clone()],
-                    harmony_api::Channel::GroupChannel { members, .. } => {
+                    harmony_api::ChannelData::GroupChannel { members, .. } => {
                         members.iter().map(|m| m.id.clone()).collect()
                     }
                 };
-                self.conversations.insert(ch.id().to_string(), ch);
+                self.current_channels
+                    .insert(channel.id().to_string(), channel);
                 let missing: Vec<String> = member_ids
                     .into_iter()
-                    .filter(|id| !self.profiles.contains_key(id))
+                    .filter(|id| self.api.users().get(id).is_none())
                     .collect();
-                return fetch_profiles_task(self.api.clone(), missing);
+                return fetch_users_task(self.api.clone(), missing);
             }
-            Event::ChannelDeleted(e) => {
-                self.conversations.remove(&e.channel_id);
-                if self.current_conversation.as_ref() == Some(&e.channel_id) {
+            EncryptedEvent::ChannelDeleted { channel_id } => {
+                self.current_channels.remove(&channel_id);
+                if self.current_conversation.as_ref() == Some(&channel_id) {
                     self.current_conversation = None;
                     self.current_conversation_messages.clear();
                 }
             }
-            Event::MemberJoined(_e) => {
+            EncryptedEvent::MemberJoined { .. } => {
                 // TODO: update group channel membership
             }
-            Event::MemberLeft(_e) => {
+            EncryptedEvent::MemberLeft { .. } => {
                 // TODO: update group channel membership
             }
-            Event::UserJoinedCall(e) => {
+            EncryptedEvent::UserJoinedCall(e) => {
                 return self.call.on_user_joined(
                     &e.call_id,
                     e.user_id,
@@ -522,17 +485,17 @@ impl MainView {
                     &self.api,
                 );
             }
-            Event::UserLeftCall(e) => {
+            EncryptedEvent::UserLeftCall(e) => {
                 self.call.on_user_left(&e.call_id, &e.session_id);
             }
-            Event::UserVoiceStateChanged(e) => {
+            EncryptedEvent::UserVoiceStateChanged(e) => {
                 self.call
                     .on_voice_state_changed(&e.call_id, &e.session_id, e.muted);
             }
-            Event::CallMigrated(e) => {
+            EncryptedEvent::CallMigrated(e) => {
                 return self.call.on_call_migrated(&e.call_id, &self.api);
             }
-            Event::ContactStateChanged { user_id, state } => {
+            EncryptedEvent::ContactStateChanged { user_id, state } => {
                 return self.contacts.on_state_changed(user_id, &state, &self.api);
             }
         }
@@ -553,9 +516,10 @@ impl MainView {
     }
 
     pub fn profile(&self, user_id: &str) -> UserProfile {
-        self.profiles
+        self.api
+            .users()
             .get(user_id)
-            .cloned()
+            .map(|u| UserProfile::from(&u))
             .unwrap_or_else(|| placeholder_profile(user_id))
     }
 
@@ -680,14 +644,14 @@ impl MainView {
     }
 }
 
-pub fn fetch_profiles_task(api: Arc<ApiClient>, user_ids: Vec<String>) -> Task<Message> {
+pub fn fetch_users_task(api: Arc<EncryptedClient>, user_ids: Vec<String>) -> Task<Message> {
     if user_ids.is_empty() {
         return Task::none();
     }
     Task::perform(
-        async move { api.get_profiles(user_ids).await },
+        async move { api.users().fetch_bulk(user_ids).await },
         |result| match result {
-            Ok(profiles) => Message::Main(MainMessage::ProfilesLoaded(profiles)),
+            Ok(_) => Message::Main(MainMessage::UsersFetched),
             Err(_) => Message::Main(MainMessage::Ignore),
         },
     )

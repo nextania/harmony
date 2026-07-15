@@ -32,7 +32,7 @@ impl ExternalLinkView {
                 let url = self.url.clone();
                 Task::perform(
                     async move {
-                        let _ = open::that(&url);
+                        open::that(&url).ok();
                     },
                     |_| Message::CloseExternalLink,
                 )

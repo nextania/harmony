@@ -1,9 +1,8 @@
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
 
+use core_api::Session;
 use dashmap::DashMap;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -24,52 +23,26 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 
 const EVENT_CHANNEL_CAPACITY: usize = 1024;
 
-// TODO: finish designing account refresh system?
-/// Supplies a fresh authentication token whenever the client authenticates.
-pub trait TokenProvider: Send + Sync {
-    fn fetch_token(&self) -> Pin<Box<dyn Future<Output = Result<String>> + Send + '_>>;
-}
-
 /// Configuration for the Harmony client
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ClientOptions {
     /// WebSocket server URL
     pub server_url: String,
-    /// Authentication token issued by AS. Used as the token when no
-    /// [`TokenProvider`] is configured, and as the initial fallback otherwise.
-    pub token: String,
     /// Connection timeout
     pub timeout: Duration,
     /// Whether to automatically reconnect on connection loss
     pub auto_reconnect: bool,
     /// Maximum number of reconnection attempts
     pub max_reconnect_attempts: u32,
-    /// Optional hook to obtain a fresh token on each authentication.
-    pub token_provider: Option<Arc<dyn TokenProvider>>,
-}
-
-impl std::fmt::Debug for ClientOptions {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ClientOptions")
-            .field("server_url", &self.server_url)
-            .field("token", &"<redacted>")
-            .field("timeout", &self.timeout)
-            .field("auto_reconnect", &self.auto_reconnect)
-            .field("max_reconnect_attempts", &self.max_reconnect_attempts)
-            .field("token_provider", &self.token_provider.is_some())
-            .finish()
-    }
 }
 
 impl ClientOptions {
-    pub fn new(server_url: impl Into<String>, token: impl Into<String>) -> Self {
+    pub fn new(server_url: impl Into<String>) -> Self {
         Self {
             server_url: server_url.into(),
-            token: token.into(),
             timeout: Duration::from_secs(30),
             auto_reconnect: true,
             max_reconnect_attempts: 5,
-            token_provider: None,
         }
     }
 
@@ -85,11 +58,6 @@ impl ClientOptions {
 
     pub fn with_max_reconnect_attempts(mut self, attempts: u32) -> Self {
         self.max_reconnect_attempts = attempts;
-        self
-    }
-
-    pub fn with_token_provider(mut self, provider: Arc<dyn TokenProvider>) -> Self {
-        self.token_provider = Some(provider);
         self
     }
 }
@@ -120,6 +88,7 @@ pub struct HarmonyClient {
     reconnect_attempts: Arc<AtomicU32>,
     manually_disconnected: Arc<AtomicBool>,
     pending_requests: Arc<DashMap<String, oneshot::Sender<RpcResponse>>>,
+    identity: Arc<Session>,
 }
 
 type RpcResponse = std::result::Result<Value, Value>;
@@ -132,6 +101,7 @@ fn emit(evt_tx: &broadcast::Sender<ClientEvent>, event: impl Into<ClientEvent>) 
 
 impl HarmonyClient {
     pub async fn new_with_recv(
+        identity: Arc<Session>,
         options: ClientOptions,
         evt_tx: broadcast::Sender<ClientEvent>,
     ) -> Result<Self> {
@@ -146,15 +116,22 @@ impl HarmonyClient {
             evt_tx,
             pending_requests: Arc::new(DashMap::new()),
             manually_disconnected: Arc::new(AtomicBool::new(false)),
+            identity,
         };
 
         client.connect(ws_rx).await?;
         Ok(client)
     }
 
-    pub async fn new(options: ClientOptions) -> Result<(Self, broadcast::Receiver<ClientEvent>)> {
+    pub async fn new(
+        identity: Arc<Session>,
+        options: ClientOptions,
+    ) -> Result<(Self, broadcast::Receiver<ClientEvent>)> {
         let (evt_tx, evt_rx) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
-        Ok((Self::new_with_recv(options, evt_tx).await?, evt_rx))
+        Ok((
+            Self::new_with_recv(identity, options, evt_tx).await?,
+            evt_rx,
+        ))
     }
 
     /// Subscribe an additional consumer to the event stream. Each receiver
@@ -223,7 +200,7 @@ impl HarmonyClient {
 
     pub fn disconnect(&self) -> Result<()> {
         self.manually_disconnected.store(true, Ordering::SeqCst);
-        let _ = self.websocket_tx.send(Message::Close(None));
+        self.websocket_tx.send(Message::Close(None)).ok();
 
         Ok(())
     }
@@ -243,12 +220,11 @@ impl HarmonyClient {
             reconnect_attempts: self.reconnect_attempts.clone(),
             pending_requests: self.pending_requests.clone(),
             manually_disconnected: self.manually_disconnected.clone(),
-            static_token: self.options.token.clone(),
-            token_provider: self.options.token_provider.clone(),
             max_attempts: self.options.max_reconnect_attempts,
             auto_reconnect: self.options.auto_reconnect,
             timeout_duration: self.options.timeout,
             first_outcome: first_tx,
+            identity: self.identity.clone(),
         }));
 
         match first_rx.await {
@@ -267,12 +243,11 @@ impl HarmonyClient {
             reconnect_attempts,
             pending_requests,
             manually_disconnected,
-            static_token,
-            token_provider,
             max_attempts,
             auto_reconnect,
             timeout_duration,
             first_outcome,
+            identity,
         } = task;
 
         let mut first_outcome = Some(first_outcome);
@@ -284,20 +259,16 @@ impl HarmonyClient {
 
             'establish: {
                 // 1. get token
-                let token = if let Some(provider) = &token_provider {
-                    match provider.fetch_token().await {
-                        Ok(t) => t,
-                        Err(e) => {
-                            tracing::error!("failed to obtain auth token: {}", e);
-                            if let Some(tx) = first_outcome.take() {
-                                let _ = tx.send(Err(e));
-                                break_after = true;
-                            }
-                            break 'establish;
+                let token = match identity.get_token().await {
+                    Ok(t) => t,
+                    Err(e) => {
+                        tracing::error!("failed to obtain auth token: {}", e);
+                        if let Some(tx) = first_outcome.take() {
+                            tx.send(Err(HarmonyError::Core(e))).ok();
+                            break_after = true;
                         }
+                        break 'establish;
                     }
-                } else {
-                    static_token.clone()
                 };
 
                 // 2. connect socket
@@ -310,7 +281,7 @@ impl HarmonyClient {
                     Err(e) => {
                         tracing::warn!("connection attempt failed: {}", e);
                         if let Some(tx) = first_outcome.take() {
-                            let _ = tx.send(Err(e));
+                            tx.send(Err(e)).ok();
                             break_after = true;
                         }
                         break 'establish;
@@ -327,7 +298,7 @@ impl HarmonyClient {
                 if let Err(e) = ws_tx.send(Message::binary(identify)).await {
                     tracing::warn!("failed to send identify: {}", e);
                     if let Some(tx) = first_outcome.take() {
-                        let _ = tx.send(Err(HarmonyError::NotConnected));
+                        tx.send(Err(HarmonyError::NotConnected)).ok();
                         break_after = true;
                     }
                     break 'establish;
@@ -379,7 +350,7 @@ impl HarmonyClient {
                                                     emit(&evt_tx, LifecycleEvent::Connected);
                                                 }
                                                 if let Some(tx) = first_outcome.take() {
-                                                    let _ = tx.send(Ok(()));
+                                                    tx.send(Ok(())).ok();
                                                 }
                                             }
                                         }
@@ -393,8 +364,7 @@ impl HarmonyClient {
                                         }
                                         Ok(RpcMessageS2C::Message { id, ok, data }) => {
                                             if let Some((_, sender)) = pending_requests.remove(&id) {
-                                                let _ =
-                                                    sender.send(if ok { Ok(data) } else { Err(data) });
+                                                sender.send(if ok { Ok(data) } else { Err(data) }).ok();
                                             } else {
                                                 tracing::debug!(
                                                     "response for unknown request id: {}",
@@ -439,7 +409,7 @@ impl HarmonyClient {
                 if authed_this_session {
                     emit(&evt_tx, LifecycleEvent::Disconnected);
                 } else if let Some(tx) = first_outcome.take() {
-                    let _ = tx.send(Err(HarmonyError::AuthenticationClosed));
+                    tx.send(Err(HarmonyError::AuthenticationClosed)).ok();
                     break_after = true;
                 }
             }
@@ -496,10 +466,9 @@ struct ConnectionTask {
     reconnect_attempts: Arc<AtomicU32>,
     pending_requests: Arc<DashMap<String, oneshot::Sender<RpcResponse>>>,
     manually_disconnected: Arc<AtomicBool>,
-    static_token: String,
-    token_provider: Option<Arc<dyn TokenProvider>>,
     max_attempts: u32,
     auto_reconnect: bool,
     timeout_duration: Duration,
     first_outcome: oneshot::Sender<Result<()>>,
+    identity: Arc<Session>,
 }

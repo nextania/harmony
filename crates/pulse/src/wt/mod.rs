@@ -45,7 +45,7 @@ pub struct SessionState {
 
 impl SessionState {
     pub fn close(&self, _reason: &str) {
-        let _ = self.close_tx.send(());
+        self.close_tx.send(()).ok();
     }
 }
 
@@ -281,9 +281,9 @@ async fn handle_join(
     // reconnection
     if let Some((_, old)) = GLOBAL_SESSIONS.remove(&session_data.session_id) {
         GLOBAL_UNIQUE_SESSIONS.remove(&old.id);
-        let _ = old
-            .message_tx
-            .send(ControlS2C::Disconnected { reconnect: None });
+        old.message_tx
+            .send(ControlS2C::Disconnected { reconnect: None })
+            .ok();
         old.close("replaced by reconnection");
     }
 
@@ -326,10 +326,12 @@ async fn handle_join(
     let available_tracks = call.get_available_tracks(&state.session_id);
     drop(call);
 
-    let _ = message_tx.send(ControlS2C::Connected {
-        id: state.session_id.clone(),
-        available_tracks,
-    });
+    message_tx
+        .send(ControlS2C::Connected {
+            id: state.session_id.clone(),
+            available_tracks,
+        })
+        .ok();
 
     if is_first_member {
         let external_sender_credential = crate::environment::EXTERNAL_SENDER
@@ -338,10 +340,12 @@ async fn handle_join(
         let external_sender_signature_key = crate::environment::EXTERNAL_SENDER
             .signature_public_key()
             .clone();
-        let _ = message_tx.send(ControlS2C::InitializeGroup {
-            external_sender_credential,
-            external_sender_signature_key,
-        });
+        message_tx
+            .send(ControlS2C::InitializeGroup {
+                external_sender_credential,
+                external_sender_signature_key,
+            })
+            .ok();
         info!(
             "Sent InitializeGroup to first member in call {}",
             state.call_id
@@ -416,10 +420,13 @@ async fn handle_start_produce(request_id: u64, media_hint: MediaHint, state: &Se
     };
     if !allowed {
         warn!("User lacks permission to produce {:?}", media_hint);
-        let _ = state.message_tx.send(ControlS2C::ProduceFailed {
-            request_id,
-            reason: format!("missing permission to produce {media_hint:?}"),
-        });
+        state
+            .message_tx
+            .send(ControlS2C::ProduceFailed {
+                request_id,
+                reason: format!("missing permission to produce {media_hint:?}"),
+            })
+            .ok();
         return;
     }
     if state
@@ -428,10 +435,13 @@ async fn handle_start_produce(request_id: u64, media_hint: MediaHint, state: &Se
         .any(|track| track.media_hint == media_hint)
     {
         warn!("Already producing track of type {:?}", media_hint);
-        let _ = state.message_tx.send(ControlS2C::ProduceFailed {
-            request_id,
-            reason: format!("already producing a {media_hint:?} track"),
-        });
+        state
+            .message_tx
+            .send(ControlS2C::ProduceFailed {
+                request_id,
+                reason: format!("already producing a {media_hint:?} track"),
+            })
+            .ok();
         return;
     }
 
@@ -449,10 +459,13 @@ async fn handle_start_produce(request_id: u64, media_hint: MediaHint, state: &Se
     if let Some(call) = GLOBAL_CALLS.get(&state.call_id) {
         call.start_producing(&state.session_id, track_info).await;
     }
-    let _ = state.message_tx.send(ControlS2C::ProduceStarted {
-        request_id,
-        track_id: global_track_id,
-    });
+    state
+        .message_tx
+        .send(ControlS2C::ProduceStarted {
+            request_id,
+            track_id: global_track_id,
+        })
+        .ok();
 }
 
 fn handle_stop_produce(request_id: u64, media_hint: MediaHint, state: &SessionState) {
@@ -463,19 +476,23 @@ fn handle_stop_produce(request_id: u64, media_hint: MediaHint, state: &SessionSt
         .map(|track| track.id.clone())
     else {
         warn!("StopProduce for track type {:?} not produced", media_hint);
-        let _ = state.message_tx.send(ControlS2C::ProduceFailed {
-            request_id,
-            reason: format!("not producing a {media_hint:?} track"),
-        });
+        state
+            .message_tx
+            .send(ControlS2C::ProduceFailed {
+                request_id,
+                reason: format!("not producing a {media_hint:?} track"),
+            })
+            .ok();
         return;
     };
     if let Some(call) = GLOBAL_CALLS.get(&state.call_id) {
         call.stop_producing(&state.session_id, &global_track_id);
     }
     state.producers.remove(&global_track_id);
-    let _ = state
+    state
         .message_tx
-        .send(ControlS2C::ProduceStopped { request_id });
+        .send(ControlS2C::ProduceStopped { request_id })
+        .ok();
 }
 
 fn handle_request_keyframe(track_id: String, state: &SessionState) {
@@ -483,12 +500,13 @@ fn handle_request_keyframe(track_id: String, state: &SessionState) {
         return;
     };
     if let Some(track) = call.tracks.get(&track_id) {
-        let _ = track
+        track
             .producer_session
             .message_tx
             .send(ControlS2C::KeyFrameRequested {
                 track_id: track.id.clone(),
-            });
+            })
+            .ok();
     }
 }
 
@@ -503,7 +521,7 @@ fn handle_receiver_report(
         return;
     };
     if let Some(track) = call.tracks.get(&track_id) {
-        let _ = track
+        track
             .producer_session
             .message_tx
             .send(ControlS2C::ReceiverReport {
@@ -511,7 +529,8 @@ fn handle_receiver_report(
                 lost,
                 received,
                 jitter_ms,
-            });
+            })
+            .ok();
     }
 }
 
@@ -520,9 +539,12 @@ async fn broadcast_proposals(call: &Call) {
     if let Some((proposals, recipients, epoch)) = proposals {
         for recipient in recipients {
             if let Some(session) = GLOBAL_SESSIONS.get(&recipient) {
-                let _ = session.message_tx.send(ControlS2C::MlsProposals {
-                    proposals: proposals.clone(),
-                });
+                session
+                    .message_tx
+                    .send(ControlS2C::MlsProposals {
+                        proposals: proposals.clone(),
+                    })
+                    .ok();
             }
         }
         let state = call.mls_state.clone();
@@ -569,20 +591,26 @@ async fn handle_mls_commit(
 
     for recipient in mls_state.full_members.iter() {
         if let Some(session) = GLOBAL_SESSIONS.get(recipient) {
-            let _ = session.message_tx.send(ControlS2C::MlsCommit {
-                commit_data: commit_data.clone(),
-                epoch,
-                welcome_data: None,
-            });
+            session
+                .message_tx
+                .send(ControlS2C::MlsCommit {
+                    commit_data: commit_data.clone(),
+                    epoch,
+                    welcome_data: None,
+                })
+                .ok();
         }
     }
     for new_member in new_members.iter() {
         if let Some(session) = GLOBAL_SESSIONS.get(new_member) {
-            let _ = session.message_tx.send(ControlS2C::MlsCommit {
-                commit_data: commit_data.clone(),
-                epoch,
-                welcome_data: welcome_data.clone(),
-            });
+            session
+                .message_tx
+                .send(ControlS2C::MlsCommit {
+                    commit_data: commit_data.clone(),
+                    epoch,
+                    welcome_data: welcome_data.clone(),
+                })
+                .ok();
         }
         mls_state.full_members.push(new_member.clone());
     }
@@ -601,9 +629,10 @@ async fn handle_mls_commit(
         {
             for recipient in call.mls_state.lock().await.full_members.iter() {
                 if let Some(session) = GLOBAL_SESSIONS.get(recipient) {
-                    let _ = session
+                    session
                         .message_tx
-                        .send(ControlS2C::EpochReady { epoch: new_epoch });
+                        .send(ControlS2C::EpochReady { epoch: new_epoch })
+                        .ok();
                 }
             }
             info!("Advanced to epoch {} for call {}", new_epoch, call_id);
@@ -620,9 +649,10 @@ async fn handle_commit_ack(epoch: u64, state: &SessionState) {
     {
         for recipient in call.mls_state.lock().await.full_members.iter() {
             if let Some(session) = GLOBAL_SESSIONS.get(recipient) {
-                let _ = session
+                session
                     .message_tx
-                    .send(ControlS2C::EpochReady { epoch: new_epoch });
+                    .send(ControlS2C::EpochReady { epoch: new_epoch })
+                    .ok();
             }
         }
     }

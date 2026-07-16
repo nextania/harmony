@@ -72,11 +72,6 @@ use iced::window;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use crate::views::{
-    login::{LoginMessage, LoginView},
-    main::MainView,
-    splash::{SplashMessage, SplashView},
-};
 use crate::{
     media::screen_capture::ScreenCaptureConfig,
     views::{
@@ -88,6 +83,14 @@ use crate::{
             settings::{SettingsMessage, SettingsView},
         },
         main::MainMessage,
+    },
+};
+use crate::{
+    preferences::Preferences,
+    views::{
+        login::{LoginMessage, LoginView},
+        main::MainView,
+        splash::{SplashMessage, SplashView},
     },
 };
 
@@ -691,6 +694,9 @@ impl App {
                 }
                 match window.view {
                     AppWindowView::Splash(_) | AppWindowView::Login(_) => {
+                        if let Err(e) = Preferences::get().save() {
+                            tracing::warn!("failed to save preferences: {e}")
+                        }
                         return iced::exit();
                     }
                     AppWindowView::Main(_) => {
@@ -705,6 +711,9 @@ impl App {
                         }
                         // TODO: if stay_running is enabled, we should keep running in the background
                         if self.windows.is_empty() {
+                            if let Err(e) = Preferences::get().save() {
+                                tracing::warn!("failed to save preferences: {e}")
+                            }
                             return iced::exit();
                         }
                     }
@@ -788,7 +797,8 @@ fn main() -> iced::Result {
                 .with_target("wgpu_capture", LevelFilter::DEBUG),
         )
         .init();
-    rust_i18n::set_locale("en");
+    let preferences = Preferences::load();
+    rust_i18n::set_locale(&preferences.locale.code());
     iced::daemon(App::new, App::update, App::view)
         .title(App::title)
         .theme(App::theme)

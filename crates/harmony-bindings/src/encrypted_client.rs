@@ -17,7 +17,10 @@ pub struct EncryptedClient {
 #[uniffi::export]
 impl EncryptedClient {
     #[uniffi::constructor]
-    pub async fn connect(session: Arc<Session>, options: ClientOptions) -> HarmonyResult<Arc<Self>> {
+    pub async fn connect(
+        session: Arc<Session>,
+        options: ClientOptions,
+    ) -> HarmonyResult<Arc<Self>> {
         let (inner, receiver) =
             harmony_api::EncryptedClient::connect(session.inner.clone(), options.into()).await?;
         Ok(Arc::new(Self {

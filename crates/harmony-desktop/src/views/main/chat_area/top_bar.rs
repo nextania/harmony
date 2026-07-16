@@ -11,7 +11,7 @@ use crate::{
 };
 
 pub fn top_bar(state: &MainView) -> Element<MainMessage> {
-    let (avatar_color, name) = match state
+    let (avatar, name) = match state
         .current_channels
         .get(
             state

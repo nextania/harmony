@@ -16,7 +16,6 @@ harmony-api = { path = "../harmony-api" }
 iced = { git = "https://github.com/infiniwave/iced.git", rev = "29432bd", features = ["canvas", "advanced", "tokio", "svg", "image", "wgpu"] }
 iced_aw = { git = "https://github.com/infiniwave/iced_aw.git", rev = "58471e4", features = ["drop_down"] }
 keyring-core = "1.0.0"
-lru = "0.18.0"
 opaque-ke = "4.0.1"
 open = "5.3.3"
 opus = "0.3.1"
@@ -45,6 +44,8 @@ argon2 = "0.5.3"
 ringbuf = "0.5.0"
 serde_cbor_2 = "0.13.0"
 core-api = { path = "../core-api" }
+dirs = "6.0.0"
+sys-locale = "0.3.2"
 
 [build-dependencies]
 winres = "0.1.12"

@@ -16,7 +16,7 @@ use crate::{
     Message,
     errors::RenderableError,
     icons::{FLUENT_ICONS, Icon},
-    preferences::Locale,
+    preferences::{Locale, Preferences},
     theme::{
         ACCENT_PURPLE, BG_LOGIN_CARD, BG_LOGIN_INPUT, BORDER_CARD, DM_SANS, LINK_COLOR, LOGIN_BG,
         LOGO_SVG, SUBTLE_GREY, TEXT_MUTED, TEXT_WHITE,
@@ -139,7 +139,10 @@ impl LoginView {
                 self.locale_dropdown_open = !self.locale_dropdown_open;
             }
             LoginMessage::SetLocale(locale) => {
-                rust_i18n::set_locale(locale.code());
+                rust_i18n::set_locale(&locale.code());
+                let mut preferences = Preferences::get_clone();
+                preferences.locale = locale;
+                preferences.set();
                 self.locale_dropdown_open = false;
             }
         }

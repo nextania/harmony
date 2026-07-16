@@ -624,9 +624,7 @@ impl EncryptedClient {
             }
             Event::UserJoinedCall(e) => single(EncryptedEvent::UserJoinedCall(e)),
             Event::UserLeftCall(e) => single(EncryptedEvent::UserLeftCall(e)),
-            Event::UserVoiceStateChanged(e) => {
-                single(EncryptedEvent::UserVoiceStateChanged(e))
-            }
+            Event::UserVoiceStateChanged(e) => single(EncryptedEvent::UserVoiceStateChanged(e)),
             Event::CallMigrated(e) => single(EncryptedEvent::CallMigrated(e)),
         })
     }

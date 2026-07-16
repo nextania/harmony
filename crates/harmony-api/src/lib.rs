@@ -23,6 +23,6 @@ pub use encrypted_client::{AddContactOutcome, ContactAction, EncryptedClient, En
 pub use error::{HarmonyError, Result};
 pub use events::*;
 pub use keystore::{ContactPrivateKey, Keystore};
-pub use user::User;
 pub use models::*;
+pub use user::User;
 pub use user_manager::{AvatarUrl, PublicUser, UserManager};

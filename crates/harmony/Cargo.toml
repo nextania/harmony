@@ -17,7 +17,7 @@ lazy_static = "1.4.0"
 chrono = "0.4.26"
 rand = "0.10.0"
 num_cpus = "1.16.0"
-ulid = "1.2.1"
+ulid = "3.0.0"
 
 dotenvy = "0.15.7"
 tracing = { workspace = true }

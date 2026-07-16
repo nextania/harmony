@@ -7,7 +7,7 @@ edition = "2024"
 ash = "0.38.0"
 thiserror = "2.0.18"
 tracing.workspace = true
-wgpu = { version = "29.0.3", features = ["wgsl"] }
+wgpu = { version = "30.0.0", features = ["wgsl"] }
 
 [target.'cfg(windows)'.dependencies]
 crossbeam-queue = "0.3.12"

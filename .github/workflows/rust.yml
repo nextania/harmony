@@ -21,7 +21,7 @@ jobs:
     steps:
     - uses: actions/checkout@v7
     - name: install-libraries
-      run: sudo apt update && sudo apt install libpipewire-0.3-dev libdbus-1-dev libva-dev
+      run: sudo apt update && sudo apt install libpipewire-0.3-dev libdbus-1-dev libva-dev libasound2-dev
     - name: upgrade
       run: rustup override set nightly
     - name: nightly-clippy

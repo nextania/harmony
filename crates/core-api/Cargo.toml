@@ -13,9 +13,9 @@ tokio = { version = "1", default-features = false, features = [
 serde = { workspace = true }
 reqwest = { version = "0.13.2", features = ["json"] }
 argon2 = "0.5.3"
-base64 = "0.22.1"
+base64 = "0.23.0"
 opaque-ke = "4.0.1"
-sha2 = "0.10.1"
+sha2 = "0.11.0"
 thiserror = "2.0.18"
 chacha20poly1305 = "0.11.0"
 zeroize = { version = "1.8", features = ["zeroize_derive"] }

@@ -15,4 +15,4 @@ opentelemetry_sdk = { version = "0.32.0", features = ["rt-tokio", "metrics", "tr
 opentelemetry-otlp = { version = "0.32.0", features = ["tonic", "metrics", "trace", "grpc-tonic"] }
 tracing-opentelemetry = "0.33.0"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
-async-nats = "0.49.1"
+async-nats = "0.50.0"

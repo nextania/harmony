@@ -19,7 +19,7 @@ opentelemetry = { workspace = true }
 
 redis = { version = "1.0.3", features = ["tokio-comp"] }
 
-ulid = "1.2.1"
+ulid = "3.0.0"
 rand = "0.10.0"
 dotenvy = "0.15.7"
 
